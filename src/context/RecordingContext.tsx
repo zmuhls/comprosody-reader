@@ -1,0 +1,152 @@
+import {
+  createContext,
+  useContext,
+  useReducer,
+  type ReactNode,
+  type Dispatch,
+} from 'react';
+import type { ProsodyDiagnostics, VoiceConfig, RecordingSession } from '../types/audio';
+import { defaultProsody, defaultVoiceConfig } from '../types/audio';
+
+export interface RecordingState {
+  isRecording: boolean;
+  session: RecordingSession | null;
+  prosody: ProsodyDiagnostics;
+  voiceConfig: VoiceConfig;
+}
+
+export type RecordingAction =
+  | { type: 'START_RECORDING'; startedAt: number }
+  | { type: 'STOP_RECORDING' }
+  | { type: 'UPDATE_INTERIM'; text: string }
+  | { type: 'APPEND_FINAL'; text: string }
+  | {
+      type: 'ADD_WORD_TIMESTAMP';
+      word: string;
+      time: number;
+    }
+  | { type: 'ADD_PAUSE'; start: number; end: number }
+  | { type: 'ADD_VOLUME_SAMPLE'; value: number }
+  | { type: 'UPDATE_PROSODY'; prosody: ProsodyDiagnostics }
+  | { type: 'SET_VOICE_CONFIG'; config: Partial<VoiceConfig> };
+
+function recordingReducer(
+  state: RecordingState,
+  action: RecordingAction
+): RecordingState {
+  switch (action.type) {
+    case 'START_RECORDING':
+      return {
+        ...state,
+        isRecording: true,
+        session: {
+          startedAt: action.startedAt,
+          interimTranscript: '',
+          finalTranscript: '',
+          wordTimestamps: [],
+          pauses: [],
+          volumeSamples: [],
+        },
+        prosody: defaultProsody,
+      };
+
+    case 'STOP_RECORDING':
+      return { ...state, isRecording: false };
+
+    case 'UPDATE_INTERIM':
+      if (!state.session) return state;
+      return {
+        ...state,
+        session: { ...state.session, interimTranscript: action.text },
+      };
+
+    case 'APPEND_FINAL':
+      if (!state.session) return state;
+      return {
+        ...state,
+        session: {
+          ...state.session,
+          finalTranscript: state.session.finalTranscript
+            ? state.session.finalTranscript + ' ' + action.text
+            : action.text,
+          interimTranscript: '',
+        },
+      };
+
+    case 'ADD_WORD_TIMESTAMP':
+      if (!state.session) return state;
+      return {
+        ...state,
+        session: {
+          ...state.session,
+          wordTimestamps: [
+            ...state.session.wordTimestamps,
+            { word: action.word, time: action.time },
+          ],
+        },
+      };
+
+    case 'ADD_PAUSE':
+      if (!state.session) return state;
+      return {
+        ...state,
+        session: {
+          ...state.session,
+          pauses: [
+            ...state.session.pauses,
+            { start: action.start, end: action.end },
+          ],
+        },
+      };
+
+    case 'ADD_VOLUME_SAMPLE':
+      if (!state.session) return state;
+      return {
+        ...state,
+        session: {
+          ...state.session,
+          volumeSamples: [...state.session.volumeSamples, action.value],
+        },
+      };
+
+    case 'UPDATE_PROSODY':
+      return { ...state, prosody: action.prosody };
+
+    case 'SET_VOICE_CONFIG':
+      return {
+        ...state,
+        voiceConfig: { ...state.voiceConfig, ...action.config },
+      };
+
+    default:
+      return state;
+  }
+}
+
+const initialState: RecordingState = {
+  isRecording: false,
+  session: null,
+  prosody: defaultProsody,
+  voiceConfig: defaultVoiceConfig,
+};
+
+const RecordingContext = createContext<{
+  state: RecordingState;
+  dispatch: Dispatch<RecordingAction>;
+} | null>(null);
+
+export function RecordingProvider({ children }: { children: ReactNode }) {
+  const [state, dispatch] = useReducer(recordingReducer, initialState);
+  return (
+    <RecordingContext.Provider value={{ state, dispatch }}>
+      {children}
+    </RecordingContext.Provider>
+  );
+}
+
+export function useRecording() {
+  const ctx = useContext(RecordingContext);
+  if (!ctx)
+    throw new Error('useRecording must be used within RecordingProvider');
+  return ctx;
+}
