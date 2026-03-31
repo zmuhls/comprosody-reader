@@ -27,10 +27,3 @@ export function saveDirectories(dirs: Record<string, Directory>): void {
   localStorage.setItem(STORAGE_KEYS.directories, JSON.stringify(dirs));
 }
 
-export function loadApiKey(): string | null {
-  return localStorage.getItem(STORAGE_KEYS.apiKey);
-}
-
-export function saveApiKey(key: string): void {
-  localStorage.setItem(STORAGE_KEYS.apiKey, key);
-}

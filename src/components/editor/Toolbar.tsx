@@ -14,8 +14,7 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
     useRefinement();
   const { refinementSettings } = state;
   const hasEntry = !!state.activeEntryId;
-  const hasApiKey = !!state.apiKey;
-  const canRefine = hasEntry && hasApiKey && !isRefining && !isGeneratingVariants;
+  const canRefine = hasEntry && !isRefining && !isGeneratingVariants;
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface-raised flex-wrap">

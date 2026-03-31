@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useApp } from '../context/AppContext';
 import { buildSystemPrompt, buildSelectionPrompt } from '../lib/prompts';
-import { streamRefinement, refineComplete } from '../lib/claude';
+import { streamRefinement, generateVariantsApi } from '../lib/claude';
 import type { Variant } from '../types/llm';
 import { VARIANT_TEMPERATURES } from '../constants';
 
@@ -16,7 +16,7 @@ export function useRefinement() {
     : null;
 
   const refine = useCallback(async () => {
-    if (!activeEntry || !state.apiKey) return;
+    if (!activeEntry) return;
 
     const systemPrompt = buildSystemPrompt(
       state.refinementSettings,
@@ -29,7 +29,6 @@ export function useRefinement() {
 
     try {
       for await (const chunk of streamRefinement({
-        apiKey: state.apiKey,
         systemPrompt,
         userMessage: activeEntry.rawTranscript,
         temperature: state.refinementSettings.temperature,
@@ -46,11 +45,11 @@ export function useRefinement() {
     } finally {
       setIsRefining(false);
     }
-  }, [activeEntry, state.apiKey, state.refinementSettings, dispatch]);
+  }, [activeEntry, state.refinementSettings, dispatch]);
 
   const refineSelection = useCallback(
     async (selectionStart: number, selectionEnd: number) => {
-      if (!activeEntry || !state.apiKey) return;
+      if (!activeEntry) return;
 
       const text = activeEntry.refinedText || activeEntry.rawTranscript;
       const selection = text.slice(selectionStart, selectionEnd);
@@ -78,7 +77,6 @@ export function useRefinement() {
 
       try {
         for await (const chunk of streamRefinement({
-          apiKey: state.apiKey,
           systemPrompt: system,
           userMessage: user,
           temperature: state.refinementSettings.temperature,
@@ -100,11 +98,11 @@ export function useRefinement() {
         setIsRefining(false);
       }
     },
-    [activeEntry, state.apiKey, state.refinementSettings, dispatch]
+    [activeEntry, state.refinementSettings, dispatch]
   );
 
   const generateVariants = useCallback(async () => {
-    if (!activeEntry || !state.apiKey) return;
+    if (!activeEntry) return;
 
     const systemPrompt = buildSystemPrompt(
       state.refinementSettings,
@@ -116,24 +114,21 @@ export function useRefinement() {
     setVariants([]);
 
     try {
-      const results = await Promise.all(
-        VARIANT_TEMPERATURES.map(async ({ label, temperature }) => {
-          const text = await refineComplete({
-            apiKey: state.apiKey!,
-            systemPrompt,
-            userMessage: activeEntry.rawTranscript,
-            temperature,
-          });
-          return { label, temperature, text } as Variant;
-        })
-      );
-      setVariants(results);
+      const results = await generateVariantsApi({
+        systemPrompt,
+        userMessage: activeEntry.rawTranscript,
+        temperatures: VARIANT_TEMPERATURES.map(({ label, temperature }) => ({
+          label,
+          temperature,
+        })),
+      });
+      setVariants(results as Variant[]);
     } catch (err) {
       console.error('Variant generation failed:', err);
     } finally {
       setIsGeneratingVariants(false);
     }
-  }, [activeEntry, state.apiKey, state.refinementSettings]);
+  }, [activeEntry, state.refinementSettings]);
 
   const acceptVariant = useCallback(
     (variant: Variant) => {

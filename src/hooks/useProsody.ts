@@ -5,9 +5,9 @@ import {
   computeEnergy,
   computeFluency,
   computeLexicalDensity,
-} from '../lib/prosody';
+} from '../lib/comprosody';
 
-export function useProsody(getTimeDomainData: () => Uint8Array | null) {
+export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | null) {
   const { state, dispatch } = useRecording();
   const intervalRef = useRef<number>(0);
   const lastSpeechTimeRef = useRef<number>(Date.now());

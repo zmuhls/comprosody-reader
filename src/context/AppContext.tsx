@@ -14,15 +14,12 @@ import {
   saveEntries,
   loadDirectories,
   saveDirectories,
-  loadApiKey,
-  saveApiKey,
 } from '../lib/storage';
 
 export interface AppState {
   entries: Record<string, Entry>;
   directories: Record<string, Directory>;
   activeEntryId: string | null;
-  apiKey: string | null;
   refinementSettings: RefinementSettings;
 }
 
@@ -34,11 +31,10 @@ export type AppAction =
   | { type: 'CREATE_DIRECTORY'; directory: Directory }
   | { type: 'RENAME_DIRECTORY'; id: string; name: string }
   | { type: 'DELETE_DIRECTORY'; id: string }
-  | { type: 'SET_API_KEY'; key: string }
   | { type: 'UPDATE_REFINEMENT_SETTINGS'; settings: Partial<RefinementSettings> }
   | { type: 'RENAME_ENTRY'; id: string; name: string };
 
-function appReducer(state: AppState, action: AppAction): AppState {
+export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'SET_ACTIVE_ENTRY':
       return { ...state, activeEntryId: action.id };
@@ -110,10 +106,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
-    case 'SET_API_KEY':
-      saveApiKey(action.key);
-      return { ...state, apiKey: action.key };
-
     case 'UPDATE_REFINEMENT_SETTINGS':
       return {
         ...state,
@@ -142,7 +134,6 @@ function createInitialState(): AppState {
     entries: loadEntries(),
     directories: loadDirectories(),
     activeEntryId: null,
-    apiKey: loadApiKey(),
     refinementSettings: {
       genre: 'freewrite',
       scale: 'sentence',

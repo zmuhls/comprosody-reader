@@ -19,7 +19,7 @@ export function useDirectoryTree(
   }, [directories, entries]);
 }
 
-function buildTree(
+export function buildTree(
   parentId: string | null,
   directories: Record<string, Directory>,
   entries: Record<string, Entry>

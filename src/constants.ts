@@ -27,6 +27,5 @@ export const VARIANT_TEMPERATURES = [
 export const STORAGE_KEYS = {
   entries: 'vox:entries',
   directories: 'vox:directories',
-  apiKey: 'vox:apiKey',
   settings: 'vox:settings',
 } as const;

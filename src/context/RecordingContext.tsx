@@ -20,17 +20,16 @@ export type RecordingAction =
   | { type: 'STOP_RECORDING' }
   | { type: 'UPDATE_INTERIM'; text: string }
   | { type: 'APPEND_FINAL'; text: string }
-  | {
-      type: 'ADD_WORD_TIMESTAMP';
-      word: string;
-      time: number;
-    }
+  | { type: 'SET_TRANSCRIPT'; text: string }
+  | { type: 'ADD_WORD_TIMESTAMP'; word: string; start: number; end: number }
   | { type: 'ADD_PAUSE'; start: number; end: number }
   | { type: 'ADD_VOLUME_SAMPLE'; value: number }
   | { type: 'UPDATE_PROSODY'; prosody: ProsodyDiagnostics }
-  | { type: 'SET_VOICE_CONFIG'; config: Partial<VoiceConfig> };
+  | { type: 'FINALIZE_PROSODY'; prosody: ProsodyDiagnostics }
+  | { type: 'SET_VOICE_CONFIG'; config: Partial<VoiceConfig> }
+  | { type: 'SET_AUDIO_BLOB'; blob: Blob };
 
-function recordingReducer(
+export function recordingReducer(
   state: RecordingState,
   action: RecordingAction
 ): RecordingState {
@@ -46,6 +45,7 @@ function recordingReducer(
           wordTimestamps: [],
           pauses: [],
           volumeSamples: [],
+          audioBlob: null,
         },
         prosody: defaultProsody,
       };
@@ -73,6 +73,18 @@ function recordingReducer(
         },
       };
 
+    case 'SET_TRANSCRIPT':
+      if (!state.session) return state;
+      return {
+        ...state,
+        session: {
+          ...state.session,
+          finalTranscript: action.text,
+          interimTranscript: '',
+          wordTimestamps: [],
+        },
+      };
+
     case 'ADD_WORD_TIMESTAMP':
       if (!state.session) return state;
       return {
@@ -81,7 +93,7 @@ function recordingReducer(
           ...state.session,
           wordTimestamps: [
             ...state.session.wordTimestamps,
-            { word: action.word, time: action.time },
+            { word: action.word, start: action.start, end: action.end },
           ],
         },
       };
@@ -112,10 +124,20 @@ function recordingReducer(
     case 'UPDATE_PROSODY':
       return { ...state, prosody: action.prosody };
 
+    case 'FINALIZE_PROSODY':
+      return { ...state, prosody: action.prosody };
+
     case 'SET_VOICE_CONFIG':
       return {
         ...state,
         voiceConfig: { ...state.voiceConfig, ...action.config },
+      };
+
+    case 'SET_AUDIO_BLOB':
+      if (!state.session) return state;
+      return {
+        ...state,
+        session: { ...state.session, audioBlob: action.blob },
       };
 
     default:
