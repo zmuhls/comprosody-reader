@@ -21,7 +21,7 @@ export async function transcribe(
   audioBuffer: Buffer,
   modelSize: string = 'base'
 ): Promise<TranscriptionResult> {
-  const tmpPath = join(tmpdir(), `vox-${randomUUID()}.webm`);
+  const tmpPath = join(tmpdir(), `comprosody-${randomUUID()}.webm`);
 
   try {
     await writeFile(tmpPath, audioBuffer);

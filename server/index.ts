@@ -20,5 +20,5 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`vox server listening on port ${port}`);
+  console.log(`comprosody server listening on port ${port}`);
 });

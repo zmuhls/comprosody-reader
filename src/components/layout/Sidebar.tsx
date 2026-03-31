@@ -15,7 +15,7 @@ export function Sidebar() {
     <aside className="w-56 flex-shrink-0 bg-surface-raised border-r border-border flex flex-col h-screen">
       <div className="p-3 border-b border-border">
         <h1 className="text-sm font-bold text-text-primary tracking-widest uppercase">
-          vox
+          comprosody
         </h1>
         <p className="text-[10px] text-text-muted mt-0.5">
           dictation &rarr; prose
