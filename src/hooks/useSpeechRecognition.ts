@@ -1,6 +1,12 @@
 import { useRef, useCallback } from 'react';
 import { useRecording } from '../context/RecordingContext';
 
+/**
+ * Web Speech API wrapper for interim transcript display during recording.
+ * Final transcription is handled by Whisper (useTranscription) after recording stops.
+ * This hook provides real-time interim text feedback while the user is speaking.
+ */
+
 // Web Speech API type augmentation
 interface SpeechRecognitionEvent extends Event {
   results: SpeechRecognitionResultList;
@@ -39,7 +45,8 @@ export function useSpeechRecognition() {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      console.error('SpeechRecognition not supported');
+      // Web Speech API not available — interim display won't work,
+      // but Whisper will still provide the final transcript.
       return;
     }
 
@@ -54,17 +61,8 @@ export function useSpeechRecognition() {
         const result = event.results[i];
         const transcript = result[0].transcript;
         if (result.isFinal) {
+          // Append as interim display text — Whisper provides the real final transcript
           dispatch({ type: 'APPEND_FINAL', text: transcript.trim() });
-          // Add word timestamps for final results
-          const words = transcript.trim().split(/\s+/);
-          const now = Date.now();
-          words.forEach((word, idx) => {
-            dispatch({
-              type: 'ADD_WORD_TIMESTAMP',
-              word,
-              time: now - (words.length - idx) * 200, // approximate
-            });
-          });
         } else {
           interim += transcript;
         }
@@ -80,7 +78,6 @@ export function useSpeechRecognition() {
     };
 
     recognition.onend = () => {
-      // Auto-restart if still recording (browser stops after silence)
       if (shouldRestartRef.current) {
         try {
           recognition.start();
@@ -92,7 +89,6 @@ export function useSpeechRecognition() {
 
     recognitionRef.current = recognition;
     shouldRestartRef.current = true;
-    dispatch({ type: 'START_RECORDING', startedAt: Date.now() });
 
     try {
       recognition.start();
@@ -108,8 +104,7 @@ export function useSpeechRecognition() {
       recognitionRef.current.stop();
       recognitionRef.current = null;
     }
-    dispatch({ type: 'STOP_RECORDING' });
-  }, [dispatch]);
+  }, []);
 
   return {
     isRecording: state.isRecording,

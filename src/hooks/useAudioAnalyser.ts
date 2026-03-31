@@ -4,17 +4,17 @@ export function useAudioAnalyser() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const dataArrayRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const animFrameRef = useRef<number>(0);
 
-  const start = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
+  const start = useCallback(async (stream?: MediaStream) => {
+    const mediaStream = stream ?? await navigator.mediaDevices.getUserMedia({ audio: true });
+    streamRef.current = mediaStream;
 
     const audioContext = new AudioContext();
     audioContextRef.current = audioContext;
 
-    const source = audioContext.createMediaStreamSource(stream);
+    const source = audioContext.createMediaStreamSource(mediaStream);
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
     source.connect(analyser);
@@ -28,10 +28,9 @@ export function useAudioAnalyser() {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = 0;
     }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
+    // Don't stop stream tracks here — the caller may still need the stream
+    // (e.g., MediaRecorder). The caller is responsible for stopping tracks.
+    streamRef.current = null;
     if (audioContextRef.current) {
       audioContextRef.current.close();
       audioContextRef.current = null;
@@ -39,7 +38,7 @@ export function useAudioAnalyser() {
     analyserRef.current = null;
   }, []);
 
-  const getTimeDomainData = useCallback((): Uint8Array | null => {
+  const getTimeDomainData = useCallback((): Uint8Array<ArrayBuffer> | null => {
     if (!analyserRef.current || !dataArrayRef.current) return null;
     analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
     return dataArrayRef.current;
