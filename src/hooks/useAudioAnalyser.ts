@@ -59,7 +59,7 @@ export function useAudioAnalyser() {
         analyser.getByteTimeDomainData(dataArray);
 
         const { width, height } = canvas;
-        ctx.fillStyle = 'rgba(10, 10, 15, 0.3)';
+        ctx.fillStyle = 'rgba(14, 13, 11, 0.3)';
         ctx.fillRect(0, 0, width, height);
 
         ctx.lineWidth = 2;

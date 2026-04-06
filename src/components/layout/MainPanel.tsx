@@ -21,7 +21,6 @@ export function MainPanel() {
   const { isTranscribing, transcribe } = useTranscription();
   const prosody = useProsody(audio.getTimeDomainData);
 
-  // Keep a ref to the stream so MediaRecorder can share it with AudioAnalyser
   const streamRef = useRef<MediaStream | null>(null);
 
   const activeEntry = state.activeEntryId
@@ -31,8 +30,6 @@ export function MainPanel() {
   const handleStart = useCallback(async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     streamRef.current = stream;
-
-    // Start all capture layers on the same stream
     await audio.start(stream);
     recorder.start(stream);
     speech.start();
@@ -43,13 +40,12 @@ export function MainPanel() {
     const audioBlob = await recorder.stop();
     audio.stop();
 
-    // Stop the shared media stream tracks
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
 
-    // Save live prosody + voice config immediately
+    // Save prosody + voice config
     if (activeEntry && recState.session) {
       dispatch({
         type: 'UPDATE_ENTRY',
@@ -61,7 +57,7 @@ export function MainPanel() {
       });
     }
 
-    // Send to Whisper for real transcription
+    // Send to OpenRouter for transcription, fall back to Web Speech API
     if (activeEntry && audioBlob.size > 0) {
       try {
         const result = await transcribe(audioBlob);
@@ -75,7 +71,7 @@ export function MainPanel() {
           },
         });
       } catch {
-        // Whisper failed — fall back to Web Speech API transcript
+        // Fall back to Web Speech API transcript
         const fallbackText = recState.session?.finalTranscript ?? '';
         if (fallbackText) {
           dispatch({
@@ -94,37 +90,37 @@ export function MainPanel() {
 
   return (
     <div className="flex-1 flex flex-col min-h-0 min-w-0">
-      {/* Recording controls */}
-      <div className="border-b border-border bg-surface-raised">
-        <div className="flex items-center gap-4 px-4 py-3">
+      {/* Recording strip */}
+      <div
+        className={`border-b border-border bg-surface-raised transition-shadow duration-500 ${
+          speech.isRecording ? 'recording-active' : ''
+        }`}
+      >
+        <div className="flex items-center gap-3 px-4 py-3">
           <RecordButton
             isRecording={speech.isRecording}
-            isTranscribing={isTranscribing}
             onStart={handleStart}
             onStop={handleStop}
           />
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 flex flex-col gap-1.5">
             <Waveform
               drawWaveform={audio.drawWaveform}
               isRecording={speech.isRecording}
             />
+            <ProsodyPanel
+              prosody={prosody}
+              isRecording={speech.isRecording}
+            />
           </div>
-        </div>
-        <div className="flex items-start gap-4 px-4 pb-3">
-          <div className="flex-1">
-            <ProsodyPanel prosody={prosody} />
-          </div>
-          <div className="pt-1">
-            <VoiceConfigToggles />
-          </div>
+          <VoiceConfigToggles />
         </div>
       </div>
 
       {/* Transcribing indicator */}
       {isTranscribing && (
         <div className="px-4 py-2 bg-surface-overlay border-b border-border">
-          <span className="text-[10px] text-text-muted animate-pulse">
-            transcribing with whisper...
+          <span className="text-[10px] text-accent animate-pulse tracking-wider">
+            transcribing...
           </span>
         </div>
       )}

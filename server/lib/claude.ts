@@ -1,14 +1,13 @@
-import Anthropic from '@anthropic-ai/sdk';
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-let client: Anthropic | null = null;
+function getApiKey(): string {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) throw new Error('OPENROUTER_API_KEY not set');
+  return key;
+}
 
-function getClient(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
-  if (!client) {
-    client = new Anthropic({ apiKey });
-  }
-  return client;
+function getModel(): string {
+  return process.env.OPENROUTER_MODEL || 'moonshotai/kimi-k2-0905';
 }
 
 export async function* streamRefinement(params: {
@@ -16,29 +15,54 @@ export async function* streamRefinement(params: {
   userMessage: string;
   temperature: number;
 }): AsyncGenerator<string, void, undefined> {
-  const anthropic = getClient();
-
-  const stream = anthropic.messages.stream({
-    model: 'claude-opus-4-6',
-    max_tokens: 64000,
-    temperature: params.temperature,
-    thinking: { type: 'adaptive' },
-    system: [
-      {
-        type: 'text',
-        text: params.systemPrompt,
-        cache_control: { type: 'ephemeral' },
-      },
-    ],
-    messages: [{ role: 'user', content: params.userMessage }],
+  const response = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getApiKey()}`,
+      'X-Title': 'comprosody',
+    },
+    body: JSON.stringify({
+      model: getModel(),
+      messages: [
+        { role: 'system', content: params.systemPrompt },
+        { role: 'user', content: params.userMessage },
+      ],
+      temperature: params.temperature,
+      max_tokens: 64000,
+      stream: true,
+    }),
   });
 
-  for await (const event of stream) {
-    if (
-      event.type === 'content_block_delta' &&
-      event.delta.type === 'text_delta'
-    ) {
-      yield event.delta.text;
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`OpenRouter error ${response.status}: ${err}`);
+  }
+
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() ?? '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const payload = line.slice(6).trim();
+      if (payload === '[DONE]') return;
+
+      try {
+        const parsed = JSON.parse(payload);
+        const delta = parsed.choices?.[0]?.delta?.content;
+        if (delta) yield delta;
+      } catch {
+        // skip malformed SSE chunks
+      }
     }
   }
 }
@@ -48,27 +72,29 @@ export async function refineComplete(params: {
   userMessage: string;
   temperature: number;
 }): Promise<string> {
-  const anthropic = getClient();
-
-  const stream = anthropic.messages.stream({
-    model: 'claude-opus-4-6',
-    max_tokens: 16000,
-    temperature: params.temperature,
-    thinking: { type: 'adaptive' },
-    system: [
-      {
-        type: 'text',
-        text: params.systemPrompt,
-        cache_control: { type: 'ephemeral' },
-      },
-    ],
-    messages: [{ role: 'user', content: params.userMessage }],
+  const response = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getApiKey()}`,
+      'X-Title': 'comprosody',
+    },
+    body: JSON.stringify({
+      model: getModel(),
+      messages: [
+        { role: 'system', content: params.systemPrompt },
+        { role: 'user', content: params.userMessage },
+      ],
+      temperature: params.temperature,
+      max_tokens: 16000,
+    }),
   });
 
-  const response = await stream.finalMessage();
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`OpenRouter error ${response.status}: ${err}`);
+  }
 
-  return response.content
-    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-    .map((block) => block.text)
-    .join('');
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content ?? '';
 }

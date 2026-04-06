@@ -39,10 +39,12 @@ export function TreeNode({ node, depth }: Props) {
   return (
     <div>
       <div
-        className={`group flex items-center gap-1 px-2 py-1 cursor-pointer text-xs hover:bg-surface-overlay transition-colors ${
-          isActive ? 'bg-surface-overlay text-accent' : 'text-text-secondary'
+        className={`group flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-xs transition-colors ${
+          isActive
+            ? 'bg-accent/10 text-accent border-r-2 border-accent'
+            : 'text-text-secondary hover:bg-surface-overlay hover:text-text-primary'
         }`}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        style={{ paddingLeft: `${depth * 14 + 12}px` }}
         onClick={() => {
           if (node.type === 'entry') setActiveEntry(node.id);
           else setIsOpen(!isOpen);
@@ -53,16 +55,35 @@ export function TreeNode({ node, depth }: Props) {
         }}
       >
         {node.type === 'directory' ? (
-          <span className="w-4 text-center text-text-muted">
-            {isOpen ? '\u25BE' : '\u25B8'}
-          </span>
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+            className="shrink-0 text-text-muted"
+          >
+            <path
+              d={isOpen ? 'M2 3 L5 7 L8 3' : 'M3 2 L7 5 L3 8'}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
         ) : (
-          <span className="w-4 text-center text-text-muted">\u25C7</span>
+          <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0">
+            <circle
+              cx="5"
+              cy="5"
+              r="2.5"
+              fill={isActive ? 'var(--color-accent)' : 'var(--color-text-muted)'}
+            />
+          </svg>
         )}
 
         {isEditing ? (
           <input
-            className="flex-1 bg-surface-raised border border-border-focus text-text-primary text-xs px-1 py-0.5 outline-none"
+            className="flex-1 bg-surface border border-border-focus text-text-primary text-xs px-1.5 py-0.5 outline-none font-ui rounded-sm"
             value={editName}
             onChange={(e) => setEditName(e.target.value)}
             onBlur={handleRename}
@@ -78,11 +99,11 @@ export function TreeNode({ node, depth }: Props) {
         )}
 
         <button
-          className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-hot text-xs px-1 transition-opacity"
+          className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-hot text-xs px-0.5 transition-opacity"
           onClick={handleDelete}
           title="Delete"
         >
-          \u00D7
+          &times;
         </button>
       </div>
 

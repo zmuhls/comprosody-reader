@@ -1,5 +1,4 @@
 import { Router } from 'express';
-import Anthropic from '@anthropic-ai/sdk';
 import { streamRefinement, refineComplete } from '../lib/claude.js';
 
 export const refineRouter = Router();
@@ -14,25 +13,6 @@ interface VariantsBody {
   systemPrompt: string;
   userMessage: string;
   temperatures: Array<{ label: string; temperature: number }>;
-}
-
-function classifyError(err: unknown): { status: number; message: string } {
-  if (err instanceof Anthropic.RateLimitError) {
-    return { status: 429, message: 'Rate limited — retry shortly' };
-  }
-  if (err instanceof Anthropic.AuthenticationError) {
-    return { status: 401, message: 'Invalid API key' };
-  }
-  if (err instanceof Anthropic.BadRequestError) {
-    return { status: 400, message: err.message };
-  }
-  if (err instanceof Anthropic.APIError) {
-    return { status: err.status ?? 500, message: err.message };
-  }
-  return {
-    status: 500,
-    message: err instanceof Error ? err.message : 'Unknown error',
-  };
 }
 
 refineRouter.post('/refine', async (req, res) => {
@@ -52,7 +32,7 @@ refineRouter.post('/refine', async (req, res) => {
     }
     res.write('data: [DONE]\n\n');
   } catch (err) {
-    const { message } = classifyError(err);
+    const message = err instanceof Error ? err.message : 'Refinement failed';
     res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
   }
   res.end();
@@ -65,8 +45,8 @@ refineRouter.post('/refine/complete', async (req, res) => {
     const text = await refineComplete({ systemPrompt, userMessage, temperature });
     res.json({ text });
   } catch (err) {
-    const { status, message } = classifyError(err);
-    res.status(status).json({ error: message });
+    const message = err instanceof Error ? err.message : 'Refinement failed';
+    res.status(500).json({ error: message });
   }
 });
 
@@ -86,7 +66,7 @@ refineRouter.post('/variants', async (req, res) => {
     );
     res.json({ variants: results });
   } catch (err) {
-    const { status, message } = classifyError(err);
-    res.status(status).json({ error: message });
+    const message = err instanceof Error ? err.message : 'Refinement failed';
+    res.status(500).json({ error: message });
   }
 });

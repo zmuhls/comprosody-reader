@@ -12,13 +12,13 @@ export function Sidebar() {
   }, []);
 
   return (
-    <aside className="w-56 flex-shrink-0 bg-surface-raised border-r border-border flex flex-col h-screen">
-      <div className="p-3 border-b border-border">
-        <h1 className="text-sm font-bold text-text-primary tracking-widest uppercase">
+    <aside className="w-52 flex-shrink-0 bg-surface-raised border-r border-border flex flex-col h-screen">
+      <div className="px-4 py-4 border-b border-border">
+        <h1 className="font-brand text-lg text-text-primary tracking-wide italic">
           comprosody
         </h1>
-        <p className="text-[10px] text-text-muted mt-0.5">
-          dictation &rarr; prose
+        <p className="text-[10px] font-ui text-text-muted mt-0.5 tracking-widest uppercase">
+          dictation to prose
         </p>
       </div>
 
@@ -28,13 +28,22 @@ export function Sidebar() {
         <DirectoryTree />
       </div>
 
-      <div className="border-t border-border p-2">
-        <span className="text-[10px] text-text-muted px-1">
+      <div className="border-t border-border px-4 py-2">
+        <span className="text-[10px] text-text-muted flex items-center gap-1.5">
+          <span
+            className={`inline-block w-1.5 h-1.5 rounded-full ${
+              serverOk === null
+                ? 'bg-text-muted'
+                : serverOk
+                  ? 'bg-success'
+                  : 'bg-hot'
+            }`}
+          />
           {serverOk === null
-            ? 'checking server...'
+            ? 'connecting...'
             : serverOk
-              ? '\u2713 server connected'
-              : '\u26A0 server offline'}
+              ? 'server connected'
+              : 'server offline'}
         </span>
       </div>
     </aside>

@@ -1,9 +1,3 @@
-import { spawn } from 'child_process';
-import { writeFile, unlink } from 'fs/promises';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { randomUUID } from 'crypto';
-
 export interface WordTimestamp {
   word: string;
   start: number;
@@ -17,60 +11,68 @@ export interface TranscriptionResult {
   duration: number;
 }
 
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+
 export async function transcribe(
   audioBuffer: Buffer,
-  modelSize: string = 'base'
+  _modelSize: string = 'base'
 ): Promise<TranscriptionResult> {
-  const tmpPath = join(tmpdir(), `comprosody-${randomUUID()}.webm`);
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY not set');
 
-  try {
-    await writeFile(tmpPath, audioBuffer);
+  const transcribeModel =
+    process.env.OPENROUTER_TRANSCRIBE_MODEL || 'google/gemini-2.5-flash';
 
-    const scriptPath = join(import.meta.dirname, '..', 'scripts', 'transcribe.py');
-    const result = await runPython(scriptPath, tmpPath, modelSize);
+  const base64Audio = audioBuffer.toString('base64');
 
-    const parsed = JSON.parse(result);
-    if (parsed.error) {
-      throw new Error(parsed.error);
-    }
-
-    return parsed as TranscriptionResult;
-  } finally {
-    await unlink(tmpPath).catch(() => {});
-  }
-}
-
-function runPython(
-  scriptPath: string,
-  audioPath: string,
-  modelSize: string
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn('python3', [scriptPath, audioPath, modelSize], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    proc.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString();
-    });
-
-    proc.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`transcribe.py exited with code ${code}: ${stderr}`));
-      } else {
-        resolve(stdout.trim());
-      }
-    });
-
-    proc.on('error', (err) => {
-      reject(new Error(`Failed to spawn python3: ${err.message}`));
-    });
+  const response = await fetch(OPENROUTER_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+      'X-Title': 'comprosody',
+    },
+    body: JSON.stringify({
+      model: transcribeModel,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: 'Transcribe this audio recording exactly as spoken. Return only the transcribed text, nothing else. No commentary, labels, or formatting.',
+            },
+            {
+              type: 'input_audio',
+              input_audio: {
+                data: base64Audio,
+                format: 'webm',
+              },
+            },
+          ],
+        },
+      ],
+      temperature: 0,
+      max_tokens: 4000,
+    }),
   });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Transcription error ${response.status}: ${err}`);
+  }
+
+  const data = await response.json();
+  const transcript = data.choices?.[0]?.message?.content?.trim() ?? '';
+
+  if (!transcript) {
+    throw new Error('No transcription returned');
+  }
+
+  return {
+    transcript,
+    words: [],
+    language: 'en',
+    duration: 0,
+  };
 }

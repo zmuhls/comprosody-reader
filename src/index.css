@@ -1,38 +1,52 @@
 @import "tailwindcss";
 
 @theme {
-  --color-surface: #0a0a0f;
-  --color-surface-raised: #12121a;
-  --color-surface-overlay: #1a1a25;
-  --color-border: #2a2a3a;
-  --color-border-focus: #4a4a6a;
-  --color-text-primary: #e8e8f0;
-  --color-text-secondary: #8888a0;
-  --color-text-muted: #555570;
-  --color-accent: #6366f1;
-  --color-accent-hover: #818cf8;
-  --color-warm: #f59e0b;
-  --color-hot: #ef4444;
-  --color-cool: #06b6d4;
-  --color-success: #10b981;
-  --color-energy: #f97316;
-  --font-mono: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  --color-surface: #0e0d0b;
+  --color-surface-raised: #161513;
+  --color-surface-overlay: #1e1d1a;
+  --color-surface-writing: #12110e;
+  --color-border: #2e2a24;
+  --color-border-focus: #4a4438;
+  --color-text-primary: #e8e2d6;
+  --color-text-secondary: #9a9184;
+  --color-text-muted: #5a5449;
+  --color-accent: #c4935a;
+  --color-accent-hover: #d4a66d;
+  --color-warm: #d49c44;
+  --color-hot: #c75a4a;
+  --color-cool: #5a9aaa;
+  --color-success: #6b9a6b;
+  --color-energy: #d48a3a;
+  --color-recording: #c75a4a;
+  --font-brand: "EB Garamond", Georgia, serif;
+  --font-writing: "Crimson Pro", Georgia, serif;
+  --font-ui: "JetBrains Mono", monospace;
 }
 
 body {
   margin: 0;
   background: var(--color-surface);
   color: var(--color-text-primary);
-  font-family: var(--font-mono);
+  font-family: var(--font-ui);
+  font-weight: 400;
+  font-size: 13px;
   -webkit-font-smoothing: antialiased;
 }
 
 textarea {
-  font-family: var(--font-mono);
+  font-family: var(--font-writing);
 }
 
+select {
+  font-family: var(--font-ui);
+}
+
+.font-brand { font-family: var(--font-brand); }
+.font-writing { font-family: var(--font-writing); }
+.font-ui { font-family: var(--font-ui); }
+
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
@@ -43,4 +57,13 @@ textarea {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-border-focus);
+}
+
+@keyframes recording-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(199, 90, 74, 0.1); }
+  50% { box-shadow: 0 0 20px rgba(199, 90, 74, 0.25); }
+}
+
+.recording-active {
+  animation: recording-glow 2s ease-in-out infinite;
 }

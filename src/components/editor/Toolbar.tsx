@@ -17,7 +17,7 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
   const canRefine = hasEntry && !isRefining && !isGeneratingVariants;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface-raised flex-wrap">
+    <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-surface-raised flex-wrap">
       {/* Genre */}
       <select
         value={refinementSettings.genre}
@@ -27,7 +27,7 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
             settings: { genre: e.target.value as GenreRegister },
           })
         }
-        className="text-[10px] bg-surface border border-border text-text-secondary px-2 py-1 outline-none focus:border-border-focus"
+        className="text-[11px] bg-surface border border-border text-text-secondary px-2 py-1 outline-none focus:border-accent/50 rounded-sm transition-colors"
       >
         {GENRES.map((g) => (
           <option key={g.value} value={g.value}>
@@ -45,7 +45,7 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
             settings: { scale: e.target.value as Scale },
           })
         }
-        className="text-[10px] bg-surface border border-border text-text-secondary px-2 py-1 outline-none focus:border-border-focus"
+        className="text-[11px] bg-surface border border-border text-text-secondary px-2 py-1 outline-none focus:border-accent/50 rounded-sm transition-colors"
       >
         {SCALES.map((s) => (
           <option key={s.value} value={s.value}>
@@ -55,8 +55,8 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
       </select>
 
       {/* Temperature */}
-      <div className="flex items-center gap-1">
-        <span className="text-[9px] text-text-muted">temp</span>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] text-text-muted">temp</span>
         <input
           type="range"
           min={0}
@@ -69,9 +69,9 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
               settings: { temperature: parseFloat(e.target.value) },
             })
           }
-          className="w-16 h-1 accent-accent"
+          className="w-20 h-1 accent-accent"
         />
-        <span className="text-[9px] text-text-muted w-6">
+        <span className="text-[10px] text-text-muted tabular-nums w-7">
           {refinementSettings.temperature.toFixed(2)}
         </span>
       </div>
@@ -82,7 +82,7 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
       <button
         onClick={refine}
         disabled={!canRefine}
-        className="text-[10px] px-3 py-1 bg-accent text-white hover:bg-accent-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        className="text-[11px] px-4 py-1.5 bg-accent text-surface font-medium hover:bg-accent-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors rounded-sm"
       >
         {isRefining ? 'refining...' : 'refine'}
       </button>
@@ -90,15 +90,15 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
       <button
         onClick={onRefineSelection}
         disabled={!canRefine || !hasSelection}
-        className="text-[10px] px-3 py-1 bg-surface-overlay text-text-secondary hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        className="text-[11px] px-3 py-1.5 border border-border text-text-secondary hover:text-text-primary hover:border-border-focus disabled:opacity-30 disabled:cursor-not-allowed transition-colors rounded-sm"
       >
-        refine selection
+        selection
       </button>
 
       <button
         onClick={generateVariants}
         disabled={!canRefine}
-        className="text-[10px] px-3 py-1 bg-surface-overlay text-text-secondary hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        className="text-[11px] px-3 py-1.5 border border-border text-text-secondary hover:text-text-primary hover:border-border-focus disabled:opacity-30 disabled:cursor-not-allowed transition-colors rounded-sm"
       >
         {isGeneratingVariants ? 'generating...' : 'variants'}
       </button>

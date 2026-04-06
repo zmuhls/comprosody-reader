@@ -10,19 +10,18 @@ export function Waveform({ drawWaveform, isRecording }: Props) {
 
   useEffect(() => {
     if (isRecording && canvasRef.current) {
-      drawWaveform(canvasRef.current, '#6366f1');
+      drawWaveform(canvasRef.current, '#c4935a');
     }
   }, [isRecording, drawWaveform]);
 
-  // Draw flat line when idle
   useEffect(() => {
     if (!isRecording && canvasRef.current) {
       const ctx = canvasRef.current.getContext('2d');
       if (!ctx) return;
       const { width, height } = canvasRef.current;
-      ctx.fillStyle = 'rgba(10, 10, 15, 1)';
+      ctx.fillStyle = '#0e0d0b';
       ctx.fillRect(0, 0, width, height);
-      ctx.strokeStyle = '#2a2a3a';
+      ctx.strokeStyle = '#2e2a24';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, height / 2);
@@ -35,8 +34,8 @@ export function Waveform({ drawWaveform, isRecording }: Props) {
     <canvas
       ref={canvasRef}
       width={600}
-      height={80}
-      className="w-full h-20 rounded border border-border bg-surface"
+      height={64}
+      className="w-full h-16 rounded border border-border bg-surface"
     />
   );
 }
