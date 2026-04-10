@@ -33,6 +33,8 @@ npm run server
 
 Frontend at `http://localhost:5173`, backend at `http://localhost:3001`.
 
+The backend script runs without file watching so it starts reliably across environments. If you change code under `server/`, restart `npm run server`.
+
 ## How it works
 
 1. **Record** — click the record button, speak. Web Speech API provides real-time interim text while you talk. Prosody diagnostics (pace, energy, fluency, density) update live.
