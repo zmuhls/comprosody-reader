@@ -94,3 +94,7 @@ Strict mode. Composite project: `tsconfig.app.json` (frontend, JSX), `tsconfig.n
 ## Commit convention
 
 Lowercase, short messages. Author: zmuhls.
+
+## Known issues and pending work
+
+See `TODO.md` for the active backlog of audit findings, bugs, and improvements. Consult it before starting work on the recording pipeline, refinement flow, or backend routes — many of the obvious-looking gaps are already tracked there.
