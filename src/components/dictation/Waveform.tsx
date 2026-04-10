@@ -28,14 +28,14 @@ function drawIdle(canvas: HTMLCanvasElement) {
 
   ctx.clearRect(0, 0, width, height);
 
-  ctx.strokeStyle = 'rgba(19, 21, 23, 0.12)';
+  ctx.strokeStyle = 'rgba(238, 242, 246, 0.18)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, center);
   ctx.lineTo(width, center);
   ctx.stroke();
 
-  ctx.fillStyle = 'rgba(222, 124, 69, 0.16)';
+  ctx.fillStyle = 'rgba(217, 138, 84, 0.28)';
   const bars = 42;
   const gap = width / bars;
   for (let i = 0; i < bars; i++) {
@@ -49,7 +49,7 @@ export function Waveform({
   drawWaveform,
   isRecording,
   className,
-  color = '#de7c45',
+  color = '#d98a54',
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 

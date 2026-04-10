@@ -48,19 +48,19 @@ export function RecordingFooter({
           : 'Live interim speech is unavailable here, but the uploaded take will still be transcribed.';
 
   return (
-    <footer className="relative border-t border-border bg-surface/85 backdrop-blur-md">
+    <footer className="relative border-t border-border-strong bg-surface-raised/95 backdrop-blur-md">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(222,124,69,0.16),transparent_62%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(217,138,84,0.12),transparent_62%)]" />
         <Waveform
           drawWaveform={drawWaveform}
           isRecording={isRecording}
-          className="absolute inset-0 h-full w-full opacity-80"
-          color="#de7c45"
+          className="absolute inset-0 h-full w-full opacity-55"
+          color="#d98a54"
         />
       </div>
 
       <div className="relative flex flex-col gap-4 px-5 py-4 lg:flex-row lg:items-center">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 border border-border-strong bg-surface-overlay/78 px-4 py-3 shadow-[0_14px_36px_rgba(0,0,0,0.22)]">
           <RecordButton
             isRecording={isRecording}
             onStart={onStart}
@@ -68,11 +68,14 @@ export function RecordingFooter({
           />
 
           <div className="min-w-0">
-            <div className="text-[10px] uppercase tracking-[0.3em] text-text-muted">
+            <div className="text-[10px] uppercase tracking-[0.3em] text-text-secondary">
               recorder
             </div>
             <div className="mt-1 text-sm uppercase tracking-[0.18em] text-text-primary">
               {status}
+            </div>
+            <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-accent">
+              {isRecording ? 'stop take' : 'start take'}
             </div>
             <div className="mt-1 truncate text-xs text-text-secondary">
               {activeEntryName ?? 'No active entry'}{activeEntryName ? ' active' : ''}
@@ -81,7 +84,7 @@ export function RecordingFooter({
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="text-xs leading-relaxed text-text-secondary">
+          <p className="text-sm leading-relaxed text-text-primary/92">
             {detail}
           </p>
           <div className="mt-3">

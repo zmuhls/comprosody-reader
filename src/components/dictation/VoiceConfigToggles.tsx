@@ -59,8 +59,8 @@ export function VoiceConfigToggles() {
         onClick={() => setIsOpen(!isOpen)}
         className={`border px-3 py-2 text-[10px] uppercase tracking-[0.18em] transition-colors ${
           isOpen
-            ? 'border-border-strong bg-surface text-text-primary'
-            : 'border-border text-text-muted hover:border-border-strong hover:text-text-secondary'
+            ? 'border-border-focus bg-surface-overlay text-text-primary'
+            : 'border-border-strong bg-surface/65 text-text-secondary hover:border-border-focus hover:text-text-primary'
         }`}
         title="Voice settings"
       >
@@ -68,7 +68,7 @@ export function VoiceConfigToggles() {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full z-10 mt-2 min-w-56 border border-border bg-surface px-4 py-4 shadow-[0_18px_55px_rgba(17,20,24,0.08)]">
+        <div className="absolute right-0 top-full z-10 mt-2 min-w-56 border border-border bg-surface px-4 py-4 shadow-[0_22px_70px_rgba(0,0,0,0.42)]">
           <div className="mb-3 text-[9px] uppercase tracking-[0.22em] text-text-muted">
             voice config
           </div>

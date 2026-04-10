@@ -2,25 +2,25 @@
 @import "tailwindcss";
 
 @theme {
-  --color-canvas: #efece4;
-  --color-surface: rgba(248, 245, 238, 0.82);
-  --color-surface-raised: rgba(245, 241, 233, 0.92);
-  --color-surface-overlay: rgba(255, 252, 246, 0.86);
-  --color-surface-writing: rgba(255, 253, 249, 0.96);
-  --color-border: rgba(19, 21, 23, 0.11);
-  --color-border-strong: rgba(19, 21, 23, 0.2);
-  --color-border-focus: rgba(19, 21, 23, 0.34);
-  --color-text-primary: #121417;
-  --color-text-secondary: #4c5560;
-  --color-text-muted: #7f8790;
-  --color-accent: #de7c45;
-  --color-accent-hover: #c86f3d;
-  --color-warm: #cb8a41;
-  --color-hot: #c6574c;
-  --color-cool: #4d8ea6;
-  --color-success: #608468;
-  --color-energy: #d58c43;
-  --color-recording: #d84f43;
+  --color-canvas: #0d1014;
+  --color-surface: rgba(18, 23, 29, 0.84);
+  --color-surface-raised: rgba(22, 28, 35, 0.92);
+  --color-surface-overlay: rgba(26, 33, 41, 0.9);
+  --color-surface-writing: rgba(16, 21, 27, 0.96);
+  --color-border: rgba(223, 231, 240, 0.1);
+  --color-border-strong: rgba(223, 231, 240, 0.18);
+  --color-border-focus: rgba(223, 231, 240, 0.34);
+  --color-text-primary: #eef2f6;
+  --color-text-secondary: #b2bcc8;
+  --color-text-muted: #75808d;
+  --color-accent: #d98a54;
+  --color-accent-hover: #e79a65;
+  --color-warm: #d29c53;
+  --color-hot: #d76358;
+  --color-cool: #5fa0ba;
+  --color-success: #7eab86;
+  --color-energy: #de9a56;
+  --color-recording: #dc6559;
   --font-brand: "EB Garamond", Georgia, serif;
   --font-writing: "Crimson Pro", Georgia, serif;
   --font-ui: "JetBrains Mono", monospace;
@@ -57,15 +57,16 @@ select {
 .app-shell {
   background-color: var(--color-canvas);
   background-image:
-    linear-gradient(rgba(19, 21, 23, 0.055) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(19, 21, 23, 0.055) 1px, transparent 1px),
-    radial-gradient(circle at top right, rgba(222, 124, 69, 0.12), transparent 28%);
-  background-size: 34px 34px, 34px 34px, cover;
-  background-position: -1px -1px, -1px -1px, 0 0;
+    linear-gradient(rgba(238, 242, 246, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(238, 242, 246, 0.024) 1px, transparent 1px),
+    radial-gradient(circle at top right, rgba(217, 138, 84, 0.08), transparent 34%),
+    radial-gradient(circle at bottom left, rgba(63, 93, 124, 0.08), transparent 28%);
+  background-size: 42px 42px, 42px 42px, cover;
+  background-position: -1px -1px, -1px -1px, 0 0, 0 0;
 }
 
 ::selection {
-  background: rgba(222, 124, 69, 0.18);
+  background: rgba(217, 138, 84, 0.3);
   color: var(--color-text-primary);
 }
 

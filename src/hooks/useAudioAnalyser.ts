@@ -52,7 +52,7 @@ export function useAudioAnalyser() {
   }, []);
 
   const drawWaveform = useCallback(
-    (canvas: HTMLCanvasElement, color: string = '#de7c45') => {
+    (canvas: HTMLCanvasElement, color: string = '#d98a54') => {
       const ctx = canvas.getContext('2d');
       if (!ctx || !analyserRef.current || !timeDomainDataRef.current || !frequencyDataRef.current) {
         return;
@@ -81,11 +81,11 @@ export function useAudioAnalyser() {
         ctx.clearRect(0, 0, width, height);
 
         const gradient = ctx.createLinearGradient(0, 0, width, 0);
-        gradient.addColorStop(0, 'rgba(222, 124, 69, 0)');
-        gradient.addColorStop(0.22, 'rgba(222, 124, 69, 0.28)');
-        gradient.addColorStop(0.5, 'rgba(255, 235, 214, 0.9)');
-        gradient.addColorStop(0.78, 'rgba(222, 124, 69, 0.28)');
-        gradient.addColorStop(1, 'rgba(222, 124, 69, 0)');
+        gradient.addColorStop(0, 'rgba(217, 138, 84, 0)');
+        gradient.addColorStop(0.22, 'rgba(217, 138, 84, 0.24)');
+        gradient.addColorStop(0.5, 'rgba(244, 226, 206, 0.8)');
+        gradient.addColorStop(0.78, 'rgba(217, 138, 84, 0.24)');
+        gradient.addColorStop(1, 'rgba(217, 138, 84, 0)');
 
         ctx.fillStyle = gradient;
         for (let i = 0; i < barCount; i++) {

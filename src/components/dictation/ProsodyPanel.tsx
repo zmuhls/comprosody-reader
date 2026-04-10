@@ -15,15 +15,15 @@ function Stat({
   unit?: string;
 }) {
   return (
-    <div className="flex items-center gap-2 border border-border bg-surface/70 px-3 py-2">
-      <span className="text-[9px] uppercase tracking-[0.22em] text-text-muted">
+    <div className="flex items-center gap-2 border border-border-strong bg-surface-overlay/80 px-3 py-2">
+      <span className="text-[9px] uppercase tracking-[0.22em] text-text-secondary">
         {label}
       </span>
-      <span className="text-[12px] tabular-nums text-text-secondary">
+      <span className="text-[12px] tabular-nums text-text-primary">
         {value}
       </span>
       {unit && (
-        <span className="text-[9px] uppercase tracking-[0.18em] text-text-muted">
+        <span className="text-[9px] uppercase tracking-[0.18em] text-text-secondary">
           {unit}
         </span>
       )}
