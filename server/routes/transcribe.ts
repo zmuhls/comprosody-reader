@@ -16,8 +16,7 @@ transcribeRouter.post('/transcribe', async (req, res) => {
       return;
     }
 
-    const modelSize = (req.query.model as string) || 'base';
-    const result = await transcribe(audioBuffer, modelSize);
+    const result = await transcribe(audioBuffer);
 
     res.json(result);
   } catch (err) {

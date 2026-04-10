@@ -1,5 +1,13 @@
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+interface OpenRouterCompletionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
 function getApiKey(): string {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) throw new Error('OPENROUTER_API_KEY not set');
@@ -95,6 +103,6 @@ export async function refineComplete(params: {
     throw new Error(`OpenRouter error ${response.status}: ${err}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as OpenRouterCompletionResponse;
   return data.choices?.[0]?.message?.content ?? '';
 }

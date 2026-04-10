@@ -10,7 +10,7 @@ import {
 export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | null) {
   const { state, dispatch } = useRecording();
   const intervalRef = useRef<number>(0);
-  const lastSpeechTimeRef = useRef<number>(Date.now());
+  const lastSpeechTimeRef = useRef<number>(0);
   const pauseStartRef = useRef<number | null>(null);
 
   const update = useCallback(() => {

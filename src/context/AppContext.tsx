@@ -14,7 +14,15 @@ import {
   saveEntries,
   loadDirectories,
   saveDirectories,
+  loadRefinementSettings,
+  saveRefinementSettings,
 } from '../lib/storage';
+
+const DEFAULT_REFINEMENT_SETTINGS: RefinementSettings = {
+  genre: 'freewrite',
+  scale: 'sentence',
+  temperature: 0.5,
+};
 
 export interface AppState {
   entries: Record<string, Entry>;
@@ -59,10 +67,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case 'DELETE_ENTRY': {
-      const { [action.id]: _, ...rest } = state.entries;
+      const nextEntries = { ...state.entries };
+      delete nextEntries[action.id];
       return {
         ...state,
-        entries: rest,
+        entries: nextEntries,
         activeEntryId: state.activeEntryId === action.id ? null : state.activeEntryId,
       };
     }
@@ -89,7 +98,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case 'DELETE_DIRECTORY': {
-      const { [action.id]: _, ...restDirs } = state.directories;
+      const nextDirectories = { ...state.directories };
+      delete nextDirectories[action.id];
       // Also delete entries in this directory
       const restEntries: Record<string, Entry> = {};
       for (const [id, entry] of Object.entries(state.entries)) {
@@ -97,7 +107,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
       return {
         ...state,
-        directories: restDirs,
+        directories: nextDirectories,
         entries: restEntries,
         activeEntryId:
           state.activeEntryId && !restEntries[state.activeEntryId]
@@ -130,15 +140,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 }
 
 function createInitialState(): AppState {
+  const savedSettings = loadRefinementSettings();
   return {
     entries: loadEntries(),
     directories: loadDirectories(),
     activeEntryId: null,
-    refinementSettings: {
-      genre: 'freewrite',
-      scale: 'sentence',
-      temperature: 0.5,
-    },
+    refinementSettings: savedSettings ?? DEFAULT_REFINEMENT_SETTINGS,
   };
 }
 
@@ -159,6 +166,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     saveDirectories(state.directories);
   }, [state.directories]);
+
+  useEffect(() => {
+    saveRefinementSettings(state.refinementSettings);
+  }, [state.refinementSettings]);
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>

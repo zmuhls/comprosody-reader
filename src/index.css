@@ -1,31 +1,40 @@
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;500;600&family=EB+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --color-surface: #0e0d0b;
-  --color-surface-raised: #161513;
-  --color-surface-overlay: #1e1d1a;
-  --color-surface-writing: #12110e;
-  --color-border: #2e2a24;
-  --color-border-focus: #4a4438;
-  --color-text-primary: #e8e2d6;
-  --color-text-secondary: #9a9184;
-  --color-text-muted: #5a5449;
-  --color-accent: #c4935a;
-  --color-accent-hover: #d4a66d;
-  --color-warm: #d49c44;
-  --color-hot: #c75a4a;
-  --color-cool: #5a9aaa;
-  --color-success: #6b9a6b;
-  --color-energy: #d48a3a;
-  --color-recording: #c75a4a;
+  --color-canvas: #efece4;
+  --color-surface: rgba(248, 245, 238, 0.82);
+  --color-surface-raised: rgba(245, 241, 233, 0.92);
+  --color-surface-overlay: rgba(255, 252, 246, 0.86);
+  --color-surface-writing: rgba(255, 253, 249, 0.96);
+  --color-border: rgba(19, 21, 23, 0.11);
+  --color-border-strong: rgba(19, 21, 23, 0.2);
+  --color-border-focus: rgba(19, 21, 23, 0.34);
+  --color-text-primary: #121417;
+  --color-text-secondary: #4c5560;
+  --color-text-muted: #7f8790;
+  --color-accent: #de7c45;
+  --color-accent-hover: #c86f3d;
+  --color-warm: #cb8a41;
+  --color-hot: #c6574c;
+  --color-cool: #4d8ea6;
+  --color-success: #608468;
+  --color-energy: #d58c43;
+  --color-recording: #d84f43;
   --font-brand: "EB Garamond", Georgia, serif;
   --font-writing: "Crimson Pro", Georgia, serif;
   --font-ui: "JetBrains Mono", monospace;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
-  background: var(--color-surface);
+  background: var(--color-canvas);
   color: var(--color-text-primary);
   font-family: var(--font-ui);
   font-weight: 400;
@@ -45,6 +54,21 @@ select {
 .font-writing { font-family: var(--font-writing); }
 .font-ui { font-family: var(--font-ui); }
 
+.app-shell {
+  background-color: var(--color-canvas);
+  background-image:
+    linear-gradient(rgba(19, 21, 23, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(19, 21, 23, 0.055) 1px, transparent 1px),
+    radial-gradient(circle at top right, rgba(222, 124, 69, 0.12), transparent 28%);
+  background-size: 34px 34px, 34px 34px, cover;
+  background-position: -1px -1px, -1px -1px, 0 0;
+}
+
+::selection {
+  background: rgba(222, 124, 69, 0.18);
+  color: var(--color-text-primary);
+}
+
 ::-webkit-scrollbar {
   width: 5px;
 }
@@ -57,13 +81,4 @@ select {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-border-focus);
-}
-
-@keyframes recording-glow {
-  0%, 100% { box-shadow: 0 0 8px rgba(199, 90, 74, 0.1); }
-  50% { box-shadow: 0 0 20px rgba(199, 90, 74, 0.25); }
-}
-
-.recording-active {
-  animation: recording-glow 2s ease-in-out infinite;
 }

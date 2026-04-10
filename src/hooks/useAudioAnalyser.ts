@@ -4,23 +4,30 @@ export function useAudioAnalyser() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const dataArrayRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const timeDomainDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const frequencyDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const animFrameRef = useRef<number>(0);
 
   const start = useCallback(async (stream?: MediaStream) => {
-    const mediaStream = stream ?? await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mediaStream =
+      stream ?? (await navigator.mediaDevices.getUserMedia({ audio: true }));
     streamRef.current = mediaStream;
 
     const audioContext = new AudioContext();
     audioContextRef.current = audioContext;
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
 
     const source = audioContext.createMediaStreamSource(mediaStream);
     const analyser = audioContext.createAnalyser();
     analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.82;
     source.connect(analyser);
 
     analyserRef.current = analyser;
-    dataArrayRef.current = new Uint8Array(analyser.frequencyBinCount);
+    timeDomainDataRef.current = new Uint8Array(analyser.frequencyBinCount);
+    frequencyDataRef.current = new Uint8Array(analyser.frequencyBinCount);
   }, []);
 
   const stop = useCallback(() => {
@@ -39,44 +46,71 @@ export function useAudioAnalyser() {
   }, []);
 
   const getTimeDomainData = useCallback((): Uint8Array<ArrayBuffer> | null => {
-    if (!analyserRef.current || !dataArrayRef.current) return null;
-    analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
-    return dataArrayRef.current;
+    if (!analyserRef.current || !timeDomainDataRef.current) return null;
+    analyserRef.current.getByteTimeDomainData(timeDomainDataRef.current);
+    return timeDomainDataRef.current;
   }, []);
 
   const drawWaveform = useCallback(
-    (canvas: HTMLCanvasElement, color: string = '#6366f1') => {
+    (canvas: HTMLCanvasElement, color: string = '#de7c45') => {
       const ctx = canvas.getContext('2d');
-      if (!ctx || !analyserRef.current || !dataArrayRef.current) return;
+      if (!ctx || !analyserRef.current || !timeDomainDataRef.current || !frequencyDataRef.current) {
+        return;
+      }
+
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+      }
 
       const draw = () => {
         animFrameRef.current = requestAnimationFrame(draw);
 
         const analyser = analyserRef.current;
-        const dataArray = dataArrayRef.current;
-        if (!analyser || !dataArray) return;
+        const timeDomainData = timeDomainDataRef.current;
+        const frequencyData = frequencyDataRef.current;
+        if (!analyser || !timeDomainData || !frequencyData) return;
 
-        analyser.getByteTimeDomainData(dataArray);
+        analyser.getByteTimeDomainData(timeDomainData);
+        analyser.getByteFrequencyData(frequencyData);
 
         const { width, height } = canvas;
-        ctx.fillStyle = 'rgba(14, 13, 11, 0.3)';
-        ctx.fillRect(0, 0, width, height);
+        const midline = height / 2;
+        const barCount = Math.min(96, frequencyData.length);
+        const barWidth = width / barCount;
 
-        ctx.lineWidth = 2;
+        ctx.clearRect(0, 0, width, height);
+
+        const gradient = ctx.createLinearGradient(0, 0, width, 0);
+        gradient.addColorStop(0, 'rgba(222, 124, 69, 0)');
+        gradient.addColorStop(0.22, 'rgba(222, 124, 69, 0.28)');
+        gradient.addColorStop(0.5, 'rgba(255, 235, 214, 0.9)');
+        gradient.addColorStop(0.78, 'rgba(222, 124, 69, 0.28)');
+        gradient.addColorStop(1, 'rgba(222, 124, 69, 0)');
+
+        ctx.fillStyle = gradient;
+        for (let i = 0; i < barCount; i++) {
+          const index = Math.floor((i / barCount) * frequencyData.length);
+          const amplitude = frequencyData[index] / 255;
+          const barHeight = Math.max(2, amplitude * height * 0.72);
+          const x = i * barWidth;
+          ctx.fillRect(x, midline - barHeight / 2, Math.max(1, barWidth * 0.58), barHeight);
+        }
+
+        ctx.lineWidth = 1.35;
         ctx.strokeStyle = color;
         ctx.beginPath();
 
-        const sliceWidth = width / dataArray.length;
+        const sliceWidth = width / timeDomainData.length;
         let x = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          const v = dataArray[i] / 128.0;
+        for (let i = 0; i < timeDomainData.length; i++) {
+          const v = timeDomainData[i] / 128.0;
           const y = (v * height) / 2;
           if (i === 0) ctx.moveTo(x, y);
           else ctx.lineTo(x, y);
           x += sliceWidth;
         }
 
-        ctx.lineTo(width, height / 2);
+        ctx.lineTo(width, midline);
         ctx.stroke();
       };
 

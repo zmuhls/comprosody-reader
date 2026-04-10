@@ -1,5 +1,6 @@
 import { STORAGE_KEYS } from '../constants';
 import type { Entry, Directory } from '../types/editor';
+import type { RefinementSettings } from '../types/llm';
 
 export function loadEntries(): Record<string, Entry> {
   try {
@@ -27,3 +28,15 @@ export function saveDirectories(dirs: Record<string, Directory>): void {
   localStorage.setItem(STORAGE_KEYS.directories, JSON.stringify(dirs));
 }
 
+export function loadRefinementSettings(): RefinementSettings | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.settings);
+    return raw ? (JSON.parse(raw) as RefinementSettings) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveRefinementSettings(settings: RefinementSettings): void {
+  localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
+}

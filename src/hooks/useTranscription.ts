@@ -18,10 +18,12 @@ interface TranscriptionResponse {
 export function useTranscription() {
   const { dispatch } = useRecording();
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
 
   const transcribe = useCallback(
     async (audioBlob: Blob) => {
       setIsTranscribing(true);
+      setTranscriptionError(null);
 
       try {
         const response = await fetch('/api/transcribe', {
@@ -54,6 +56,9 @@ export function useTranscription() {
 
         return data;
       } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Transcription failed';
+        setTranscriptionError(message);
         console.error('Transcription failed:', err);
         throw err;
       } finally {
@@ -63,5 +68,5 @@ export function useTranscription() {
     [dispatch]
   );
 
-  return { isTranscribing, transcribe };
+  return { isTranscribing, transcriptionError, transcribe };
 }

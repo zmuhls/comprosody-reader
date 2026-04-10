@@ -6,7 +6,7 @@ import { MainPanel } from './components/layout/MainPanel';
 function AppInner() {
   return (
     <RecordingProvider>
-      <div className="flex h-screen overflow-hidden bg-surface">
+      <div className="app-shell flex h-screen overflow-hidden text-text-primary">
         <Sidebar />
         <MainPanel />
       </div>

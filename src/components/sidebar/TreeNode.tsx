@@ -39,12 +39,12 @@ export function TreeNode({ node, depth }: Props) {
   return (
     <div>
       <div
-        className={`group flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-xs transition-colors ${
+        className={`group flex cursor-pointer items-center gap-2 px-4 py-2 text-[11px] transition-colors ${
           isActive
-            ? 'bg-accent/10 text-accent border-r-2 border-accent'
-            : 'text-text-secondary hover:bg-surface-overlay hover:text-text-primary'
+            ? 'border-r-2 border-accent bg-accent/8 text-accent'
+            : 'text-text-secondary hover:bg-surface-writing hover:text-text-primary'
         }`}
-        style={{ paddingLeft: `${depth * 14 + 12}px` }}
+        style={{ paddingLeft: `${depth * 16 + 16}px` }}
         onClick={() => {
           if (node.type === 'entry') setActiveEntry(node.id);
           else setIsOpen(!isOpen);
@@ -99,7 +99,7 @@ export function TreeNode({ node, depth }: Props) {
         )}
 
         <button
-          className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-hot text-xs px-0.5 transition-opacity"
+          className="px-0.5 text-xs text-text-muted opacity-0 transition-opacity hover:text-hot group-hover:opacity-100"
           onClick={handleDelete}
           title="Delete"
         >

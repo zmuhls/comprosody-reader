@@ -40,6 +40,9 @@ export function useSpeechRecognition() {
   const { state, dispatch } = useRecording();
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const shouldRestartRef = useRef(false);
+  const isSupported =
+    typeof window !== 'undefined' &&
+    !!(window.SpeechRecognition || window.webkitSpeechRecognition);
 
   const start = useCallback(() => {
     const SpeechRecognition =
@@ -108,6 +111,7 @@ export function useSpeechRecognition() {
 
   return {
     isRecording: state.isRecording,
+    isSupported,
     start,
     stop,
     interimTranscript: state.session?.interimTranscript ?? '',

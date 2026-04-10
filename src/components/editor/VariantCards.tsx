@@ -30,30 +30,30 @@ export function VariantCards({ variants, onAccept }: Props) {
   if (variants.length === 0) return null;
 
   return (
-    <div className="border-t border-border p-4 bg-surface-raised">
-      <div className="text-[10px] text-text-muted mb-3 uppercase tracking-widest">
-        variants — click to accept
+    <div className="border-t border-border bg-surface px-5 py-4">
+      <div className="mb-3 text-[10px] uppercase tracking-[0.28em] text-text-muted">
+        variant passes
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid gap-3 xl:grid-cols-3">
         {variants.map((v) => {
           const style = LABEL_STYLES[v.label];
           return (
             <button
               key={v.label}
               onClick={() => onAccept(v)}
-              className={`text-left p-3 border ${style.border} ${style.bg} hover:border-opacity-100 transition-all rounded-sm`}
+              className={`border ${style.border} ${style.bg} p-4 text-left transition-all hover:-translate-y-px hover:border-opacity-100`}
             >
-              <div className="flex items-center justify-between mb-2">
+              <div className="mb-3 flex items-center justify-between">
                 <span
-                  className={`text-[10px] font-medium uppercase tracking-wider ${style.text}`}
+                  className={`text-[10px] font-medium uppercase tracking-[0.24em] ${style.text}`}
                 >
                   {v.label}
                 </span>
-                <span className="text-[9px] text-text-muted tabular-nums">
+                <span className="text-[9px] tabular-nums text-text-muted">
                   t={v.temperature}
                 </span>
               </div>
-              <p className="text-xs text-text-secondary line-clamp-4 leading-relaxed font-writing">
+              <p className="line-clamp-5 text-sm leading-relaxed text-text-secondary font-writing">
                 {v.text.slice(0, 300)}
                 {v.text.length > 300 ? '...' : ''}
               </p>

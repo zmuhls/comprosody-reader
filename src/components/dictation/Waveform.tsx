@@ -3,39 +3,83 @@ import { useRef, useEffect } from 'react';
 interface Props {
   drawWaveform: (canvas: HTMLCanvasElement, color?: string) => void;
   isRecording: boolean;
+  className?: string;
+  color?: string;
 }
 
-export function Waveform({ drawWaveform, isRecording }: Props) {
+function resizeCanvas(canvas: HTMLCanvasElement) {
+  const ratio = window.devicePixelRatio || 1;
+  const { width, height } = canvas.getBoundingClientRect();
+  canvas.width = Math.max(1, Math.floor(width * ratio));
+  canvas.height = Math.max(1, Math.floor(height * ratio));
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(ratio, ratio);
+}
+
+function drawIdle(canvas: HTMLCanvasElement) {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const { width, height } = canvas.getBoundingClientRect();
+  const center = height / 2;
+
+  ctx.clearRect(0, 0, width, height);
+
+  ctx.strokeStyle = 'rgba(19, 21, 23, 0.12)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, center);
+  ctx.lineTo(width, center);
+  ctx.stroke();
+
+  ctx.fillStyle = 'rgba(222, 124, 69, 0.16)';
+  const bars = 42;
+  const gap = width / bars;
+  for (let i = 0; i < bars; i++) {
+    const heightMod = i % 6 === 0 ? 18 : i % 3 === 0 ? 12 : 8;
+    const x = i * gap;
+    ctx.fillRect(x, center - heightMod / 2, Math.max(1.5, gap * 0.38), heightMod);
+  }
+}
+
+export function Waveform({
+  drawWaveform,
+  isRecording,
+  className,
+  color = '#de7c45',
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (isRecording && canvasRef.current) {
-      drawWaveform(canvasRef.current, '#c4935a');
-    }
-  }, [isRecording, drawWaveform]);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-  useEffect(() => {
-    if (!isRecording && canvasRef.current) {
-      const ctx = canvasRef.current.getContext('2d');
-      if (!ctx) return;
-      const { width, height } = canvasRef.current;
-      ctx.fillStyle = '#0e0d0b';
-      ctx.fillRect(0, 0, width, height);
-      ctx.strokeStyle = '#2e2a24';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, height / 2);
-      ctx.lineTo(width, height / 2);
-      ctx.stroke();
+    resizeCanvas(canvas);
+
+    const observer = new ResizeObserver(() => {
+      resizeCanvas(canvas);
+      if (!isRecording) {
+        drawIdle(canvas);
+      }
+    });
+    observer.observe(canvas);
+
+    if (isRecording) {
+      drawWaveform(canvas, color);
+    } else {
+      drawIdle(canvas);
     }
-  }, [isRecording]);
+
+    return () => observer.disconnect();
+  }, [isRecording, drawWaveform, color]);
 
   return (
     <canvas
       ref={canvasRef}
-      width={600}
-      height={64}
-      className="w-full h-16 rounded border border-border bg-surface"
+      className={className ?? 'h-20 w-full'}
     />
   );
 }

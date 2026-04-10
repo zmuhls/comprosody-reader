@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
 import { buildSystemPrompt, buildSelectionPrompt } from '../lib/prompts';
 import { streamRefinement, generateVariantsApi } from '../lib/claude';
@@ -10,13 +10,23 @@ export function useRefinement() {
   const [isRefining, setIsRefining] = useState(false);
   const [variants, setVariants] = useState<Variant[]>([]);
   const [isGeneratingVariants, setIsGeneratingVariants] = useState(false);
+  const [refinementError, setRefinementError] = useState<string | null>(null);
 
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
     : null;
 
+  useEffect(() => {
+    setVariants([]);
+    setRefinementError(null);
+  }, [activeEntry?.id]);
+
   const refine = useCallback(async () => {
     if (!activeEntry) return;
+    if (!activeEntry.rawTranscript.trim()) {
+      setRefinementError('Record or edit a transcript before refining.');
+      return;
+    }
 
     const systemPrompt = buildSystemPrompt(
       state.refinementSettings,
@@ -25,6 +35,7 @@ export function useRefinement() {
     );
 
     setIsRefining(true);
+    setRefinementError(null);
     let result = '';
 
     try {
@@ -41,6 +52,9 @@ export function useRefinement() {
         });
       }
     } catch (err) {
+      setRefinementError(
+        err instanceof Error ? err.message : 'Refinement failed'
+      );
       console.error('Refinement failed:', err);
     } finally {
       setIsRefining(false);
@@ -53,7 +67,10 @@ export function useRefinement() {
 
       const text = activeEntry.refinedText || activeEntry.rawTranscript;
       const selection = text.slice(selectionStart, selectionEnd);
-      if (!selection.trim()) return;
+      if (!selection.trim()) {
+        setRefinementError('Select text in the draft pane before refining a fragment.');
+        return;
+      }
 
       // Get surrounding context (one sentence before/after)
       const beforeText = text.slice(0, selectionStart);
@@ -73,6 +90,7 @@ export function useRefinement() {
       );
 
       setIsRefining(true);
+      setRefinementError(null);
       let refined = '';
 
       try {
@@ -93,6 +111,9 @@ export function useRefinement() {
           updates: { refinedText: newText },
         });
       } catch (err) {
+        setRefinementError(
+          err instanceof Error ? err.message : 'Selection refinement failed'
+        );
         console.error('Selection refinement failed:', err);
       } finally {
         setIsRefining(false);
@@ -103,6 +124,10 @@ export function useRefinement() {
 
   const generateVariants = useCallback(async () => {
     if (!activeEntry) return;
+    if (!activeEntry.rawTranscript.trim()) {
+      setRefinementError('Variants need transcript text to work from.');
+      return;
+    }
 
     const systemPrompt = buildSystemPrompt(
       state.refinementSettings,
@@ -112,6 +137,7 @@ export function useRefinement() {
 
     setIsGeneratingVariants(true);
     setVariants([]);
+    setRefinementError(null);
 
     try {
       const results = await generateVariantsApi({
@@ -124,6 +150,9 @@ export function useRefinement() {
       });
       setVariants(results as Variant[]);
     } catch (err) {
+      setRefinementError(
+        err instanceof Error ? err.message : 'Variant generation failed'
+      );
       console.error('Variant generation failed:', err);
     } finally {
       setIsGeneratingVariants(false);
@@ -145,6 +174,7 @@ export function useRefinement() {
 
   return {
     isRefining,
+    refinementError,
     refine,
     refineSelection,
     variants,

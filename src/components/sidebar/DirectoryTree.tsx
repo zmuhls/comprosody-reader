@@ -8,14 +8,14 @@ export function DirectoryTree() {
 
   if (tree.length === 0) {
     return (
-      <div className="px-3 py-6 text-text-muted text-xs text-center">
-        No entries yet. Create one to start.
+      <div className="px-5 py-8 text-sm text-text-muted">
+        No entries yet. Start a take or create a folder to begin organizing the draft space.
       </div>
     );
   }
 
   return (
-    <div className="py-1">
+    <div className="py-2">
       {tree.map((node) => (
         <TreeNode key={node.id} node={node} depth={0} />
       ))}

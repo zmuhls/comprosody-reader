@@ -13,9 +13,16 @@ export interface TranscriptionResult {
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+interface OpenRouterTranscriptionResponse {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+}
+
 export async function transcribe(
-  audioBuffer: Buffer,
-  _modelSize: string = 'base'
+  audioBuffer: Buffer
 ): Promise<TranscriptionResult> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY not set');
@@ -62,7 +69,7 @@ export async function transcribe(
     throw new Error(`Transcription error ${response.status}: ${err}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as OpenRouterTranscriptionResponse;
   const transcript = data.choices?.[0]?.message?.content?.trim() ?? '';
 
   if (!transcript) {

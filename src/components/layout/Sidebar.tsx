@@ -12,12 +12,15 @@ export function Sidebar() {
   }, []);
 
   return (
-    <aside className="w-52 flex-shrink-0 bg-surface-raised border-r border-border flex flex-col h-screen">
-      <div className="px-4 py-4 border-b border-border">
-        <h1 className="font-brand text-lg text-text-primary tracking-wide italic">
+    <aside className="flex h-screen w-64 flex-shrink-0 flex-col border-r border-border bg-surface/80 backdrop-blur-md">
+      <div className="border-b border-border px-5 py-5">
+        <div className="text-[10px] uppercase tracking-[0.32em] text-text-muted">
+          studio
+        </div>
+        <h1 className="mt-2 font-brand text-3xl italic text-text-primary">
           comprosody
         </h1>
-        <p className="text-[10px] font-ui text-text-muted mt-0.5 tracking-widest uppercase">
+        <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary">
           dictation to prose
         </p>
       </div>
@@ -28,10 +31,10 @@ export function Sidebar() {
         <DirectoryTree />
       </div>
 
-      <div className="border-t border-border px-4 py-2">
-        <span className="text-[10px] text-text-muted flex items-center gap-1.5">
+      <div className="border-t border-border px-5 py-4">
+        <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-muted">
           <span
-            className={`inline-block w-1.5 h-1.5 rounded-full ${
+            className={`inline-block h-2 w-2 ${
               serverOk === null
                 ? 'bg-text-muted'
                 : serverOk
