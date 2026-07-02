@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "diagnostic": "npx tsx scripts/prosody-pipeline-diagnostic.ts",
-    "server": "npx tsx --watch server/index.ts"
+    "server": "npx tsx --watch server/index.ts",
+    "server:prod": "NODE_ENV=production npx tsx server/index.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

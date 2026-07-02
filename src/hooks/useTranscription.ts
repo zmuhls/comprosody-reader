@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import { useRecording } from '../context/RecordingContext';
+import { useApp } from '../context/AppContext';
 
 interface TranscriptionWord {
   word: string;
@@ -15,9 +16,24 @@ interface TranscriptionResponse {
   error?: string;
 }
 
+function formatError(err: unknown): string {
+  return err instanceof Error ? err.message : 'Transcription failed';
+}
+
 export function useTranscription() {
-  const { dispatch } = useRecording();
+  const { dispatch: recordingDispatch } = useRecording();
+  const { dispatch: appDispatch } = useApp();
   const [isTranscribing, setIsTranscribing] = useState(false);
+
+  const setError = useCallback(
+    (message: string) => {
+      appDispatch({
+        type: 'SET_ERROR',
+        error: { id: crypto.randomUUID(), message, type: 'transcription' },
+      });
+    },
+    [appDispatch]
+  );
 
   const transcribe = useCallback(
     async (audioBlob: Blob) => {
@@ -31,7 +47,7 @@ export function useTranscription() {
         });
 
         if (!response.ok) {
-          const err = await response.json();
+          const err = await response.json().catch(() => ({}));
           throw new Error(err.error || `Transcription failed: ${response.status}`);
         }
 
@@ -39,10 +55,10 @@ export function useTranscription() {
 
         if (data.error) throw new Error(data.error);
 
-        dispatch({ type: 'SET_TRANSCRIPT', text: data.transcript });
+        recordingDispatch({ type: 'SET_TRANSCRIPT', text: data.transcript });
 
         for (const w of data.words) {
-          dispatch({
+          recordingDispatch({
             type: 'ADD_WORD_TIMESTAMP',
             word: w.word,
             start: w.start,
@@ -50,17 +66,18 @@ export function useTranscription() {
           });
         }
 
-        dispatch({ type: 'SET_AUDIO_BLOB', blob: audioBlob });
+        recordingDispatch({ type: 'SET_AUDIO_BLOB', blob: audioBlob });
 
         return data;
       } catch (err) {
         console.error('Transcription failed:', err);
+        setError(formatError(err));
         throw err;
       } finally {
         setIsTranscribing(false);
       }
     },
-    [dispatch]
+    [recordingDispatch, appDispatch, setError]
   );
 
   return { isTranscribing, transcribe };

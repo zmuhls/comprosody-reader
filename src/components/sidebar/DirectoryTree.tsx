@@ -1,8 +1,9 @@
+import { memo } from 'react';
 import { useStorage } from '../../hooks/useStorage';
 import { useDirectoryTree } from '../../hooks/useDirectoryTree';
 import { TreeNode } from './TreeNode';
 
-export function DirectoryTree() {
+export const DirectoryTree = memo(function DirectoryTree() {
   const { directories, entries } = useStorage();
   const tree = useDirectoryTree(directories, entries);
 
@@ -21,4 +22,4 @@ export function DirectoryTree() {
       ))}
     </div>
   );
-}
+});

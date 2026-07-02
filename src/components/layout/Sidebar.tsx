@@ -1,14 +1,27 @@
-import { useState, useEffect } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { DirectoryTree } from '../sidebar/DirectoryTree';
 import { EntryActions } from '../sidebar/EntryActions';
 
-export function Sidebar() {
+export const Sidebar = memo(function Sidebar() {
   const [serverOk, setServerOk] = useState<boolean | null>(null);
 
   useEffect(() => {
-    fetch('/api/health')
-      .then((r) => setServerOk(r.ok))
-      .catch(() => setServerOk(false));
+    let cancelled = false;
+    const check = () => {
+      fetch('/api/health')
+        .then((r) => {
+          if (!cancelled) setServerOk(r.ok);
+        })
+        .catch(() => {
+          if (!cancelled) setServerOk(false);
+        });
+    };
+    check();
+    const id = setInterval(check, 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   return (
@@ -39,4 +52,4 @@ export function Sidebar() {
       </div>
     </aside>
   );
-}
+});

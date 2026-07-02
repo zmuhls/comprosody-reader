@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import type { TreeNode as TreeNodeType } from '../../hooks/useDirectoryTree';
 import { useStorage } from '../../hooks/useStorage';
 
@@ -7,7 +7,7 @@ interface Props {
   depth: number;
 }
 
-export function TreeNode({ node, depth }: Props) {
+export const TreeNode = memo(function TreeNode({ node, depth }: Props) {
   const [isOpen, setIsOpen] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(node.name);
@@ -81,6 +81,7 @@ export function TreeNode({ node, depth }: Props) {
           className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-hot text-xs px-1 transition-opacity"
           onClick={handleDelete}
           title="Delete"
+          aria-label={`Delete ${node.type} ${node.name}`}
         >
           \u00D7
         </button>
@@ -95,4 +96,4 @@ export function TreeNode({ node, depth }: Props) {
       )}
     </div>
   );
-}
+});

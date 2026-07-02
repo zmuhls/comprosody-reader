@@ -1,24 +1,34 @@
+import { memo } from 'react';
 import { useApp } from '../../context/AppContext';
-import { useRefinement } from '../../hooks/useRefinement';
 import { GENRES, SCALES } from '../../constants';
 import type { GenreRegister, Scale } from '../../types/llm';
 
 interface Props {
   onRefineSelection: () => void;
   hasSelection: boolean;
+  isRefining: boolean;
+  isGeneratingVariants: boolean;
+  onRefine: () => void;
+  onGenerateVariants: () => void;
 }
 
-export function Toolbar({ onRefineSelection, hasSelection }: Props) {
+export const Toolbar = memo(function Toolbar({
+  onRefineSelection,
+  hasSelection,
+  isRefining,
+  isGeneratingVariants,
+  onRefine,
+  onGenerateVariants,
+}: Props) {
   const { state, dispatch } = useApp();
-  const { isRefining, refine, isGeneratingVariants, generateVariants } =
-    useRefinement();
   const { refinementSettings } = state;
   const hasEntry = !!state.activeEntryId;
   const canRefine = hasEntry && !isRefining && !isGeneratingVariants;
+  const canUndo = state.historyIndex > 0;
+  const canRedo = state.historyIndex < state.history.length - 1;
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 border-b border-border bg-surface-raised flex-wrap">
-      {/* Genre */}
       <select
         value={refinementSettings.genre}
         onChange={(e) =>
@@ -36,7 +46,6 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
         ))}
       </select>
 
-      {/* Scale */}
       <select
         value={refinementSettings.scale}
         onChange={(e) =>
@@ -54,7 +63,6 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
         ))}
       </select>
 
-      {/* Temperature */}
       <div className="flex items-center gap-1">
         <span className="text-[9px] text-text-muted">temp</span>
         <input
@@ -76,11 +84,31 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
         </span>
       </div>
 
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => dispatch({ type: 'UNDO' })}
+          disabled={!canUndo}
+          className="text-[10px] px-2 py-1 text-text-secondary hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label="Undo"
+          title="Undo"
+        >
+          \u21B6 undo
+        </button>
+        <button
+          onClick={() => dispatch({ type: 'REDO' })}
+          disabled={!canRedo}
+          className="text-[10px] px-2 py-1 text-text-secondary hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label="Redo"
+          title="Redo"
+        >
+          redo \u21B7
+        </button>
+      </div>
+
       <div className="flex-1" />
 
-      {/* Actions */}
       <button
-        onClick={refine}
+        onClick={onRefine}
         disabled={!canRefine}
         className="text-[10px] px-3 py-1 bg-accent text-white hover:bg-accent-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
       >
@@ -96,7 +124,7 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
       </button>
 
       <button
-        onClick={generateVariants}
+        onClick={onGenerateVariants}
         disabled={!canRefine}
         className="text-[10px] px-3 py-1 bg-surface-overlay text-text-secondary hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
       >
@@ -104,4 +132,4 @@ export function Toolbar({ onRefineSelection, hasSelection }: Props) {
       </button>
     </div>
   );
-}
+});

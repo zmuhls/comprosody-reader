@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { ProsodyDiagnostics } from '../../types/audio';
 
 interface Props {
@@ -34,7 +35,18 @@ function Gauge({
   );
 }
 
-export function ProsodyPanel({ prosody }: Props) {
+function propsEqual(prev: Props, next: Props): boolean {
+  const a = prev.prosody;
+  const b = next.prosody;
+  return (
+    a.pace === b.pace &&
+    a.energy === b.energy &&
+    a.fluency === b.fluency &&
+    a.lexicalDensity === b.lexicalDensity
+  );
+}
+
+export const ProsodyPanel = memo(function ProsodyPanel({ prosody }: Props) {
   return (
     <div className="flex flex-col gap-1.5 p-3 bg-surface-raised rounded border border-border">
       <Gauge
@@ -67,4 +79,4 @@ export function ProsodyPanel({ prosody }: Props) {
       />
     </div>
   );
-}
+}, propsEqual);

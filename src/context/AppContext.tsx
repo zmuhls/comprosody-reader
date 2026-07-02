@@ -3,6 +3,7 @@ import {
   useContext,
   useReducer,
   useEffect,
+  useRef,
   type ReactNode,
   type Dispatch,
 } from 'react';
@@ -16,45 +17,81 @@ import {
   saveDirectories,
 } from '../lib/storage';
 
+export interface AppError {
+  id: string;
+  message: string;
+  type: 'transcription' | 'refinement' | 'network' | 'generic';
+}
+
 export interface AppState {
   entries: Record<string, Entry>;
   directories: Record<string, Directory>;
   activeEntryId: string | null;
   refinementSettings: RefinementSettings;
+  errors: AppError[];
+  history: Record<string, Entry>[];
+  historyIndex: number;
 }
 
 export type AppAction =
   | { type: 'SET_ACTIVE_ENTRY'; id: string | null }
   | { type: 'CREATE_ENTRY'; entry: Entry }
-  | { type: 'UPDATE_ENTRY'; id: string; updates: Partial<Entry> }
+  | { type: 'UPDATE_ENTRY'; id: string; updates: Partial<Entry>; recordHistory?: boolean }
   | { type: 'DELETE_ENTRY'; id: string }
   | { type: 'CREATE_DIRECTORY'; directory: Directory }
   | { type: 'RENAME_DIRECTORY'; id: string; name: string }
   | { type: 'DELETE_DIRECTORY'; id: string }
   | { type: 'UPDATE_REFINEMENT_SETTINGS'; settings: Partial<RefinementSettings> }
-  | { type: 'RENAME_ENTRY'; id: string; name: string };
+  | { type: 'RENAME_ENTRY'; id: string; name: string }
+  | { type: 'SET_ERROR'; error: AppError }
+  | { type: 'CLEAR_ERROR'; id: string }
+  | { type: 'UNDO' }
+  | { type: 'REDO' };
+
+const HISTORY_LIMIT = 30;
+
+function recordHistory(
+  state: AppState,
+  nextEntries: Record<string, Entry>
+): { history: Record<string, Entry>[]; historyIndex: number } {
+  const history = state.history.slice(0, state.historyIndex + 1);
+  // Ensure the previous current state is captured before the new one.
+  if (history.length === 0 || history[history.length - 1] !== state.entries) {
+    history.push(state.entries);
+  }
+  history.push(nextEntries);
+  while (history.length > HISTORY_LIMIT) {
+    history.shift();
+  }
+  return { history, historyIndex: history.length - 1 };
+}
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'SET_ACTIVE_ENTRY':
       return { ...state, activeEntryId: action.id };
 
-    case 'CREATE_ENTRY':
+    case 'CREATE_ENTRY': {
+      const nextEntries = { ...state.entries, [action.entry.id]: action.entry };
       return {
         ...state,
-        entries: { ...state.entries, [action.entry.id]: action.entry },
+        entries: nextEntries,
         activeEntryId: action.entry.id,
+        ...recordHistory(state, nextEntries),
       };
+    }
 
     case 'UPDATE_ENTRY': {
       const existing = state.entries[action.id];
       if (!existing) return state;
+      const nextEntries = {
+        ...state.entries,
+        [action.id]: { ...existing, ...action.updates, updatedAt: Date.now() },
+      };
       return {
         ...state,
-        entries: {
-          ...state.entries,
-          [action.id]: { ...existing, ...action.updates, updatedAt: Date.now() },
-        },
+        entries: nextEntries,
+        ...(action.recordHistory !== false ? recordHistory(state, nextEntries) : {}),
       };
     }
 
@@ -64,6 +101,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         entries: rest,
         activeEntryId: state.activeEntryId === action.id ? null : state.activeEntryId,
+        ...recordHistory(state, rest),
       };
     }
 
@@ -89,20 +127,30 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case 'DELETE_DIRECTORY': {
-      const { [action.id]: _, ...restDirs } = state.directories;
-      // Also delete entries in this directory
+      const idsToRemove = collectDescendantDirectoryIds(action.id, state.directories);
+      idsToRemove.add(action.id);
+
+      const restDirs: Record<string, Directory> = {};
+      for (const [id, dir] of Object.entries(state.directories)) {
+        if (!idsToRemove.has(id)) restDirs[id] = dir;
+      }
+
       const restEntries: Record<string, Entry> = {};
       for (const [id, entry] of Object.entries(state.entries)) {
-        if (entry.parentId !== action.id) restEntries[id] = entry;
+        if (!idsToRemove.has(entry.parentId ?? '')) restEntries[id] = entry;
       }
+
+      const nextActive =
+        state.activeEntryId && !restEntries[state.activeEntryId]
+          ? null
+          : state.activeEntryId;
+
       return {
         ...state,
         directories: restDirs,
         entries: restEntries,
-        activeEntryId:
-          state.activeEntryId && !restEntries[state.activeEntryId]
-            ? null
-            : state.activeEntryId,
+        activeEntryId: nextActive,
+        ...recordHistory(state, restEntries),
       };
     }
 
@@ -115,18 +163,66 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'RENAME_ENTRY': {
       const entry = state.entries[action.id];
       if (!entry) return state;
+      const nextEntries = {
+        ...state.entries,
+        [action.id]: { ...entry, name: action.name, updatedAt: Date.now() },
+      };
       return {
         ...state,
-        entries: {
-          ...state.entries,
-          [action.id]: { ...entry, name: action.name, updatedAt: Date.now() },
-        },
+        entries: nextEntries,
+        ...recordHistory(state, nextEntries),
       };
     }
+
+    case 'SET_ERROR':
+      return {
+        ...state,
+        errors: [...state.errors, action.error],
+      };
+
+    case 'CLEAR_ERROR':
+      return {
+        ...state,
+        errors: state.errors.filter((e) => e.id !== action.id),
+      };
+
+    case 'UNDO':
+      if (state.historyIndex <= 0) return state;
+      return {
+        ...state,
+        entries: state.history[state.historyIndex - 1],
+        historyIndex: state.historyIndex - 1,
+      };
+
+    case 'REDO':
+      if (state.historyIndex >= state.history.length - 1) return state;
+      return {
+        ...state,
+        entries: state.history[state.historyIndex + 1],
+        historyIndex: state.historyIndex + 1,
+      };
 
     default:
       return state;
   }
+}
+
+function collectDescendantDirectoryIds(
+  rootId: string,
+  directories: Record<string, Directory>
+): Set<string> {
+  const ids = new Set<string>();
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    for (const dir of Object.values(directories)) {
+      if (dir.parentId === current) {
+        ids.add(dir.id);
+        queue.push(dir.id);
+      }
+    }
+  }
+  return ids;
 }
 
 function createInitialState(): AppState {
@@ -139,6 +235,9 @@ function createInitialState(): AppState {
       scale: 'sentence',
       temperature: 0.5,
     },
+    errors: [],
+    history: [],
+    historyIndex: -1,
   };
 }
 
@@ -147,18 +246,48 @@ const AppContext = createContext<{
   dispatch: Dispatch<AppAction>;
 } | null>(null);
 
+function useDebouncedSaver<T>(
+  value: T,
+  save: (value: T) => void,
+  delayMs: number = 500
+): void {
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedRef = useRef<string>('');
+
+  useEffect(() => {
+    const serialized = JSON.stringify(value);
+    if (serialized === lastSavedRef.current) return;
+
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    timeoutRef.current = setTimeout(() => {
+      save(value);
+      lastSavedRef.current = serialized;
+      timeoutRef.current = null;
+    }, delayMs);
+
+    const handleBeforeUnload = () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        save(value);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [value, save, delayMs]);
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, null, createInitialState);
 
-  // Persist entries to localStorage on change
-  useEffect(() => {
-    saveEntries(state.entries);
-  }, [state.entries]);
-
-  // Persist directories to localStorage on change
-  useEffect(() => {
-    saveDirectories(state.directories);
-  }, [state.directories]);
+  useDebouncedSaver(state.entries, saveEntries, 500);
+  useDebouncedSaver(state.directories, saveDirectories, 500);
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>
@@ -180,8 +309,8 @@ export function newEntry(parentId: string | null): Entry {
     parentId,
     rawTranscript: '',
     refinedText: '',
-    prosody: defaultProsody,
-    voiceConfig: defaultVoiceConfig,
+    prosody: { ...defaultProsody },
+    voiceConfig: { ...defaultVoiceConfig },
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };

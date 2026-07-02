@@ -16,6 +16,48 @@ interface VariantsBody {
   temperatures: Array<{ label: string; temperature: number }>;
 }
 
+const DEFAULT_TIMEOUT_MS = 120_000;
+
+function validateRefineBody(body: unknown): body is RefineBody {
+  if (typeof body !== 'object' || body === null) return false;
+  const b = body as Partial<RefineBody>;
+  return (
+    typeof b.systemPrompt === 'string' &&
+    typeof b.userMessage === 'string' &&
+    typeof b.temperature === 'number' &&
+    b.temperature >= 0 &&
+    b.temperature <= 1
+  );
+}
+
+function validateVariantsBody(body: unknown): body is VariantsBody {
+  if (typeof body !== 'object' || body === null) return false;
+  const b = body as Partial<VariantsBody>;
+  if (
+    typeof b.systemPrompt !== 'string' ||
+    typeof b.userMessage !== 'string' ||
+    !Array.isArray(b.temperatures)
+  ) {
+    return false;
+  }
+  return b.temperatures.every(
+    (t) =>
+      typeof t === 'object' &&
+      t !== null &&
+      typeof (t as { label?: unknown }).label === 'string' &&
+      typeof (t as { temperature?: unknown }).temperature === 'number' &&
+      (t as { temperature: number }).temperature >= 0 &&
+      (t as { temperature: number }).temperature <= 1
+  );
+}
+
+function createAbortController(timeoutMs: number): AbortController {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
+  return controller;
+}
+
 function classifyError(err: unknown): { status: number; message: string } {
   if (err instanceof Anthropic.RateLimitError) {
     return { status: 429, message: 'Rate limited — retry shortly' };
@@ -29,6 +71,9 @@ function classifyError(err: unknown): { status: number; message: string } {
   if (err instanceof Anthropic.APIError) {
     return { status: err.status ?? 500, message: err.message };
   }
+  if (err instanceof Error && err.name === 'AbortError') {
+    return { status: 504, message: 'Refinement request timed out' };
+  }
   return {
     status: 500,
     message: err instanceof Error ? err.message : 'Unknown error',
@@ -36,17 +81,29 @@ function classifyError(err: unknown): { status: number; message: string } {
 }
 
 refineRouter.post('/refine', async (req, res) => {
-  const { systemPrompt, userMessage, temperature } = req.body as RefineBody;
+  if (!validateRefineBody(req.body)) {
+    res.status(400).json({ error: 'Invalid request body' });
+    return;
+  }
+
+  const { systemPrompt, userMessage, temperature } = req.body;
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+
+  const controller = createAbortController(DEFAULT_TIMEOUT_MS);
+
+  req.on('close', () => {
+    controller.abort();
+  });
 
   try {
     for await (const chunk of streamRefinement({
       systemPrompt,
       userMessage,
       temperature,
+      signal: controller.signal,
     })) {
       res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
     }
@@ -59,10 +116,16 @@ refineRouter.post('/refine', async (req, res) => {
 });
 
 refineRouter.post('/refine/complete', async (req, res) => {
-  const { systemPrompt, userMessage, temperature } = req.body as RefineBody;
+  if (!validateRefineBody(req.body)) {
+    res.status(400).json({ error: 'Invalid request body' });
+    return;
+  }
+
+  const { systemPrompt, userMessage, temperature } = req.body;
+  const controller = createAbortController(DEFAULT_TIMEOUT_MS);
 
   try {
-    const text = await refineComplete({ systemPrompt, userMessage, temperature });
+    const text = await refineComplete({ systemPrompt, userMessage, temperature, signal: controller.signal });
     res.json({ text });
   } catch (err) {
     const { status, message } = classifyError(err);
@@ -71,21 +134,35 @@ refineRouter.post('/refine/complete', async (req, res) => {
 });
 
 refineRouter.post('/variants', async (req, res) => {
-  const { systemPrompt, userMessage, temperatures } = req.body as VariantsBody;
+  if (!validateVariantsBody(req.body)) {
+    res.status(400).json({ error: 'Invalid request body' });
+    return;
+  }
+
+  const { systemPrompt, userMessage, temperatures } = req.body;
+  const controllers: AbortController[] = [];
+
+  req.on('close', () => {
+    controllers.forEach((c) => c.abort());
+  });
 
   try {
-    const results = await Promise.all(
-      temperatures.map(async ({ label, temperature }) => {
-        const text = await refineComplete({
-          systemPrompt,
-          userMessage,
-          temperature,
-        });
-        return { label, temperature, text };
-      })
-    );
+    // Sequential generation to avoid tripling rate-limit exposure
+    const results: Array<{ label: string; temperature: number; text: string }> = [];
+    for (const { label, temperature } of temperatures) {
+      const controller = createAbortController(DEFAULT_TIMEOUT_MS);
+      controllers.push(controller);
+      const text = await refineComplete({
+        systemPrompt,
+        userMessage,
+        temperature,
+        signal: controller.signal,
+      });
+      results.push({ label, temperature, text });
+    }
     res.json({ variants: results });
   } catch (err) {
+    controllers.forEach((c) => c.abort());
     const { status, message } = classifyError(err);
     res.status(status).json({ error: message });
   }

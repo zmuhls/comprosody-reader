@@ -11,26 +11,58 @@ function getClient(): Anthropic {
   return client;
 }
 
-export async function* streamRefinement(params: {
+function getModel(): string {
+  return process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+}
+
+function getMaxTokens(): number {
+  const parsed = parseInt(process.env.ANTHROPIC_MAX_TOKENS || '8192', 10);
+  return Number.isNaN(parsed) || parsed <= 0 ? 8192 : parsed;
+}
+
+function buildThinkingConfig(maxTokens: number):
+  | { type: 'enabled'; budget_tokens: number }
+  | undefined {
+  const flag = process.env.ANTHROPIC_THINKING;
+  if (flag === '0' || flag === 'false' || flag === 'off') return undefined;
+  // Claude 3.7+ supports extended thinking via type: 'enabled'.
+  // budget_tokens must be < max_tokens and >= 1024.
+  const budget = Math.min(4096, Math.max(1024, Math.floor(maxTokens / 4)));
+  return { type: 'enabled', budget_tokens: budget };
+}
+
+interface RefineParams {
   systemPrompt: string;
   userMessage: string;
   temperature: number;
-}): AsyncGenerator<string, void, undefined> {
-  const anthropic = getClient();
+  signal?: AbortSignal;
+}
 
-  const stream = anthropic.messages.stream({
-    model: 'claude-opus-4-6',
-    max_tokens: 64000,
+function buildRequestBody(params: RefineParams) {
+  const maxTokens = getMaxTokens();
+  const thinking = buildThinkingConfig(maxTokens);
+  return {
+    model: getModel(),
+    max_tokens: maxTokens,
     temperature: params.temperature,
-    thinking: { type: 'adaptive' },
     system: [
       {
-        type: 'text',
+        type: 'text' as const,
         text: params.systemPrompt,
-        cache_control: { type: 'ephemeral' },
+        cache_control: { type: 'ephemeral' as const },
       },
     ],
-    messages: [{ role: 'user', content: params.userMessage }],
+    messages: [{ role: 'user' as const, content: params.userMessage }],
+    ...(thinking ? { thinking } : {}),
+  };
+}
+
+export async function* streamRefinement(
+  params: RefineParams
+): AsyncGenerator<string, void, undefined> {
+  const anthropic = getClient();
+  const stream = anthropic.messages.stream(buildRequestBody(params), {
+    signal: params.signal,
   });
 
   for await (const event of stream) {
@@ -43,29 +75,12 @@ export async function* streamRefinement(params: {
   }
 }
 
-export async function refineComplete(params: {
-  systemPrompt: string;
-  userMessage: string;
-  temperature: number;
-}): Promise<string> {
+export async function refineComplete(params: RefineParams): Promise<string> {
   const anthropic = getClient();
-
-  const stream = anthropic.messages.stream({
-    model: 'claude-opus-4-6',
-    max_tokens: 16000,
-    temperature: params.temperature,
-    thinking: { type: 'adaptive' },
-    system: [
-      {
-        type: 'text',
-        text: params.systemPrompt,
-        cache_control: { type: 'ephemeral' },
-      },
-    ],
-    messages: [{ role: 'user', content: params.userMessage }],
-  });
-
-  const response = await stream.finalMessage();
+  const response = await anthropic.messages.create(
+    buildRequestBody(params),
+    { signal: params.signal }
+  );
 
   return response.content
     .filter((block): block is Anthropic.TextBlock => block.type === 'text')

@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import { useRecording } from '../context/RecordingContext';
 import {
   computeWpm,
@@ -6,12 +6,18 @@ import {
   computeFluency,
   computeLexicalDensity,
 } from '../lib/comprosody';
+import type { ProsodyDiagnostics } from '../types/audio';
+import { defaultProsody } from '../types/audio';
 
 export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | null) {
   const { state, dispatch } = useRecording();
   const intervalRef = useRef<number>(0);
   const lastSpeechTimeRef = useRef<number>(Date.now());
   const pauseStartRef = useRef<number | null>(null);
+
+  // Local state for live prosody — avoids dispatching to context every 500ms
+  // which would re-render all RecordingContext consumers.
+  const [liveProsody, setLiveProsody] = useState<ProsodyDiagnostics>(defaultProsody);
 
   const update = useCallback(() => {
     if (!state.session) return;
@@ -53,10 +59,7 @@ export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | nu
     const fluency = computeFluency(state.session.pauses, elapsed);
     const lexicalDensity = computeLexicalDensity(fullText);
 
-    dispatch({
-      type: 'UPDATE_PROSODY',
-      prosody: { pace, energy, fluency, lexicalDensity },
-    });
+    setLiveProsody({ pace, energy, fluency, lexicalDensity });
   }, [state.session, getTimeDomainData, dispatch]);
 
   useEffect(() => {
@@ -69,6 +72,10 @@ export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | nu
         clearInterval(intervalRef.current);
         intervalRef.current = 0;
       }
+      // When recording stops, finalize prosody into context once
+      if (liveProsody.pace > 0 || liveProsody.energy > 0 || liveProsody.fluency !== 1) {
+        dispatch({ type: 'FINALIZE_PROSODY', prosody: liveProsody });
+      }
     }
     return () => {
       if (intervalRef.current) {
@@ -76,7 +83,8 @@ export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | nu
         intervalRef.current = 0;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.isRecording, update]);
 
-  return state.prosody;
+  return liveProsody;
 }
