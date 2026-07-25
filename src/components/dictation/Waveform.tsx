@@ -20,9 +20,8 @@ export function Waveform({ drawWaveform, isRecording }: Props) {
       const ctx = canvasRef.current.getContext('2d');
       if (!ctx) return;
       const { width, height } = canvasRef.current;
-      ctx.fillStyle = 'rgba(10, 10, 15, 1)';
-      ctx.fillRect(0, 0, width, height);
-      ctx.strokeStyle = '#2a2a3a';
+      ctx.clearRect(0, 0, width, height);
+      ctx.strokeStyle = '#d2d2ce';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, height / 2);
@@ -35,8 +34,10 @@ export function Waveform({ drawWaveform, isRecording }: Props) {
     <canvas
       ref={canvasRef}
       width={600}
-      height={80}
-      className="w-full h-20 rounded border border-border bg-surface"
+      height={42}
+      className="record-waveform"
+      aria-label={isRecording ? 'Live microphone waveform' : 'Microphone idle'}
+      role="img"
     />
   );
 }

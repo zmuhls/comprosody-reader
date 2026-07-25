@@ -1,138 +1,319 @@
-import { useRef, useCallback } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useApp } from '../../context/AppContext';
 import { useRecording } from '../../context/RecordingContext';
-import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 import { useAudioAnalyser } from '../../hooks/useAudioAnalyser';
 import { useMediaRecorder } from '../../hooks/useMediaRecorder';
 import { useTranscription } from '../../hooks/useTranscription';
 import { useProsody } from '../../hooks/useProsody';
-import { RecordButton } from '../dictation/RecordButton';
-import { Waveform } from '../dictation/Waveform';
-import { ProsodyPanel } from '../dictation/ProsodyPanel';
-import { VoiceConfigToggles } from '../dictation/VoiceConfigToggles';
+import { useRefinement } from '../../hooks/useRefinement';
+import {
+  appendProsodySnapshot,
+  appendRecordingTranscript,
+} from '../../lib/recordingDocument';
+import { completeTranscriptProsody } from '../../lib/comprosody';
+import { selectTranscriptionHints } from '../../lib/voiceProfile';
+import type { TranscriptionProviderId } from '../../types/transcription';
 import { Editor } from '../editor/Editor';
 
-export function MainPanel() {
-  const { state, dispatch } = useApp();
-  const { state: recState } = useRecording();
-  const speech = useSpeechRecognition();
+interface MainPanelProps {
+  onOpenSidebar: () => void;
+}
+
+const PROVIDER_STORAGE_KEY = 'cadence:transcription-provider';
+
+interface RecordingTarget {
+  entryId: string;
+  provider: TranscriptionProviderId;
+  keyterms: readonly string[];
+}
+
+function initialProvider(): TranscriptionProviderId {
+  try {
+    return localStorage.getItem(PROVIDER_STORAGE_KEY) === 'elevenlabs'
+      ? 'elevenlabs'
+      : 'local';
+  } catch {
+    return 'local';
+  }
+}
+
+export function MainPanel({ onOpenSidebar }: MainPanelProps) {
+  const { state, dispatch, voiceProfile } = useApp();
+  const { state: recordingState, dispatch: recordingDispatch } = useRecording();
+  const [provider, setProvider] = useState<TranscriptionProviderId>(initialProvider);
   const audio = useAudioAnalyser();
   const recorder = useMediaRecorder();
-  const { isTranscribing, transcribe } = useTranscription();
   const prosody = useProsody(audio.getTimeDomainData);
+  const refinement = useRefinement();
 
-  // Keep a ref to the stream so MediaRecorder can share it with AudioAnalyser
+  const keyterms = useMemo(() => {
+    const hints = selectTranscriptionHints(voiceProfile, {
+      maxTerms: 60,
+      maxPhrases: 40,
+      minTermCount: 2,
+      minPhraseCount: 2,
+    });
+    return [...hints.terms, ...hints.phrases];
+  }, [voiceProfile]);
+
+  const { isTranscribing, transcribe } = useTranscription({
+    provider,
+    keyterms,
+  });
+
   const streamRef = useRef<MediaStream | null>(null);
+  const recordingTargetRef = useRef<RecordingTarget | null>(null);
+  const stateRef = useRef(state);
 
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
     : null;
 
-  const handleStart = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef.current = stream;
+  useLayoutEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
-    // Start all capture layers on the same stream
-    await audio.start(stream);
-    recorder.start(stream);
-    speech.start();
-  }, [audio, recorder, speech]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(PROVIDER_STORAGE_KEY, provider);
+    } catch {
+      // Provider selection remains in memory if storage is unavailable.
+    }
+  }, [provider]);
+
+  useEffect(() => {
+    const target = recordingTargetRef.current;
+    if (target && !state.entries[target.entryId]) {
+      recordingTargetRef.current = null;
+    }
+  }, [state.entries]);
+
+  const setRecordingError = useCallback(
+    (error: unknown) => {
+      dispatch({
+        type: 'SET_ERROR',
+        error: {
+          id: crypto.randomUUID(),
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Microphone access could not be started.',
+          type: 'transcription',
+        },
+      });
+    },
+    [dispatch],
+  );
+
+  const handleStart = useCallback(async () => {
+    if (
+      !activeEntry ||
+      recordingTargetRef.current ||
+      recordingState.isRecording ||
+      isTranscribing
+    ) {
+      return;
+    }
+
+    const target: RecordingTarget = {
+      entryId: activeEntry.id,
+      provider,
+      keyterms: [...keyterms],
+    };
+    recordingTargetRef.current = target;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      if (
+        recordingTargetRef.current !== target ||
+        !stateRef.current.entries[target.entryId]
+      ) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+
+      streamRef.current = stream;
+      recordingDispatch({ type: 'START_RECORDING', startedAt: Date.now() });
+      await audio.start(stream);
+      recorder.start(stream);
+    } catch (error) {
+      audio.stop();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      if (recordingTargetRef.current === target) {
+        recordingTargetRef.current = null;
+      }
+      recordingDispatch({ type: 'STOP_RECORDING' });
+      setRecordingError(error);
+    }
+  }, [
+    activeEntry,
+    audio,
+    isTranscribing,
+    keyterms,
+    provider,
+    recorder,
+    recordingDispatch,
+    recordingState.isRecording,
+    setRecordingError,
+  ]);
 
   const handleStop = useCallback(async () => {
-    speech.stop();
-    const audioBlob = await recorder.stop();
-    audio.stop();
+    if (!recordingState.isRecording) return;
 
-    // Stop the shared media stream tracks
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
+    const target = recordingTargetRef.current;
+    const stoppedAt = Date.now();
+    const recordingDurationMs = recordingState.session
+      ? Math.max(0, stoppedAt - recordingState.session.startedAt)
+      : 0;
+    const capturedProsody = { ...prosody };
+    const capturedVoiceConfig = { ...recordingState.voiceConfig };
+    recordingDispatch({ type: 'STOP_RECORDING' });
+    let audioBlob: Blob;
+
+    try {
+      audioBlob = await recorder.stop();
+    } catch (error) {
+      setRecordingError(error);
+      if (recordingTargetRef.current === target) {
+        recordingTargetRef.current = null;
+      }
+      return;
+    } finally {
+      audio.stop();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
 
-    // Save live prosody + voice config immediately
-    if (activeEntry && recState.session) {
+    if (!target || !stateRef.current.entries[target.entryId]) {
+      if (recordingTargetRef.current === target) {
+        recordingTargetRef.current = null;
+      }
+      return;
+    }
+
+    let snapshotSaved = false;
+    const saveSnapshot = (
+      metrics: typeof capturedProsody,
+      entry = stateRef.current.entries[target.entryId],
+    ) => {
+      if (!entry) return;
       dispatch({
         type: 'UPDATE_ENTRY',
-        id: activeEntry.id,
+        id: target.entryId,
         updates: {
-          prosody: { ...prosody },
-          voiceConfig: { ...recState.voiceConfig },
+          prosody: { ...metrics },
+          prosodyHistory: appendProsodySnapshot(
+            entry.prosodyHistory,
+            metrics,
+            stoppedAt,
+          ),
+          voiceConfig: capturedVoiceConfig,
         },
       });
-    }
+      recordingDispatch({ type: 'FINALIZE_PROSODY', prosody: metrics });
+      snapshotSaved = true;
+    };
 
-    // Send to Whisper for real transcription
-    if (activeEntry && audioBlob.size > 0) {
-      try {
-        const result = await transcribe(audioBlob);
-        dispatch({
-          type: 'UPDATE_ENTRY',
-          id: activeEntry.id,
-          updates: {
-            rawTranscript: activeEntry.rawTranscript
-              ? activeEntry.rawTranscript + '\n\n' + result.transcript
-              : result.transcript,
-          },
+    try {
+      if (audioBlob.size === 0) {
+        saveSnapshot(capturedProsody);
+        return;
+      }
+
+      const result = await transcribe(audioBlob, {
+        provider: target.provider,
+        keyterms: target.keyterms,
+      });
+      const transcript = result.transcript.trim();
+      if (!transcript) {
+        saveSnapshot(capturedProsody);
+        return;
+      }
+
+      const latestEntry = stateRef.current.entries[target.entryId];
+      if (!latestEntry) return;
+
+      const appended = appendRecordingTranscript(latestEntry, transcript);
+      const correctedProsody = completeTranscriptProsody(
+        capturedProsody,
+        transcript,
+        recordingDurationMs,
+      );
+      dispatch({
+        type: 'UPDATE_ENTRY',
+        id: target.entryId,
+        updates: {
+          rawTranscript: appended.rawTranscript,
+          refinedText: appended.documentText,
+          prosody: correctedProsody,
+          prosodyHistory: appendProsodySnapshot(
+            latestEntry.prosodyHistory,
+            correctedProsody,
+            stoppedAt,
+          ),
+          voiceConfig: capturedVoiceConfig,
+        },
+      });
+      recordingDispatch({
+        type: 'FINALIZE_PROSODY',
+        prosody: correctedProsody,
+      });
+      snapshotSaved = true;
+
+      if (stateRef.current.refinementSettings.autoRefine !== false) {
+        await refinement.refine({
+          entryId: target.entryId,
+          mode: 'faithful',
+          sourceText: appended.documentText,
+          autoTriggered: true,
         });
-      } catch {
-        // Whisper failed — fall back to Web Speech API transcript
-        const fallbackText = recState.session?.finalTranscript ?? '';
-        if (fallbackText) {
-          dispatch({
-            type: 'UPDATE_ENTRY',
-            id: activeEntry.id,
-            updates: {
-              rawTranscript: activeEntry.rawTranscript
-                ? activeEntry.rawTranscript + '\n\n' + fallbackText
-                : fallbackText,
-            },
-          });
-        }
+      }
+    } catch {
+      // useTranscription reports the request error. The unverified speech is
+      // deliberately not inserted or reconstructed through a cloud fallback.
+      if (!snapshotSaved) saveSnapshot(capturedProsody);
+    } finally {
+      if (recordingTargetRef.current === target) {
+        recordingTargetRef.current = null;
       }
     }
-  }, [speech, recorder, audio, activeEntry, recState, prosody, dispatch, transcribe]);
+  }, [
+    audio,
+    dispatch,
+    prosody,
+    recorder,
+    recordingDispatch,
+    recordingState,
+    refinement,
+    setRecordingError,
+    transcribe,
+  ]);
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 min-w-0">
-      {/* Recording controls */}
-      <div className="border-b border-border bg-surface-raised">
-        <div className="flex items-center gap-4 px-4 py-3">
-          <RecordButton
-            isRecording={speech.isRecording}
-            isTranscribing={isTranscribing}
-            onStart={handleStart}
-            onStop={handleStop}
-          />
-          <div className="flex-1 min-w-0">
-            <Waveform
-              drawWaveform={audio.drawWaveform}
-              isRecording={speech.isRecording}
-            />
-          </div>
-        </div>
-        <div className="flex items-start gap-4 px-4 pb-3">
-          <div className="flex-1">
-            <ProsodyPanel prosody={prosody} />
-          </div>
-          <div className="pt-1">
-            <VoiceConfigToggles />
-          </div>
-        </div>
-      </div>
-
-      {/* Transcribing indicator */}
-      {isTranscribing && (
-        <div className="px-4 py-2 bg-surface-overlay border-b border-border">
-          <span className="text-[10px] text-text-muted animate-pulse">
-            transcribing with whisper...
-          </span>
-        </div>
-      )}
-
-      {/* Editor */}
+    <div className="main-panel">
       <Editor
-        interimTranscript={speech.interimTranscript}
-        isRecording={speech.isRecording}
+        key={state.activeEntryId ?? 'no-active-entry'}
+        drawWaveform={audio.drawWaveform}
+        interimTranscript=""
+        isRecording={recordingState.isRecording}
+        isTranscribing={isTranscribing}
+        onOpenSidebar={onOpenSidebar}
+        onProviderChange={setProvider}
+        onStart={handleStart}
+        onStop={handleStop}
+        prosody={prosody}
+        provider={provider}
+        refinement={refinement}
+        startedAt={recordingState.session?.startedAt}
       />
     </div>
   );

@@ -1,3 +1,5 @@
+import { cadenceApiUrl } from './urls';
+
 export interface RefineParams {
   systemPrompt: string;
   userMessage: string;
@@ -10,7 +12,7 @@ export interface VariantParams extends RefineParams {
 }
 
 export async function* streamRefinement(params: RefineParams): AsyncGenerator<string, void, undefined> {
-  const response = await fetch('/api/refine', {
+  const response = await fetch(cadenceApiUrl('/refine'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -22,40 +24,49 @@ export async function* streamRefinement(params: RefineParams): AsyncGenerator<st
     throw new Error(body.error || `Refinement failed: ${response.status}`);
   }
 
-  const reader = response.body!.getReader();
+  if (!response.body) {
+    throw new Error('Refinement returned no response stream.');
+  }
+  const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/u);
+      buffer = lines.pop() ?? '';
 
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const payload = line.slice(6);
-      if (payload === '[DONE]') return;
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6);
+        if (payload === '[DONE]') return;
 
-      try {
-        const parsed = JSON.parse(payload);
-        if (parsed.error) throw new Error(parsed.error);
-        if (parsed.text) yield parsed.text;
-      } catch (err) {
-        if (err instanceof SyntaxError) {
-          console.error('Malformed SSE payload:', payload);
-          continue;
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.error) throw new Error(parsed.error);
+          if (parsed.text) yield parsed.text;
+        } catch (err) {
+          if (err instanceof SyntaxError) {
+            console.error('Malformed SSE payload:', payload);
+            continue;
+          }
+          throw err;
         }
-        throw err;
       }
     }
+  } finally {
+    reader.releaseLock();
   }
+
+  throw new Error('Refinement stream ended before completion.');
 }
 
 export async function refineComplete(params: RefineParams): Promise<string> {
-  const response = await fetch('/api/refine/complete', {
+  const response = await fetch(cadenceApiUrl('/refine/complete'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -77,7 +88,7 @@ export async function generateVariantsApi(params: {
   temperatures: Array<{ label: string; temperature: number }>;
   signal?: AbortSignal;
 }): Promise<Array<{ label: string; temperature: number; text: string }>> {
-  const response = await fetch('/api/variants', {
+  const response = await fetch(cadenceApiUrl('/variants'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),

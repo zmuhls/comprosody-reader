@@ -3,6 +3,7 @@ import {
   computeEnergy,
   computeFluency,
   computeLexicalDensity,
+  completeTranscriptProsody,
   interpretPace,
   interpretEnergy,
   interpretFluency,
@@ -169,6 +170,28 @@ describe('computeLexicalDensity', () => {
   it('recognizes contractions as function words', () => {
     // "don't can't won't" are all contractions in the set
     expect(computeLexicalDensity("don't can't won't")).toBe(0);
+  });
+});
+
+describe('completeTranscriptProsody', () => {
+  it('recomputes transcript metrics while preserving audio-derived metrics', () => {
+    const completed = completeTranscriptProsody(
+      {
+        pace: 0,
+        energy: 0.43,
+        fluency: 0.72,
+        lexicalDensity: 0,
+      },
+      'The archive reshapes public memory',
+      30_000,
+    );
+
+    expect(completed).toEqual({
+      pace: 10,
+      energy: 0.43,
+      fluency: 0.72,
+      lexicalDensity: 4 / 5,
+    });
   });
 });
 

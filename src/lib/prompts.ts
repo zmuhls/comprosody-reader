@@ -1,4 +1,9 @@
-import type { GenreRegister, Scale, RefinementSettings } from '../types/llm';
+import type {
+  GenreRegister,
+  Scale,
+  RefinementMode,
+  RefinementSettings,
+} from '../types/llm';
 import type { ProsodyDiagnostics, VoiceConfig } from '../types/audio';
 import {
   interpretPace,
@@ -108,19 +113,66 @@ function buildTransitionGuidance(prosody: ProsodyDiagnostics, voiceConfig: Voice
   return 'Oral-to-written transitions:\n' + lines.join('\n');
 }
 
+export interface RefinementPromptOptions {
+  mode?: RefinementMode;
+  instruction?: string;
+  vocabularyHints?: readonly string[];
+}
+
+function buildFidelityGuidance(
+  settings: RefinementSettings,
+  mode: RefinementMode,
+): string {
+  if (mode === 'overhaul') {
+    return `Structural mode: full overhaul.
+- Find the idea that recurs across the dictation, even when it appears only intermittently, and use it as the organizing thread.
+- Reorder, consolidate, and connect passages when necessary so the thought becomes legible as an argument.
+- Preserve the writer's claims, examples, qualifications, characteristic vocabulary, and productive uncertainty.
+- Do not invent evidence, citations, concepts, conclusions, or disciplinary jargon. Do not make the prose sound more certain than the speaker was.
+- Prefer a persuasive sequence of paragraphs over a summary or outline.`;
+  }
+
+  const strictness = settings.highFidelity === false
+    ? 'Use a light editorial hand.'
+    : 'Use an exceptionally conservative editorial hand.';
+
+  return `Structural mode: faithful edit. ${strictness}
+- Put adjacent pieces together, correct obvious transcription and copy errors, and add only the connective tissue needed for sentences to read as continuous prose.
+- Form the basis of humanities scholarship without over-coding the prose: do not add theoretical vocabulary, inflate the register, or turn exploratory thought into a polished thesis.
+- Preserve wording whenever it is already intelligible. Preserve ambiguity, hesitation, and provisional claims when they carry meaning.
+- Never add facts, citations, examples, or arguments that were not spoken.`;
+}
+
+function buildVocabularyGuidance(vocabularyHints: readonly string[] | undefined): string {
+  if (!vocabularyHints?.length) return '';
+  return `Locally learned vocabulary (spelling and casing hints, not content to insert): ${vocabularyHints
+    .slice(0, 40)
+    .join(', ')}. Preserve these forms when they occur in the source; never introduce them merely because they are listed.`;
+}
+
 export function buildSystemPrompt(
   settings: RefinementSettings,
   prosody: ProsodyDiagnostics,
-  voiceConfig: VoiceConfig
+  voiceConfig: VoiceConfig,
+  options: RefinementPromptOptions = {},
 ): string {
+  const mode = options.mode ?? settings.mode ?? 'faithful';
   const parts = [
     GENRE_PREAMBLES[settings.genre],
+    '',
+    buildFidelityGuidance(settings, mode),
     '',
     buildProsodyContext(prosody),
     '',
     buildVoiceConfigContext(voiceConfig),
     '',
     buildTransitionGuidance(prosody, voiceConfig),
+    '',
+    buildVocabularyGuidance(options.vocabularyHints),
+    '',
+    options.instruction?.trim()
+      ? `Focused instruction from the writer: ${options.instruction.trim()}\nFollow it only where it does not conflict with fidelity, factuality, or the selected structural mode.`
+      : '',
     '',
     `Refine at the ${settings.scale} level. ${SCALE_INSTRUCTIONS[settings.scale]}`,
     '',
@@ -135,9 +187,10 @@ export function buildSelectionPrompt(
   voiceConfig: VoiceConfig,
   contextBefore: string,
   selection: string,
-  contextAfter: string
+  contextAfter: string,
+  options: RefinementPromptOptions = {},
 ): { system: string; user: string } {
-  const system = buildSystemPrompt(settings, prosody, voiceConfig);
+  const system = buildSystemPrompt(settings, prosody, voiceConfig, options);
   const user = `Here is a fragment of dictated text to refine. The selected portion is between [START] and [END] markers. Refine ONLY the selected text, maintaining coherence with the surrounding context. Return ONLY the refined selected text, nothing else.
 
 Context before: ${contextBefore}

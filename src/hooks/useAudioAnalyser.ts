@@ -45,7 +45,7 @@ export function useAudioAnalyser() {
   }, []);
 
   const drawWaveform = useCallback(
-    (canvas: HTMLCanvasElement, color: string = '#6366f1') => {
+    (canvas: HTMLCanvasElement, color: string = '#8e4437') => {
       const ctx = canvas.getContext('2d');
       if (!ctx || !analyserRef.current || !dataArrayRef.current) return;
 
@@ -59,10 +59,9 @@ export function useAudioAnalyser() {
         analyser.getByteTimeDomainData(dataArray);
 
         const { width, height } = canvas;
-        ctx.fillStyle = 'rgba(10, 10, 15, 0.3)';
-        ctx.fillRect(0, 0, width, height);
+        ctx.clearRect(0, 0, width, height);
 
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 1.25;
         ctx.strokeStyle = color;
         ctx.beginPath();
 

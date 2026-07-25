@@ -1,13 +1,19 @@
 import { memo, useState } from 'react';
 import type { TreeNode as TreeNodeType } from '../../hooks/useDirectoryTree';
 import { useStorage } from '../../hooks/useStorage';
+import { Icon } from '../ui/Icon';
 
 interface Props {
   node: TreeNodeType;
   depth: number;
+  onSelectEntry?: () => void;
 }
 
-export const TreeNode = memo(function TreeNode({ node, depth }: Props) {
+export const TreeNode = memo(function TreeNode({
+  node,
+  depth,
+  onSelectEntry,
+}: Props) {
   const [isOpen, setIsOpen] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(node.name);
@@ -23,77 +29,104 @@ export const TreeNode = memo(function TreeNode({ node, depth }: Props) {
   const isActive = node.type === 'entry' && node.id === activeEntryId;
 
   const handleRename = () => {
-    if (editName.trim()) {
-      if (node.type === 'entry') renameEntry(node.id, editName.trim());
-      else renameDirectory(node.id, editName.trim());
+    const nextName = editName.trim();
+    if (nextName) {
+      if (node.type === 'entry') renameEntry(node.id, nextName);
+      else renameDirectory(node.id, nextName);
     }
     setIsEditing(false);
   };
 
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDelete = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!window.confirm(`Delete “${node.name}”?`)) return;
     if (node.type === 'entry') deleteEntry(node.id);
     else deleteDirectory(node.id);
   };
 
+  const handleActivate = () => {
+    if (node.type === 'entry') {
+      setActiveEntry(node.id);
+      onSelectEntry?.();
+    } else {
+      setIsOpen((current) => !current);
+    }
+  };
+
   return (
-    <div>
+    <div className="tree-branch">
       <div
-        className={`group flex items-center gap-1 px-2 py-1 cursor-pointer text-xs hover:bg-surface-overlay transition-colors ${
-          isActive ? 'bg-surface-overlay text-accent' : 'text-text-secondary'
-        }`}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
-        onClick={() => {
-          if (node.type === 'entry') setActiveEntry(node.id);
-          else setIsOpen(!isOpen);
-        }}
+        className={`tree-row tree-row-${node.type} ${isActive ? 'is-active' : ''}`}
+        onClick={handleActivate}
         onDoubleClick={() => {
           setEditName(node.name);
           setIsEditing(true);
         }}
+        role="treeitem"
+        aria-expanded={node.type === 'directory' ? isOpen : undefined}
+        aria-selected={node.type === 'entry' ? isActive : undefined}
+        style={{ paddingLeft: `${depth * 14 + 18}px` }}
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            handleActivate();
+          }
+        }}
       >
-        {node.type === 'directory' ? (
-          <span className="w-4 text-center text-text-muted">
-            {isOpen ? '\u25BE' : '\u25B8'}
-          </span>
-        ) : (
-          <span className="w-4 text-center text-text-muted">\u25C7</span>
-        )}
+        <span className="tree-leading-icon">
+          {node.type === 'directory' ? (
+            <Icon
+              name={isOpen ? 'chevron-down' : 'chevron-right'}
+              size={13}
+            />
+          ) : (
+            <Icon name="file" size={13} />
+          )}
+        </span>
 
         {isEditing ? (
           <input
-            className="flex-1 bg-surface-raised border border-border-focus text-text-primary text-xs px-1 py-0.5 outline-none"
+            aria-label={`Rename ${node.type}`}
+            className="tree-rename-input"
             value={editName}
-            onChange={(e) => setEditName(e.target.value)}
+            onChange={(event) => setEditName(event.target.value)}
             onBlur={handleRename}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleRename();
-              if (e.key === 'Escape') setIsEditing(false);
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === 'Enter') handleRename();
+              if (event.key === 'Escape') setIsEditing(false);
             }}
             autoFocus
-            onClick={(e) => e.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
           />
         ) : (
-          <span className="flex-1 truncate">{node.name}</span>
+          <span className="tree-label">{node.name}</span>
         )}
 
         <button
-          className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-hot text-xs px-1 transition-opacity"
-          onClick={handleDelete}
-          title="Delete"
           aria-label={`Delete ${node.type} ${node.name}`}
+          className="tree-delete"
+          onClick={handleDelete}
+          title={`Delete ${node.name}`}
+          type="button"
         >
-          \u00D7
+          <Icon name="trash" size={13} />
         </button>
       </div>
 
-      {node.type === 'directory' && isOpen && node.children.length > 0 && (
-        <div>
+      {node.type === 'directory' && isOpen && node.children.length > 0 ? (
+        <div role="group">
           {node.children.map((child) => (
-            <TreeNode key={child.id} node={child} depth={depth + 1} />
+            <TreeNode
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              onSelectEntry={onSelectEntry}
+            />
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 });

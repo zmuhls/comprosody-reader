@@ -1,7 +1,8 @@
 """Long-running faster-whisper worker.
 
 Reads JSON requests from stdin (one per line):
-  {"id": "uuid", "audio_path": "/tmp/file.webm", "model_size": "base"}
+  {"id": "uuid", "audio_path": "/tmp/file.webm", "model_size": "base",
+   "hotwords": "Comprosody, prosody"}
 Writes JSON responses to stdout (one per line):
   {"id": "uuid", "result": {...}}  or  {"id": "uuid", "error": "..."}
 """
@@ -21,8 +22,13 @@ def load_model(model_size: str) -> WhisperModel:
     return WhisperModel(model_size, compute_type="int8")
 
 
-def transcribe(model: WhisperModel, audio_path: str):
-    segments, info = model.transcribe(audio_path, word_timestamps=True)
+def transcribe(model: WhisperModel, audio_path: str, hotwords=None):
+    segments, info = model.transcribe(
+        audio_path,
+        word_timestamps=True,
+        hotwords=hotwords,
+        vad_filter=True,
+    )
 
     words = []
     transcript_parts = []
@@ -78,6 +84,7 @@ def main():
         req_id = req.get("id")
         audio_path = req.get("audio_path")
         requested_model = req.get("model_size") or model_size
+        hotwords = req.get("hotwords")
 
         if req.get("action") == "exit":
             print(json.dumps({"id": req_id, "status": "exiting"}))
@@ -89,12 +96,15 @@ def main():
             sys.stdout.flush()
             continue
 
+        if not isinstance(hotwords, str) or not hotwords.strip():
+            hotwords = None
+
         try:
             if requested_model != model_size:
                 # Reload if a different model size is requested.
                 model = load_model(requested_model)
                 model_size = requested_model
-            result = transcribe(model, audio_path)
+            result = transcribe(model, audio_path, hotwords)
             print(json.dumps({"id": req_id, "result": result}))
         except Exception as exc:
             print(json.dumps({"id": req_id, "error": str(exc)}))

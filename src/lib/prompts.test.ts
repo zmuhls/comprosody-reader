@@ -97,6 +97,65 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('refinement, not rewriting');
     expect(prompt).toContain('Return only the refined text');
   });
+
+  it('defines a high-fidelity humanities edit without permitting invention', () => {
+    const settings: RefinementSettings = {
+      ...defaultSettings,
+      genre: 'academic',
+      highFidelity: true,
+      mode: 'faithful',
+    };
+
+    const prompt = buildSystemPrompt(settings, defaultProsody, defaultVoiceConfig);
+
+    expect(prompt).toContain('Structural mode: faithful edit');
+    expect(prompt).toContain('exceptionally conservative editorial hand');
+    expect(prompt).toContain('basis of humanities scholarship without over-coding');
+    expect(prompt).toContain('do not add theoretical vocabulary');
+    expect(prompt).toContain('Preserve ambiguity, hesitation, and provisional claims');
+    expect(prompt).toContain('Never add facts, citations, examples, or arguments that were not spoken');
+  });
+
+  it('uses an intermittent recurring idea as the thread for a full overhaul', () => {
+    const prompt = buildSystemPrompt(
+      { ...defaultSettings, mode: 'faithful' },
+      defaultProsody,
+      defaultVoiceConfig,
+      { mode: 'overhaul' },
+    );
+
+    expect(prompt).toContain('Structural mode: full overhaul');
+    expect(prompt).toContain('idea that recurs across the dictation');
+    expect(prompt).toContain('even when it appears only intermittently');
+    expect(prompt).toContain('use it as the organizing thread');
+    expect(prompt).toContain('Reorder, consolidate, and connect passages');
+    expect(prompt).toContain('Preserve the writer\'s claims, examples, qualifications');
+    expect(prompt).toContain('Do not invent evidence, citations, concepts, conclusions, or disciplinary jargon');
+    expect(prompt).toContain('Do not make the prose sound more certain than the speaker was');
+  });
+
+  it('includes a focused writer instruction and learned vocabulary as non-generative hints', () => {
+    const prompt = buildSystemPrompt(
+      defaultSettings,
+      defaultProsody,
+      defaultVoiceConfig,
+      {
+        instruction: '  Keep the distinction between archive and repertoire explicit.  ',
+        vocabularyHints: ['Glissant', 'poiesis', 'counter-archive'],
+      },
+    );
+
+    expect(prompt).toContain(
+      'Focused instruction from the writer: Keep the distinction between archive and repertoire explicit.',
+    );
+    expect(prompt).toContain(
+      'Follow it only where it does not conflict with fidelity, factuality, or the selected structural mode.',
+    );
+    expect(prompt).toContain(
+      'Locally learned vocabulary (spelling and casing hints, not content to insert): Glissant, poiesis, counter-archive.',
+    );
+    expect(prompt).toContain('never introduce them merely because they are listed');
+  });
 });
 
 // --- Genre coverage ---

@@ -2,9 +2,9 @@ import { useRef, useCallback } from 'react';
 import { useRecording } from '../context/RecordingContext';
 
 /**
- * Web Speech API wrapper for interim transcript display during recording.
- * Final transcription is handled by Whisper (useTranscription) after recording stops.
- * This hook provides real-time interim text feedback while the user is speaking.
+ * Optional Web Speech API wrapper. Cadence's recording flow intentionally does
+ * not invoke this hook: some browsers process recognition remotely. Any future
+ * use must be an explicit, disclosed opt-in rather than a local-mode fallback.
  */
 
 // Web Speech API type augmentation

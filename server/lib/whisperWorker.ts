@@ -3,19 +3,7 @@ import { writeFile, unlink } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomUUID } from 'crypto';
-
-export interface WordTimestamp {
-  word: string;
-  start: number;
-  end: number;
-}
-
-export interface TranscriptionResult {
-  transcript: string;
-  words: WordTimestamp[];
-  language: string;
-  duration: number;
-}
+import type { TranscriptionResult } from './transcription/types.js';
 
 interface PendingRequest {
   resolve: (value: TranscriptionResult) => void;
@@ -25,7 +13,6 @@ interface PendingRequest {
 
 class WhisperWorker {
   private proc: ChildProcess | null = null;
-  private ready = false;
   private pending = new Map<string, PendingRequest>();
   private buffer = '';
   private modelSize: string;
@@ -46,7 +33,6 @@ class WhisperWorker {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.proc = proc;
-    this.ready = false;
 
     proc.stdout?.on('data', (chunk: Buffer) => this.handleStdout(chunk));
     proc.stderr?.on('data', (chunk: Buffer) => {
@@ -71,7 +57,6 @@ class WhisperWorker {
       try {
         const msg = JSON.parse(line);
         if (msg.status === 'ready') {
-          this.ready = true;
           continue;
         }
         const req = msg.id ? this.pending.get(msg.id) : undefined;
@@ -99,7 +84,6 @@ class WhisperWorker {
     const pending = this.pending;
     this.pending = new Map();
     this.proc = null;
-    this.ready = false;
 
     for (const req of pending.values()) {
       clearTimeout(req.timer);
@@ -112,7 +96,11 @@ class WhisperWorker {
     }
   }
 
-  async transcribe(audioBuffer: Buffer, modelSize?: string): Promise<TranscriptionResult> {
+  async transcribe(
+    audioBuffer: Buffer,
+    modelSize?: string,
+    hotwords?: string
+  ): Promise<TranscriptionResult> {
     const id = randomUUID();
     const tmpPath = join(tmpdir(), `comprosody-${id}.webm`);
     await writeFile(tmpPath, audioBuffer);
@@ -147,6 +135,7 @@ class WhisperWorker {
           id,
           audio_path: tmpPath,
           model_size: modelSize || this.modelSize,
+          hotwords,
         };
         const stdin = this.proc?.stdin;
         if (!stdin) {
@@ -178,9 +167,10 @@ const worker = new WhisperWorker();
 
 export async function transcribeWithWorker(
   audioBuffer: Buffer,
-  modelSize?: string
+  modelSize?: string,
+  hotwords?: string
 ): Promise<TranscriptionResult> {
-  return worker.transcribe(audioBuffer, modelSize);
+  return worker.transcribe(audioBuffer, modelSize, hotwords);
 }
 
 export function shutdownWorker(): void {

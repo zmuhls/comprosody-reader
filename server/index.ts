@@ -1,22 +1,18 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
 import { refineRouter } from './routes/refine.js';
+import { speechRouter } from './routes/speech.js';
 import { transcribeRouter } from './routes/transcribe.js';
 import { shutdownWorker } from './lib/transcribe.js';
 
 dotenv.config();
 
-function requireEnv(): void {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('Missing ANTHROPIC_API_KEY. Copy .env.example to .env and fill it in.');
-    process.exit(1);
-  }
-}
-requireEnv();
-
 const app = express();
 const port = parseInt(process.env.PORT || '3001', 10);
+const host = process.env.HOST || '127.0.0.1';
+const isLoopbackHost = new Set(['127.0.0.1', '::1', 'localhost']).has(host);
 
 const allowedOrigins = new Set(
   (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173')
@@ -41,6 +37,13 @@ app.use(
     },
   })
 );
+
+// Railway and the Readings gateway must be able to probe readiness without
+// possessing the service-to-service API credential. Keep this response
+// deliberately value-free and register it before auth and rate limiting.
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true });
+});
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -72,10 +75,18 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Simple shared-secret auth: if COMPROSODY_API_KEY is set, all /api routes
-// require it as a Bearer token. Skipped in development for localhost convenience.
+// Simple shared-secret auth: if COMPROSODY_API_KEY is set, functional /api
+// routes require it as a Bearer token. Health remains public for readiness
+// probes. Auth is skipped in development on loopback for local convenience.
 const serverApiKey = process.env.COMPROSODY_API_KEY;
-if (serverApiKey && process.env.NODE_ENV !== 'development') {
+if (!isLoopbackHost && !serverApiKey) {
+  console.error(
+    'COMPROSODY_API_KEY is required when HOST is not a loopback address.',
+  );
+  process.exit(1);
+}
+
+if (serverApiKey && (process.env.NODE_ENV !== 'development' || !isLoopbackHost)) {
   app.use('/api', (req, res, next) => {
     const auth = req.get('authorization');
     if (auth === `Bearer ${serverApiKey}`) return next();
@@ -84,14 +95,34 @@ if (serverApiKey && process.env.NODE_ENV !== 'development') {
 }
 
 app.use('/api', refineRouter);
+app.use('/api', speechRouter);
 app.use('/api', transcribeRouter);
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
+// API misses must remain JSON errors instead of falling through to the SPA.
+app.use('/api', (_req, res) => {
+  res.status(404).json({ error: 'API route not found' });
 });
 
-const server = app.listen(port, () => {
-  console.log(`comprosody server listening on port ${port}`);
+if (process.env.NODE_ENV === 'production') {
+  const distPath = fileURLToPath(new URL('../dist', import.meta.url));
+  app.use(express.static(distPath, { index: 'index.html' }));
+
+  // Client-side routes share the same editor shell. The Readings gateway strips
+  // `/studio` before forwarding, so the private service serves its built files
+  // from `/` while browser-visible URLs remain under `/studio`.
+  app.use((req, res, next) => {
+    if (req.method !== 'GET') {
+      next();
+      return;
+    }
+    res.sendFile('index.html', { root: distPath }, (error) => {
+      if (error) next(error);
+    });
+  });
+}
+
+const server = app.listen(port, host, () => {
+  console.log(`Cadence server listening at http://${host}:${port}`);
 });
 
 function shutdown() {

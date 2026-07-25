@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import {
   createContext,
   useContext,
@@ -26,8 +27,7 @@ export type RecordingAction =
   | { type: 'ADD_VOLUME_SAMPLE'; value: number }
   | { type: 'UPDATE_PROSODY'; prosody: ProsodyDiagnostics }
   | { type: 'FINALIZE_PROSODY'; prosody: ProsodyDiagnostics }
-  | { type: 'SET_VOICE_CONFIG'; config: Partial<VoiceConfig> }
-  | { type: 'SET_AUDIO_BLOB'; blob: Blob };
+  | { type: 'SET_VOICE_CONFIG'; config: Partial<VoiceConfig> };
 
 export function recordingReducer(
   state: RecordingState,
@@ -45,7 +45,6 @@ export function recordingReducer(
           wordTimestamps: [],
           pauses: [],
           volumeSamples: [],
-          audioBlob: null,
         },
         prosody: defaultProsody,
       };
@@ -131,13 +130,6 @@ export function recordingReducer(
       return {
         ...state,
         voiceConfig: { ...state.voiceConfig, ...action.config },
-      };
-
-    case 'SET_AUDIO_BLOB':
-      if (!state.session) return state;
-      return {
-        ...state,
-        session: { ...state.session, audioBlob: action.blob },
       };
 
     default:

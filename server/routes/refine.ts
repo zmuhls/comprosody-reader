@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import Anthropic from '@anthropic-ai/sdk';
 import { streamRefinement, refineComplete } from '../lib/claude.js';
 
@@ -58,6 +58,22 @@ function createAbortController(timeoutMs: number): AbortController {
   return controller;
 }
 
+function abortOnDisconnect(
+  req: Request,
+  res: Response,
+  controller: AbortController,
+): () => void {
+  const abort = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  req.once('aborted', abort);
+  res.once('close', abort);
+  return () => {
+    req.off('aborted', abort);
+    res.off('close', abort);
+  };
+}
+
 function classifyError(err: unknown): { status: number; message: string } {
   if (err instanceof Anthropic.RateLimitError) {
     return { status: 429, message: 'Rate limited — retry shortly' };
@@ -93,10 +109,7 @@ refineRouter.post('/refine', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   const controller = createAbortController(DEFAULT_TIMEOUT_MS);
-
-  req.on('close', () => {
-    controller.abort();
-  });
+  const stopWatching = abortOnDisconnect(req, res, controller);
 
   try {
     for await (const chunk of streamRefinement({
@@ -109,10 +122,15 @@ refineRouter.post('/refine', async (req, res) => {
     }
     res.write('data: [DONE]\n\n');
   } catch (err) {
-    const { message } = classifyError(err);
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    if (!res.destroyed && !res.writableEnded) {
+      const { message } = classifyError(err);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    }
+  } finally {
+    stopWatching();
+    controller.abort();
   }
-  res.end();
+  if (!res.destroyed && !res.writableEnded) res.end();
 });
 
 refineRouter.post('/refine/complete', async (req, res) => {
@@ -123,13 +141,19 @@ refineRouter.post('/refine/complete', async (req, res) => {
 
   const { systemPrompt, userMessage, temperature } = req.body;
   const controller = createAbortController(DEFAULT_TIMEOUT_MS);
+  const stopWatching = abortOnDisconnect(req, res, controller);
 
   try {
     const text = await refineComplete({ systemPrompt, userMessage, temperature, signal: controller.signal });
     res.json({ text });
   } catch (err) {
-    const { status, message } = classifyError(err);
-    res.status(status).json({ error: message });
+    if (!res.destroyed && !res.writableEnded) {
+      const { status, message } = classifyError(err);
+      res.status(status).json({ error: message });
+    }
+  } finally {
+    stopWatching();
+    controller.abort();
   }
 });
 
@@ -141,10 +165,13 @@ refineRouter.post('/variants', async (req, res) => {
 
   const { systemPrompt, userMessage, temperatures } = req.body;
   const controllers: AbortController[] = [];
-
-  req.on('close', () => {
-    controllers.forEach((c) => c.abort());
-  });
+  const disconnectController = new AbortController();
+  const stopWatching = abortOnDisconnect(req, res, disconnectController);
+  disconnectController.signal.addEventListener(
+    'abort',
+    () => controllers.forEach((controller) => controller.abort()),
+    { once: true },
+  );
 
   try {
     // Sequential generation to avoid tripling rate-limit exposure
@@ -163,7 +190,13 @@ refineRouter.post('/variants', async (req, res) => {
     res.json({ variants: results });
   } catch (err) {
     controllers.forEach((c) => c.abort());
-    const { status, message } = classifyError(err);
-    res.status(status).json({ error: message });
+    if (!res.destroyed && !res.writableEnded) {
+      const { status, message } = classifyError(err);
+      res.status(status).json({ error: message });
+    }
+  } finally {
+    stopWatching();
+    disconnectController.abort();
+    controllers.forEach((controller) => controller.abort());
   }
 });

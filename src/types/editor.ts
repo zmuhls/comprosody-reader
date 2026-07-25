@@ -7,6 +7,10 @@ export interface Entry {
   rawTranscript: string;
   refinedText: string;
   prosody: ProsodyDiagnostics;
+  prosodyHistory?: Array<{
+    capturedAt: number;
+    metrics: ProsodyDiagnostics;
+  }>;
   voiceConfig: VoiceConfig;
   createdAt: number;
   updatedAt: number;

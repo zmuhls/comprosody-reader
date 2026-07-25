@@ -20,7 +20,6 @@ function makeRecordingState(): RecordingState {
       wordTimestamps: [],
       pauses: [],
       volumeSamples: [],
-      audioBlob: null,
     },
     prosody: { ...defaultProsody },
     voiceConfig: { ...defaultVoiceConfig },

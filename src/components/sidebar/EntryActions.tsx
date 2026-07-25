@@ -1,23 +1,28 @@
 import { useStorage } from '../../hooks/useStorage';
+import { Icon } from '../ui/Icon';
 
 export function EntryActions() {
   const { createEntry, createDirectory } = useStorage();
 
   return (
-    <div className="flex gap-1 p-2 border-b border-border">
+    <div className="entry-actions">
       <button
-        onClick={() => createDirectory(null)}
-        className="flex-1 text-xs px-2 py-1.5 bg-surface-overlay text-text-secondary hover:text-text-primary hover:bg-border transition-colors"
-        title="New folder"
+        className="entry-primary-action"
+        onClick={() => createEntry(null)}
+        title="New note"
+        type="button"
       >
-        + folder
+        <Icon name="plus" size={16} />
+        <span>New note</span>
       </button>
       <button
-        onClick={() => createEntry(null)}
-        className="flex-1 text-xs px-2 py-1.5 bg-surface-overlay text-text-secondary hover:text-text-primary hover:bg-border transition-colors"
-        title="New entry"
+        aria-label="New folder"
+        className="icon-button entry-folder-action"
+        onClick={() => createDirectory(null)}
+        title="New folder"
+        type="button"
       >
-        + entry
+        <Icon name="folder" size={15} />
       </button>
     </div>
   );

@@ -12,7 +12,7 @@ import { defaultProsody } from '../types/audio';
 export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | null) {
   const { state, dispatch } = useRecording();
   const intervalRef = useRef<number>(0);
-  const lastSpeechTimeRef = useRef<number>(Date.now());
+  const lastSpeechTimeRef = useRef<number>(0);
   const pauseStartRef = useRef<number | null>(null);
 
   // Local state for live prosody — avoids dispatching to context every 500ms
@@ -86,5 +86,8 @@ export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | nu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.isRecording, update]);
 
-  return liveProsody;
+  // The analyser owns the live display while recording. Once stopped, use the
+  // finalized context snapshot so MainPanel's post-transcription correction is
+  // reflected in the UI as well as the saved note and local voice profile.
+  return state.isRecording ? liveProsody : state.prosody;
 }

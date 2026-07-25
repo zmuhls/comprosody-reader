@@ -1,20 +1,34 @@
+/* eslint-disable react-refresh/only-export-components */
 import {
   createContext,
+  useCallback,
   useContext,
   useReducer,
   useEffect,
+  useMemo,
   useRef,
+  useState,
   type ReactNode,
   type Dispatch,
 } from 'react';
 import type { Entry, Directory } from '../types/editor';
 import type { RefinementSettings } from '../types/llm';
+import type { VoiceProfile } from '../lib/voiceProfile';
 import { defaultVoiceConfig, defaultProsody } from '../types/audio';
+import { buildVoiceProfile } from '../lib/voiceProfile';
+import {
+  hydrateWorkspaceDatabase,
+  persistVoiceProfileDatabase,
+  persistWorkspaceDatabase,
+} from '../lib/database';
 import {
   loadEntries,
   saveEntries,
   loadDirectories,
   saveDirectories,
+  saveVoiceProfile,
+  loadRefinementSettings,
+  saveRefinementSettings,
 } from '../lib/storage';
 
 export interface AppError {
@@ -34,6 +48,11 @@ export interface AppState {
 }
 
 export type AppAction =
+  | {
+      type: 'HYDRATE_WORKSPACE';
+      entries: Record<string, Entry>;
+      directories: Record<string, Directory>;
+    }
   | { type: 'SET_ACTIVE_ENTRY'; id: string | null }
   | { type: 'CREATE_ENTRY'; entry: Entry }
   | { type: 'UPDATE_ENTRY'; id: string; updates: Partial<Entry>; recordHistory?: boolean }
@@ -68,6 +87,19 @@ function recordHistory(
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
+    case 'HYDRATE_WORKSPACE':
+      return {
+        ...state,
+        entries: action.entries,
+        directories: action.directories,
+        activeEntryId:
+          state.activeEntryId && action.entries[state.activeEntryId]
+            ? state.activeEntryId
+            : mostRecentEntryId(action.entries),
+        history: [],
+        historyIndex: -1,
+      };
+
     case 'SET_ACTIVE_ENTRY':
       return { ...state, activeEntryId: action.id };
 
@@ -96,7 +128,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case 'DELETE_ENTRY': {
-      const { [action.id]: _, ...rest } = state.entries;
+      const rest = { ...state.entries };
+      delete rest[action.id];
       return {
         ...state,
         entries: rest,
@@ -225,15 +258,28 @@ function collectDescendantDirectoryIds(
   return ids;
 }
 
+function mostRecentEntryId(entries: Record<string, Entry>): string | null {
+  const entriesByRecency = Object.values(entries).sort(
+    (left, right) => right.updatedAt - left.updatedAt,
+  );
+  return entriesByRecency[0]?.id ?? null;
+}
+
 function createInitialState(): AppState {
+  const storedSettings = loadRefinementSettings();
+  const entries = loadEntries();
   return {
-    entries: loadEntries(),
+    entries,
     directories: loadDirectories(),
-    activeEntryId: null,
+    activeEntryId: mostRecentEntryId(entries),
     refinementSettings: {
-      genre: 'freewrite',
+      genre: 'academic',
       scale: 'sentence',
-      temperature: 0.5,
+      temperature: 0.2,
+      mode: 'faithful',
+      highFidelity: true,
+      autoRefine: true,
+      ...storedSettings,
     },
     errors: [],
     history: [],
@@ -244,6 +290,8 @@ function createInitialState(): AppState {
 const AppContext = createContext<{
   state: AppState;
   dispatch: Dispatch<AppAction>;
+  voiceProfile: VoiceProfile;
+  storageReady: boolean;
 } | null>(null);
 
 function useDebouncedSaver<T>(
@@ -284,13 +332,90 @@ function useDebouncedSaver<T>(
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(appReducer, null, createInitialState);
+  const [state, reducerDispatch] = useReducer(appReducer, null, createInitialState);
+  const [storageReady, setStorageReady] = useState(false);
+  const storageReadyRef = useRef(false);
+  const pendingWorkspaceActionsRef = useRef<AppAction[]>([]);
+  const dispatch = useCallback<Dispatch<AppAction>>(
+    (action) => {
+      if (
+        !storageReadyRef.current &&
+        action.type !== 'HYDRATE_WORKSPACE' &&
+        action.type !== 'SET_ERROR' &&
+        action.type !== 'CLEAR_ERROR' &&
+        action.type !== 'UPDATE_REFINEMENT_SETTINGS'
+      ) {
+        pendingWorkspaceActionsRef.current.push(action);
+      }
+      reducerDispatch(action);
+    },
+    [],
+  );
+  const voiceProfile = useMemo(
+    () => buildVoiceProfile(state.entries),
+    [state.entries],
+  );
 
   useDebouncedSaver(state.entries, saveEntries, 500);
   useDebouncedSaver(state.directories, saveDirectories, 500);
+  useDebouncedSaver(voiceProfile, saveVoiceProfile, 1_000);
+  useDebouncedSaver(
+    state.refinementSettings,
+    saveRefinementSettings,
+    500,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    hydrateWorkspaceDatabase({
+      entries: state.entries,
+      directories: state.directories,
+    })
+      .then((workspace) => {
+        if (cancelled) return;
+        reducerDispatch({ type: 'HYDRATE_WORKSPACE', ...workspace });
+        for (const action of pendingWorkspaceActionsRef.current) {
+          reducerDispatch(action);
+        }
+        pendingWorkspaceActionsRef.current = [];
+        storageReadyRef.current = true;
+        setStorageReady(true);
+      })
+      .catch((error) => {
+        console.error('IndexedDB hydration failed; using local backup:', error);
+        if (!cancelled) {
+          pendingWorkspaceActionsRef.current = [];
+          storageReadyRef.current = true;
+          setStorageReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // The initial local snapshot is intentionally imported only once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    const timer = setTimeout(() => {
+      Promise.all([
+        persistWorkspaceDatabase({
+          entries: state.entries,
+          directories: state.directories,
+        }),
+        persistVoiceProfileDatabase(voiceProfile),
+      ]).catch((error) => {
+        console.error('IndexedDB save failed; local backup remains available:', error);
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [state.entries, state.directories, storageReady, voiceProfile]);
 
   return (
-    <AppContext.Provider value={{ state, dispatch }}>
+    <AppContext.Provider
+      value={{ state, dispatch, voiceProfile, storageReady }}
+    >
       {children}
     </AppContext.Provider>
   );

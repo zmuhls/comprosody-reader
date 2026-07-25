@@ -25,7 +25,6 @@ export interface RecordingSession {
   wordTimestamps: WordTimestamp[];
   pauses: Array<{ start: number; end: number }>;
   volumeSamples: number[];
-  audioBlob: Blob | null;
 }
 
 export const defaultVoiceConfig: VoiceConfig = {

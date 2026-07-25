@@ -1,0 +1,21 @@
+.git
+.gitignore
+.env
+.env.*
+.DS_Store
+.playwright-cli
+.tmp-server
+node_modules
+dist
+server-dist
+coverage
+logs
+*.log
+*.tsbuildinfo
+*.pdf
+
+# Historical nested checkout and local-only Python state.
+comprosody
+.venv
+__pycache__
+*.py[cod]
