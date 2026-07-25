@@ -4,7 +4,7 @@ import {
   createBookmarkOperationQueue,
 } from './bookmark-ops.js';
 import { installGridMotion } from './grid-motion.js';
-import { initialReadingTarget } from './reader-navigation.js';
+import { initialReadingTarget, isCoverSection } from './reader-navigation.js';
 import {
   DEFAULT_PREFERENCES,
   FONT_PRESETS,
@@ -383,8 +383,16 @@ async function openBook(slug) {
   currentRendition.on('touchend', (_event, contents) => scheduleSelectionFallback(contents, currentSelectionEpoch));
   currentRendition.on('relocated', (location) => {
     if (!readerIsCurrent(slug, currentSelectionEpoch, currentBook, currentRendition)) return;
-    currentReaderLocation = location;
+    let locatedSection;
+    try { locatedSection = currentBook.spine.get(location.start.cfi); } catch {}
+    if (isCoverSection(locatedSection)) {
+      currentReaderLocation = null;
+      $('#reader-location').textContent = 'cover';
+      renderBookmarkButton();
+      return;
+    }
     progress = location.start.cfi;
+    currentReaderLocation = location;
     const percent = Math.round(currentBook.locations.percentageFromCfi(location.start.cfi) * 100);
     $('#reader-location').textContent = `${percent}%`;
     renderBookmarkButton();

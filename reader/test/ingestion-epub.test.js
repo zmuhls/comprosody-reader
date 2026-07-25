@@ -45,6 +45,19 @@ test('EPUB builder writes mimetype first with STORE and includes the EPUB 3 cont
   assert.match(opf, /<dc:title>A &amp; &lt;B&gt;<\/dc:title>/);
   assert.match(opf, /<meta property="dcterms:modified">2026-07-25T12:34:56Z<\/meta>/);
   assert.match(opf, /properties="nav"/);
+  for (const name of [
+    'OEBPS/nav.xhtml',
+    'OEBPS/text/chapter-001.xhtml',
+    'OEBPS/text/chapter-002.xhtml',
+  ]) {
+    const xhtml = await zip.file(name).async('string');
+    assert.match(
+      xhtml,
+      /<meta name="viewport" content="width=device-width, initial-scale=1\.0"\/>/,
+    );
+  }
+  const styles = await zip.file('OEBPS/styles.css').async('string');
+  assert.match(styles, /-webkit-text-size-adjust:\s*100%/u);
   assert.equal(report.format, 'EPUB 3');
   assert.equal(report.chapters, 2);
   assert.equal(report.entries, 7);

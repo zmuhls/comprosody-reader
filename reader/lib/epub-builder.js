@@ -131,6 +131,7 @@ function chapterXhtml(chapter, metadata, index) {
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${escapeXml(metadata.language)}" lang="${escapeXml(metadata.language)}">
   <head>
     <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>${escapeXml(chapter.title)}</title>
     <link rel="stylesheet" type="text/css" href="../styles.css"/>
   </head>
@@ -153,6 +154,7 @@ function navXhtml(metadata, chapters) {
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${escapeXml(metadata.language)}" lang="${escapeXml(metadata.language)}">
   <head>
     <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>contents</title>
     <link rel="stylesheet" type="text/css" href="styles.css"/>
   </head>
@@ -215,6 +217,7 @@ html {
   background: #fff;
   font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
 }
 body {
   margin: 0 auto;

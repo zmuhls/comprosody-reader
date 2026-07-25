@@ -27,6 +27,21 @@ test('restores stored progress instead of replacing it with the first text secti
   assert.equal(initialReadingTarget(spine, savedProgress), savedProgress);
 });
 
+test('repairs a stored cover CFI by opening the first readable section', () => {
+  const coverProgress = 'epubcfi(/6/2!/4/2/2/1:0)';
+  const spine = {
+    spineItems: [
+      { idref: 'coverpage', href: 'cover.xhtml', linear: false },
+      { idref: 's1', href: 'section-01.xhtml', linear: true },
+    ],
+    get(target) {
+      return target === coverProgress ? this.spineItems[0] : null;
+    },
+  };
+
+  assert.equal(initialReadingTarget(spine, coverProgress), 'section-01.xhtml');
+});
+
 test('recognizes a cover from its spine id or properties', () => {
   const spine = {
     spineItems: [

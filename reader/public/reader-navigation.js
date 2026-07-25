@@ -1,6 +1,6 @@
 const COVER_SECTION_PATTERN = /(?:^|[./_\-\s])cover(?:page)?(?:$|[./_\-\s])/iu;
 
-function isCoverSection(section) {
+export function isCoverSection(section) {
   const properties = Array.isArray(section?.properties)
     ? section.properties.join(' ')
     : String(section?.properties || '');
@@ -12,9 +12,17 @@ function isCoverSection(section) {
 }
 
 export function initialReadingTarget(spine, savedProgress) {
-  if (typeof savedProgress === 'string' && savedProgress.trim()) return savedProgress;
-
   const sections = Array.isArray(spine?.spineItems) ? spine.spineItems : [];
+  if (typeof savedProgress === 'string' && savedProgress.trim()) {
+    let savedSection;
+    try {
+      savedSection = typeof spine?.get === 'function' ? spine.get(savedProgress) : undefined;
+    } catch {
+      savedSection = undefined;
+    }
+    if (!savedSection || !isCoverSection(savedSection)) return savedProgress;
+  }
+
   const firstReadable = sections.find((section) => section?.linear !== false && !isCoverSection(section))
     || sections.find((section) => !isCoverSection(section));
 

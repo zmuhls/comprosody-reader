@@ -70,6 +70,14 @@ test('bookmark, resume, and ingestion clients retain offline and privacy boundar
   assert.match(app, /saves\.enqueue\(slug, currentState\(\), \{ debounceMs: 350 \}\)/u);
   assert.match(app, /activeBookmarkSession\.queue\.enqueue\(id, operation\)/u);
   assert.match(app, /if \(!bookmarkHydrated \|\| !activeBookmarkSession \|\| !activeSlug\) return;/u);
+  assert.match(
+    app,
+    /import \{ initialReadingTarget, isCoverSection \} from '\.\/reader-navigation\.js'/u,
+  );
+  assert.match(
+    app,
+    /if \(isCoverSection\(locatedSection\)\) \{[\s\S]*?currentReaderLocation = null;[\s\S]*?textContent = 'cover';[\s\S]*?return;[\s\S]*?\}\s*progress = location\.start\.cfi;/u,
+  );
   assert.doesNotMatch(app, /storageKey:\s*'readings-bookmark-outbox-v1'/u);
   assert.match(extractor, /getTextContent/u);
   assert.match(extractor, /data\.fill\(0\)/u);
