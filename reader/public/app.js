@@ -41,6 +41,7 @@ let annotations = [];
 let progress = null;
 let bookmarks = [];
 let currentReaderLocation = null;
+let readerAtCover = false;
 let bookmarkHydrated = false;
 let bookmarkLoadFailed = false;
 let activeBookmarkSession = null;
@@ -331,6 +332,7 @@ async function openBook(slug) {
   progress = null;
   bookmarks = [];
   currentReaderLocation = null;
+  readerAtCover = false;
   bookmarkHydrated = false;
   bookmarkLoadFailed = false;
   activeBookmarkSession = null;
@@ -387,10 +389,12 @@ async function openBook(slug) {
     try { locatedSection = currentBook.spine.get(location.start.cfi); } catch {}
     if (isCoverSection(locatedSection)) {
       currentReaderLocation = null;
+      readerAtCover = true;
       $('#reader-location').textContent = 'cover';
       renderBookmarkButton();
       return;
     }
+    readerAtCover = false;
     progress = location.start.cfi;
     currentReaderLocation = location;
     const percent = Math.round(currentBook.locations.percentageFromCfi(location.start.cfi) * 100);
@@ -472,6 +476,7 @@ function renderNotes() {
 }
 
 function bookmarkAtCurrentLocation() {
+  if (readerAtCover) return null;
   if (typeof progress !== 'string' || !progress.startsWith('epubcfi(')) return null;
   return bookmarks.find((bookmark) => bookmarkMatchesPage(
     bookmark.cfi,
@@ -494,6 +499,7 @@ function renderBookmarkButton() {
     && activeBookmarkSession
     && activeSlug
     && rendition
+    && !readerAtCover
     && typeof progress === 'string'
     && progress.startsWith('epubcfi('),
   );
@@ -1083,6 +1089,8 @@ function returnToLibrary() {
   $('#reader').hidden = true;
   $('#library').hidden = false;
   activeSlug = null;
+  currentReaderLocation = null;
+  readerAtCover = false;
   renderDirectoryNav();
   renderLibrary();
 }

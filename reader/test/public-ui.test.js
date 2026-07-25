@@ -76,8 +76,13 @@ test('bookmark, resume, and ingestion clients retain offline and privacy boundar
   );
   assert.match(
     app,
-    /if \(isCoverSection\(locatedSection\)\) \{[\s\S]*?currentReaderLocation = null;[\s\S]*?textContent = 'cover';[\s\S]*?return;[\s\S]*?\}\s*progress = location\.start\.cfi;/u,
+    /if \(isCoverSection\(locatedSection\)\) \{[\s\S]*?readerAtCover = true;[\s\S]*?return;[\s\S]*?readerAtCover = false;[\s\S]*?progress = location\.start\.cfi;/u,
   );
+  assert.match(
+    app,
+    /bookmarkHydrated[\s\S]*?&& !readerAtCover[\s\S]*?&& typeof progress === 'string'/u,
+  );
+  assert.match(app, /function bookmarkAtCurrentLocation\(\) \{\s*if \(readerAtCover\) return null;/u);
   assert.doesNotMatch(app, /storageKey:\s*'readings-bookmark-outbox-v1'/u);
   assert.match(extractor, /getTextContent/u);
   assert.match(extractor, /data\.fill\(0\)/u);
