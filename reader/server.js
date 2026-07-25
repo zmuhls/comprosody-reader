@@ -18,6 +18,10 @@ import {
   createIngestionJobManager,
 } from './lib/ingestion-jobs.js';
 import {
+  OLLAMA_CLOUD_MODEL,
+  REMEDIATION_CYCLES,
+} from './lib/ingestion-agent.js';
+import {
   BookmarkValidationError,
   normalizeBookmarkId,
   normalizeBookmarkItem,
@@ -54,6 +58,7 @@ const secret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('he
 const storePath = process.env.DATA_PATH || path.join(__dirname, 'data', 'reader-state.json');
 const catalogPath = process.env.CATALOG_PATH || path.join(__dirname, 'catalog.json');
 const booksPath = process.env.BOOKS_PATH || path.join(__dirname, 'output');
+const maxSourceCharacters = 2_000_000;
 const catalog = JSON.parse(fs.readFileSync(catalogPath, 'utf8'));
 if (!Array.isArray(catalog)) throw new Error('catalog.json must contain an array.');
 const catalogBooks = catalog.map((entry) => entry?.book);
@@ -71,7 +76,7 @@ const ingestionJobs = createIngestionJobManager({
   maxActiveJobs: 1,
   maxQueuedJobs: 3,
   maxRetainedJobs: 16,
-  maxSourceChars: 2_000_000,
+  maxSourceChars: maxSourceCharacters,
   maxEpubBytes: 25_000_000,
   ttlMs: 15 * 60_000,
 });
@@ -221,6 +226,14 @@ function rejectUnknownBook(res) {
   return res.status(404).json({ error: 'book_not_found', message: 'book not found.' });
 }
 
+function ingestionConfigured(_req, res, next) {
+  if (process.env.OLLAMA_API_KEY?.trim()) return next();
+  return res.status(503).json({
+    error: 'ingestion_not_configured',
+    message: 'ingestion is not configured yet.',
+  });
+}
+
 function publicIngestionJob(job) {
   const phase = job.progress?.phase;
   const cycle = job.progress?.cycle;
@@ -300,19 +313,26 @@ app.post('/api/logout', (_req, res) => {
 });
 
 app.get('/api/catalog', auth, (_req, res) => res.sendFile(catalogPath));
+app.get('/api/ingestion-capabilities', auth, (_req, res) => {
+  res.json({
+    schemaVersion: 1,
+    available: Boolean(process.env.OLLAMA_API_KEY?.trim()),
+    provider: 'ollama-cloud',
+    model: OLLAMA_CLOUD_MODEL,
+    cycles: REMEDIATION_CYCLES.map((cycle) => cycle.id),
+    extraction: 'browser',
+    pdfUploaded: false,
+    maxSourceCharacters,
+  });
+});
 app.post(
   '/api/ingestions',
   auth,
   sameOrigin,
   ingestionLimiter,
+  ingestionConfigured,
   ingestionJson,
   (req, res, next) => {
-    if (!process.env.OLLAMA_API_KEY?.trim()) {
-      return res.status(503).json({
-        error: 'ingestion_not_configured',
-        message: 'ingestion is not configured yet.',
-      });
-    }
     try {
       return res.status(202).json(publicIngestionJob(ingestionJobs.createJob(req.body)));
     } catch (error) {

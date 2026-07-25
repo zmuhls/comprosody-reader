@@ -86,8 +86,8 @@ function installStyles(doc) {
     }
 
     .rubi-companion button:focus-visible {
-      outline: 2px solid var(--accent, #dedbd2);
-      outline-offset: 3px;
+      outline: 0;
+      background-color: var(--accent-soft, rgb(222 219 210 / 5.5%));
     }
 
     .rubi-companion__sprite {
@@ -140,11 +140,11 @@ function installStyles(doc) {
       .rubi-companion {
         --rubi-size: 44px;
         z-index: 41;
-        top: calc(env(safe-area-inset-top, 0px) + 10px);
-        right: auto;
+        top: 54%;
+        right: max(2px, env(safe-area-inset-right, 0px));
         bottom: auto;
-        left: 50%;
-        transform: translateX(-50%);
+        left: auto;
+        transform: translateY(-50%);
       }
 
       .rubi-companion__hide {

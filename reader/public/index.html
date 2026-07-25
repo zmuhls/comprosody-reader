@@ -50,12 +50,12 @@
       <label for="ingest-author">author</label><input id="ingest-author" maxlength="180">
       <label for="ingest-language">language</label><input id="ingest-language" value="en" maxlength="16" required>
       <p>pdf stays on this device. extracted text runs through three fidelity passes.</p>
-      <button id="ingest-start" type="submit">make epub</button>
+      <button id="ingest-start" type="submit" disabled>make epub</button>
       <button id="ingest-cancel" type="button" hidden>cancel</button>
     </form>
     <section class="ingest-activity" aria-labelledby="ingest-activity-heading">
       <h3 id="ingest-activity-heading">activity</h3>
-      <p id="ingest-status" role="status" aria-live="polite">idle</p>
+      <p id="ingest-status" role="status" aria-live="polite">checking model</p>
       <p id="ingest-progress" aria-hidden="true"></p>
       <ol id="ingest-log" role="log" aria-live="off"></ol>
       <a id="ingest-download" hidden>download epub</a>

@@ -53,10 +53,16 @@ test('mobile controls respect safe areas, coarse landscape, and accessible label
   assert.match(styles, /\.save-feedback button\s*\{[^}]*min-height:\s*44px/u);
   assert.match(styles, /\.bookmark-save button\s*\{[^}]*min-height:\s*44px/u);
   assert.match(styles, /#viewer\s*\{[^}]*padding-right:\s*var\(--safe-right\)/u);
+  assert.match(styles, /button:focus-visible,[\s\S]*?a:focus-visible\s*\{[^}]*background:\s*var\(--accent-soft\)[^}]*text-decoration:\s*underline/u);
+  assert.match(styles, /\.library-intro\s*\{[^}]*border:\s*0;/u);
+  assert.match(styles, /\.book-row\s*\{[^}]*border:\s*0;/u);
+  assert.doesNotMatch(styles, /\.book-row::before/u);
   assert.match(
     rubi,
     /@media \(max-width: 720px\), \(max-height: 500px\) and \(pointer: coarse\)/u,
   );
+  assert.match(rubi, /right:\s*max\(2px, env\(safe-area-inset-right, 0px\)\)/u);
+  assert.match(rubi, /top:\s*54%/u);
 });
 
 test('bookmark, resume, and ingestion clients retain offline and privacy boundaries', () => {
@@ -87,4 +93,12 @@ test('bookmark, resume, and ingestion clients retain offline and privacy boundar
   assert.match(extractor, /getTextContent/u);
   assert.match(extractor, /data\.fill\(0\)/u);
   assert.doesNotMatch(extractor, /fetch\(|XMLHttpRequest|FormData/u);
+  assert.match(app, /api\('\/api\/ingestion-capabilities'\)/u);
+  assert.match(app, /loadIngestionCapability\(\{ force: true \}\)/u);
+  assert.match(app, /characterCount > capability\.maxSourceCharacters/u);
+  assert.ok(
+    app.indexOf("loadIngestionCapability({ force: true })")
+      < app.indexOf("appendIngestionLog('loading local pdf tools')"),
+  );
+  assert.match(app, /expectedEpoch !== ingestionEpoch \|\| activeIngestionId !== expectedJobId/u);
 });

@@ -51,6 +51,8 @@ test('the companion has borderless controls and no programmatic network client',
     .replace(/\/\*[\s\S]*?\*\//gu, '')
     .replace(/^\s*\/\/.*$/gmu, '');
   assert.match(source, /\.rubi-companion button[\s\S]*?border:\s*0;/u);
+  assert.match(source, /\.rubi-companion button:focus-visible\s*\{[^}]*outline:\s*0;/u);
+  assert.match(source, /right:\s*max\(2px, env\(safe-area-inset-right, 0px\)\)/u);
   assert.doesNotMatch(
     executable,
     /\bfetch\s*\(|XMLHttpRequest|WebSocket|EventSource|sendBeacon/u,

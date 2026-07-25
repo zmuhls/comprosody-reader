@@ -26,7 +26,7 @@ async function stop(child) {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
-async function startServer(t) {
+async function startServer(t, { ollamaKey } = {}) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'readings-ingestion-api-'));
   const port = await availablePort();
   const env = {
@@ -41,6 +41,7 @@ async function startServer(t) {
   delete env.OLLAMA_API_KEY;
   delete env.RAILWAY_ENVIRONMENT_ID;
   delete env.NODE_ENV;
+  if (ollamaKey) env.OLLAMA_API_KEY = ollamaKey;
   const child = spawn(process.execPath, ['server.js'], {
     cwd,
     env,
@@ -88,6 +89,9 @@ test('ingestion routes require authentication, a same-origin mutation, and serve
   const origin = await startServer(t);
   const body = JSON.stringify(textOnlyPayload);
 
+  const unauthorizedCapability = await fetch(`${origin}/api/ingestion-capabilities`);
+  assert.equal(unauthorizedCapability.status, 401);
+
   const unauthorized = await fetch(`${origin}/api/ingestions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', origin },
@@ -96,6 +100,21 @@ test('ingestion routes require authentication, a same-origin mutation, and serve
   assert.equal(unauthorized.status, 401);
 
   const cookie = await login(origin);
+  const capability = await fetch(`${origin}/api/ingestion-capabilities`, {
+    headers: { cookie },
+  });
+  assert.equal(capability.status, 200);
+  assert.deepEqual(await capability.json(), {
+    schemaVersion: 1,
+    available: false,
+    provider: 'ollama-cloud',
+    model: 'glm-5.2',
+    cycles: ['structure', 'encoding_ocr', 'fidelity_review'],
+    extraction: 'browser',
+    pdfUploaded: false,
+    maxSourceCharacters: 2_000_000,
+  });
+
   const missingOrigin = await fetch(`${origin}/api/ingestions`, {
     method: 'POST',
     headers: { cookie, 'content-type': 'application/json' },
@@ -125,6 +144,17 @@ test('ingestion routes require authentication, a same-origin mutation, and serve
     message: 'ingestion is not configured yet.',
   });
 
+  const malformedUnavailable = await fetch(`${origin}/api/ingestions`, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json', origin },
+    body: '{',
+  });
+  assert.equal(malformedUnavailable.status, 503);
+  assert.deepEqual(await malformedUnavailable.json(), {
+    error: 'ingestion_not_configured',
+    message: 'ingestion is not configured yet.',
+  });
+
   const unknown = await fetch(`${origin}/api/ingestions/not-a-job`, { headers: { cookie } });
   assert.equal(unknown.status, 404);
   const cancelUnknown = await fetch(`${origin}/api/ingestions/not-a-job`, {
@@ -132,4 +162,23 @@ test('ingestion routes require authentication, a same-origin mutation, and serve
     headers: { cookie, origin },
   });
   assert.equal(cancelUnknown.status, 404);
+});
+
+test('readiness reports the configured contract without invoking the model', async (t) => {
+  const origin = await startServer(t, { ollamaKey: 'unit-test-key' });
+  const cookie = await login(origin);
+  const response = await fetch(`${origin}/api/ingestion-capabilities`, {
+    headers: { cookie },
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    schemaVersion: 1,
+    available: true,
+    provider: 'ollama-cloud',
+    model: 'glm-5.2',
+    cycles: ['structure', 'encoding_ocr', 'fidelity_review'],
+    extraction: 'browser',
+    pdfUploaded: false,
+    maxSourceCharacters: 2_000_000,
+  });
 });

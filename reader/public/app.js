@@ -29,6 +29,7 @@ import {
   reorderDirectory,
 } from './library-profile.js';
 import { createRubiCompanion, RUBI_STATES } from './rubi/companion.js';
+import { validateIngestionCapability } from './ingestion-capabilities.js';
 
 const $ = (selector) => document.querySelector(selector);
 let catalog = [];
@@ -66,6 +67,8 @@ let activeIngestionId;
 let activeIngestionController;
 let ingestionEpoch = 0;
 let pdfRuntimePromise;
+let ingestionCapability;
+let ingestionCapabilityPromise;
 const bookmarkSessions = new Map();
 
 const rubi = createRubiCompanion();
@@ -1066,6 +1069,7 @@ function setIngestOpen(open, { returnFocus = true } = {}) {
     $('.app-shell').classList.add('ingest-open');
     $('#ingest-toggle').setAttribute('aria-expanded', 'true');
     $('#ingest-close').focus();
+    void loadIngestionCapability({ force: true }).catch(() => {});
   } else {
     panel.hidden = true;
     $('.app-shell').classList.remove('ingest-open');
@@ -1151,6 +1155,56 @@ function appendIngestionLog(message) {
   item.scrollIntoView({ block: 'nearest' });
 }
 
+function ingestionBusy() {
+  return Boolean(activeIngestionController || activeIngestionId);
+}
+
+function setIngestionStartAvailability() {
+  $('#ingest-start').disabled = ingestionBusy() || ingestionCapability?.available !== true;
+}
+
+function renderIngestionCapability(capability) {
+  ingestionCapability = capability;
+  setIngestionStartAvailability();
+  if (ingestionBusy()) return;
+  const label = capability.available ? `${capability.model} ready` : 'model unavailable';
+  $('#ingest-status').textContent = label;
+  $('#ingest-progress').textContent = '';
+  appendIngestionLog(label);
+}
+
+async function loadIngestionCapability({ force = false } = {}) {
+  if (ingestionCapabilityPromise) return ingestionCapabilityPromise;
+  if (!force && ingestionCapability) return ingestionCapability;
+  if (!ingestionBusy()) {
+    $('#ingest-start').disabled = true;
+    $('#ingest-status').textContent = 'checking model';
+    $('#ingest-progress').textContent = '';
+    appendIngestionLog('checking model');
+  }
+  const request = api('/api/ingestion-capabilities')
+    .then(validateIngestionCapability)
+    .then((capability) => {
+      renderIngestionCapability(capability);
+      return capability;
+    })
+    .catch((error) => {
+      ingestionCapability = undefined;
+      setIngestionStartAvailability();
+      if (!ingestionBusy()) {
+        $('#ingest-status').textContent = lower(error.message || 'model unavailable');
+        $('#ingest-progress').textContent = '';
+        appendIngestionLog(error.message || 'model unavailable');
+      }
+      throw error;
+    })
+    .finally(() => {
+      if (ingestionCapabilityPromise === request) ingestionCapabilityPromise = undefined;
+    });
+  ingestionCapabilityPromise = request;
+  return request;
+}
+
 async function loadPdfRuntime() {
   if (window.ReadingsPdfIngest) return window.ReadingsPdfIngest;
   if (!pdfRuntimePromise) {
@@ -1190,7 +1244,8 @@ function renderIngestionJob(job) {
     : '';
   if (job.status === 'completed') {
     clearTimeout(ingestionPollTimer);
-    $('#ingest-start').disabled = false;
+    activeIngestionId = null;
+    setIngestionStartAvailability();
     $('#ingest-cancel').disabled = false;
     $('#ingest-cancel').hidden = true;
     $('#ingest-download').href = `/api/ingestions/${encodeURIComponent(job.id)}/epub`;
@@ -1199,33 +1254,47 @@ function renderIngestionJob(job) {
     appendIngestionLog('ready');
   } else if (job.status === 'failed' || job.status === 'cancelled') {
     clearTimeout(ingestionPollTimer);
-    $('#ingest-start').disabled = false;
+    activeIngestionId = null;
+    setIngestionStartAvailability();
     $('#ingest-cancel').disabled = false;
     $('#ingest-cancel').hidden = true;
     appendIngestionLog(job.status === 'cancelled' ? 'cancelled' : (job.error?.message || 'not completed'));
   }
 }
 
-function scheduleIngestionPoll(delay = 1000) {
+function scheduleIngestionPoll(
+  delay = 1000,
+  expectedEpoch = ingestionEpoch,
+  expectedJobId = activeIngestionId,
+) {
   clearTimeout(ingestionPollTimer);
-  ingestionPollTimer = setTimeout(() => { void pollIngestion(); }, delay);
+  ingestionPollTimer = setTimeout(() => {
+    void pollIngestion(expectedEpoch, expectedJobId);
+  }, delay);
 }
 
-async function pollIngestion() {
-  if (!activeIngestionId) return;
+async function pollIngestion(
+  expectedEpoch = ingestionEpoch,
+  expectedJobId = activeIngestionId,
+) {
+  if (!expectedJobId
+      || expectedEpoch !== ingestionEpoch
+      || activeIngestionId !== expectedJobId) return;
   try {
-    const job = await api(`/api/ingestions/${encodeURIComponent(activeIngestionId)}`);
+    const job = await api(`/api/ingestions/${encodeURIComponent(expectedJobId)}`);
+    if (expectedEpoch !== ingestionEpoch || activeIngestionId !== expectedJobId) return;
     renderIngestionJob(job);
     if (!['completed', 'failed', 'cancelled'].includes(job.status)) {
-      scheduleIngestionPoll();
+      scheduleIngestionPoll(1000, expectedEpoch, expectedJobId);
     }
   } catch (error) {
+    if (expectedEpoch !== ingestionEpoch || activeIngestionId !== expectedJobId) return;
     $('#ingest-status').textContent = lower(error.message);
-    scheduleIngestionPoll(2500);
+    scheduleIngestionPoll(2500, expectedEpoch, expectedJobId);
   }
 }
 
-async function cancelServerIngestion(jobId) {
+async function cancelServerIngestion(jobId, expectedEpoch = ingestionEpoch) {
   activeIngestionId = jobId;
   clearTimeout(ingestionPollTimer);
   $('#ingest-status').textContent = 'cancelling';
@@ -1234,20 +1303,22 @@ async function cancelServerIngestion(jobId) {
   appendIngestionLog('cancelling');
   try {
     const job = await api(`/api/ingestions/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+    if (expectedEpoch !== ingestionEpoch || activeIngestionId !== jobId) return true;
     renderIngestionJob(job);
     if (!['completed', 'failed', 'cancelled'].includes(job.status)) {
       $('#ingest-cancel').hidden = true;
-      scheduleIngestionPoll();
+      scheduleIngestionPoll(1000, expectedEpoch, jobId);
     }
     return true;
   } catch (error) {
+    if (expectedEpoch !== ingestionEpoch || activeIngestionId !== jobId) return false;
     $('#ingest-status').textContent = 'cancel not confirmed';
     $('#ingest-progress').textContent = '';
     appendIngestionLog('cancel not confirmed');
     $('#ingest-start').disabled = true;
     $('#ingest-cancel').disabled = false;
     $('#ingest-cancel').hidden = false;
-    scheduleIngestionPoll(1500);
+    scheduleIngestionPoll(1500, expectedEpoch, jobId);
     return false;
   }
 }
@@ -1374,6 +1445,12 @@ $('#ingest-form').addEventListener('submit', async (event) => {
   $('#ingest-cancel').disabled = false;
   $('#ingest-cancel').hidden = false;
   try {
+    appendIngestionLog('checking model');
+    $('#ingest-status').textContent = 'checking model';
+    $('#ingest-progress').textContent = '';
+    const capability = await loadIngestionCapability({ force: true });
+    if (runEpoch !== ingestionEpoch) throw new DOMException('cancelled.', 'AbortError');
+    if (!capability.available) throw new Error('model unavailable');
     appendIngestionLog('loading local pdf tools');
     $('#ingest-status').textContent = 'loading local pdf tools';
     $('#ingest-progress').textContent = '';
@@ -1389,7 +1466,9 @@ $('#ingest-form').addEventListener('submit', async (event) => {
     if (runEpoch !== ingestionEpoch) throw new DOMException('cancelled.', 'AbortError');
     if (activeIngestionController === controller) activeIngestionController = null;
     const characterCount = extracted.pages.reduce((total, page) => total + page.text.length, 0);
-    if (characterCount > 2_000_000) throw new Error('extracted text exceeds the two million character limit.');
+    if (characterCount > capability.maxSourceCharacters) {
+      throw new Error(`extracted text exceeds the ${capability.maxSourceCharacters.toLocaleString()} character limit.`);
+    }
     appendIngestionLog('local extraction complete');
     $('#ingest-pdf').value = '';
     $('#ingest-file').textContent = 'extracted';
@@ -1413,7 +1492,7 @@ $('#ingest-form').addEventListener('submit', async (event) => {
     }
     activeIngestionId = job.id;
     renderIngestionJob(job);
-    void pollIngestion();
+    void pollIngestion(runEpoch, job.id);
   } catch (error) {
     if (runEpoch !== ingestionEpoch || error.name === 'AbortError') {
       $('#ingest-status').textContent = 'cancelled';
@@ -1424,10 +1503,11 @@ $('#ingest-form').addEventListener('submit', async (event) => {
       $('#ingest-progress').textContent = '';
       appendIngestionLog(error.message || 'not started');
     }
-    $('#ingest-start').disabled = false;
+    setIngestionStartAvailability();
     $('#ingest-cancel').hidden = true;
   } finally {
     if (activeIngestionController === controller) activeIngestionController = null;
+    setIngestionStartAvailability();
   }
 });
 $('#ingest-cancel').addEventListener('click', async () => {
@@ -1437,7 +1517,7 @@ $('#ingest-cancel').addEventListener('click', async () => {
     activeIngestionController = null;
   }
   if (!activeIngestionId) {
-    $('#ingest-start').disabled = false;
+    setIngestionStartAvailability();
     $('#ingest-cancel').disabled = false;
     $('#ingest-cancel').hidden = true;
     $('#ingest-status').textContent = 'cancelled';

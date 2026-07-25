@@ -45,7 +45,9 @@ The browser receives an HMAC-opaque account scope only after bookmark hydration 
 
 ## ingestion
 
-The ingest panel reads PDF bytes only in the browser with PDF.js. It submits extracted text and entered metadata to the server; it does not upload the PDF file. The server runs three conservative GLM-5.2 remediation passes and returns a temporary EPUB download. Set `OLLAMA_API_KEY` only as a server-side environment variable to enable this feature.
+The ingest panel first checks an authenticated readiness endpoint and keeps conversion disabled unless the server confirms GLM-5.2, the three remediation cycles, browser extraction, no PDF upload, and the current extracted-text limit. Submit performs a fresh, deduplicated preflight before PDF.js loads, so an unconfigured server fails closed without parsing the selected PDF.
+
+PDF bytes are read only in the browser with PDF.js. The client submits extracted text and entered metadata to the server; it does not upload the PDF file. The server runs three conservative GLM-5.2 remediation passes and returns a temporary EPUB download. Set `OLLAMA_API_KEY` only as a server-side environment variable to enable this feature.
 
 ## railway
 
