@@ -85,7 +85,7 @@ test('bookmark API applies account-scoped, idempotent item operations with delet
 
   const login = await fetch(`${origin}/api/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', origin },
     body: JSON.stringify({
       username: 'bookmark-tester',
       password: 'bookmark-password',

@@ -2,11 +2,21 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="comprosody"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="theme-color" content="#0a0a0a"><meta name="color-scheme" content="dark">
 <title>comprosody reader — sign in</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/icons/comprosody-180.png"><link rel="icon" type="image/png" sizes="192x192" href="/icons/comprosody-192.png"><script src="/theme-bootstrap.js"></script><link rel="stylesheet" href="/styles.css"></head>
 <body class="login-page"><main class="login-shell">
-  <div class="wordmark">comprosody reader</div>
   <form id="login-form" class="login-form">
-    <h1>your private shelf</h1><p>reader and note-taking library</p>
+    <h1>your private shelf</h1>
     <label>username or email<input name="username" autocomplete="username" autocapitalize="none" required></label>
     <label>password<input name="password" type="password" autocomplete="current-password" required></label>
-    <div id="login-error" role="alert"></div><button type="submit">enter</button>
+    <div id="login-status" class="login-status" role="status"></div>
+    <div id="login-error" class="login-error" role="alert"></div><button type="submit">enter</button>
+    <div class="login-switches"><button id="reset-open" type="button" hidden>reset password</button><a id="register-open" href="/register.html" hidden>register</a></div>
+  </form>
+  <form id="reset-form" class="login-form" hidden>
+    <h1>reset password</h1>
+    <label>username or email<input name="username" autocomplete="username" autocapitalize="none" required></label>
+    <label>recovery key<input name="recoveryKey" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>
+    <label>new password<input name="password" type="password" autocomplete="new-password" minlength="16" maxlength="128" required></label>
+    <label>confirm password<input name="passwordConfirmation" type="password" autocomplete="new-password" minlength="16" maxlength="128" required></label>
+    <div id="reset-error" class="login-error" role="alert"></div><button type="submit">reset</button>
+    <div class="login-switches"><button id="reset-back" type="button">back</button></div>
   </form>
 </main><script type="module" src="/login.js"></script></body></html>

@@ -70,7 +70,7 @@ async function startServer(t, { ollamaKey } = {}) {
 async function login(origin) {
   const response = await fetch(`${origin}/api/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', origin },
     body: JSON.stringify({
       username: 'ingestion-tester',
       password: 'test-password',

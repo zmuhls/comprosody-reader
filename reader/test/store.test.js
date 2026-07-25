@@ -37,6 +37,10 @@ test('postgres schema and writes keep reader progress account scoped', async () 
   const store = new PostgresStore(undefined, {}, pool);
   await store.init();
   const schema = pool.queries[0].sql;
+  assert.match(
+    schema,
+    /pg_advisory_xact_lock\(\s*hashtextextended\('readings:postgres-schema:v1'/,
+  );
   assert.match(schema, /reader_account_state/);
   assert.match(schema, /PRIMARY KEY \(account_id, book_slug\)/);
   assert.match(schema, /reader_bookmarks/);

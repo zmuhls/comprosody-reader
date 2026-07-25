@@ -28,3 +28,32 @@ export function initialReadingTarget(spine, savedProgress) {
 
   return firstReadable?.href;
 }
+
+export function pageTurnForArrow({
+  key,
+  direction = 'ltr',
+  readerActive = false,
+  modified = false,
+  repeat = false,
+  composing = false,
+  defaultPrevented = false,
+  interactive = false,
+  selectionActive = false,
+  overlayOpen = false,
+} = {}) {
+  if (!readerActive
+      || modified
+      || repeat
+      || composing
+      || defaultPrevented
+      || interactive
+      || selectionActive
+      || overlayOpen
+      || !['ArrowLeft', 'ArrowRight'].includes(key)) {
+    return null;
+  }
+
+  const rightToLeft = String(direction).toLowerCase() === 'rtl';
+  if (key === 'ArrowLeft') return rightToLeft ? 'next' : 'prev';
+  return rightToLeft ? 'prev' : 'next';
+}

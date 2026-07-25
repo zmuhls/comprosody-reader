@@ -103,12 +103,46 @@ function copyProfileRecord(record) {
   };
 }
 
+function validateStoredCredentialRecord(record) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)
+      || typeof record.passwordHash !== 'string'
+      || record.passwordHash.length < 32 || record.passwordHash.length > 1_024
+      || !Number.isSafeInteger(record.revision) || record.revision < 0
+      || record.revision > 2_147_483_646
+      || typeof record.registrationOpen !== 'boolean'
+      || typeof record.updatedAt !== 'string'
+      || new Date(record.updatedAt).toISOString() !== record.updatedAt) {
+    throw new Error('The stored credential record is invalid.');
+  }
+  return record;
+}
+
+function copyCredentialRecord(record) {
+  if (record === null || record === undefined) return null;
+  const valid = validateStoredCredentialRecord(record);
+  return {
+    passwordHash: valid.passwordHash,
+    revision: valid.revision,
+    registrationOpen: valid.registrationOpen,
+    updatedAt: valid.updatedAt,
+  };
+}
+
 export class ProfileConflictError extends Error {
   constructor(current) {
     super('The profile changed after it was loaded.');
     this.name = 'ProfileConflictError';
     this.code = 'profile_conflict';
     this.current = copyProfileRecord(current);
+  }
+}
+
+export class CredentialConflictError extends Error {
+  constructor(currentRevision) {
+    super('The credential changed after it was loaded.');
+    this.name = 'CredentialConflictError';
+    this.code = 'credential_conflict';
+    this.currentRevision = Number.isSafeInteger(currentRevision) ? currentRevision : null;
   }
 }
 
@@ -149,6 +183,7 @@ class FileStore {
       bookmarks: {},
       bookmarkItems: {},
       profile: newProfileRecord(this.initialProfile),
+      credential: null,
     };
   }
 
@@ -171,11 +206,18 @@ class FileStore {
       data.profile = newProfileRecord(this.initialProfile);
     }
     validateStoredProfileRecord(data.profile);
+    if (!Object.hasOwn(data, 'credential')) data.credential = null;
+    copyCredentialRecord(data.credential);
     this.write(data);
   }
 
   read() {
-    return JSON.parse(fs.readFileSync(this.filename, 'utf8'));
+    try {
+      return JSON.parse(fs.readFileSync(this.filename, 'utf8'));
+    } catch (error) {
+      if (error?.code === 'ENOENT') return this.emptyState();
+      throw new Error('Reader state could not be read.', { cause: error });
+    }
   }
 
   write(data) {
@@ -186,6 +228,42 @@ class FileStore {
 
   async getProfile() {
     return copyProfileRecord(this.read().profile);
+  }
+
+  async getCredentialRecord() {
+    const data = this.read();
+    return copyCredentialRecord(data.credential);
+  }
+
+  async initializeCredentialRecord(passwordHash) {
+    const data = this.read();
+    if (data.credential) return copyCredentialRecord(data.credential);
+    const record = validateStoredCredentialRecord({
+      passwordHash,
+      revision: 0,
+      registrationOpen: true,
+      updatedAt: new Date().toISOString(),
+    });
+    data.credential = record;
+    this.write(data);
+    return copyCredentialRecord(record);
+  }
+
+  async rotateCredentialRecord(passwordHash, expectedRevision, { closeRegistration = false } = {}) {
+    const data = this.read();
+    const current = copyCredentialRecord(data.credential);
+    if (!current || current.revision !== expectedRevision) {
+      throw new CredentialConflictError(current?.revision);
+    }
+    const next = validateStoredCredentialRecord({
+      passwordHash,
+      revision: current.revision + 1,
+      registrationOpen: closeRegistration ? false : current.registrationOpen,
+      updatedAt: new Date().toISOString(),
+    });
+    data.credential = next;
+    this.write(data);
+    return copyCredentialRecord(next);
   }
 
   async saveProfile(document, expectedRevision) {
@@ -320,6 +398,9 @@ class PostgresStore {
 
   async init() {
     await this.pool.query(`
+      SELECT pg_advisory_xact_lock(
+        hashtextextended('readings:postgres-schema:v1', 0)
+      );
       CREATE TABLE IF NOT EXISTS reader_state (
         book_slug TEXT PRIMARY KEY,
         annotations JSONB NOT NULL DEFAULT '[]',
@@ -339,6 +420,13 @@ class PostgresStore {
         document JSONB NOT NULL CHECK (jsonb_typeof(document) = 'object'),
         revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
         updated_at TIMESTAMPTZ
+      );
+      CREATE TABLE IF NOT EXISTS reader_credentials (
+        id SMALLINT PRIMARY KEY CHECK (id = 1),
+        password_hash TEXT NOT NULL CHECK (octet_length(password_hash) BETWEEN 32 AND 1024),
+        revision INTEGER NOT NULL DEFAULT 0 CHECK (revision BETWEEN 0 AND 2147483646),
+        registration_open BOOLEAN NOT NULL DEFAULT FALSE,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE TABLE IF NOT EXISTS reader_bookmarks (
         account_id TEXT NOT NULL,
@@ -367,6 +455,8 @@ class PostgresStore {
       CREATE INDEX IF NOT EXISTS reader_bookmark_items_active_idx
         ON reader_bookmark_items(account_id, book_slug, created_at, bookmark_id)
         WHERE deleted_at IS NULL;
+      ALTER TABLE reader_credentials
+        ADD COLUMN IF NOT EXISTS registration_open BOOLEAN NOT NULL DEFAULT FALSE;
     `);
     await this.pool.query(
       `INSERT INTO reader_profile(id,document,revision,updated_at)
@@ -604,6 +694,74 @@ class PostgresStore {
       revision: Number(rows[0].revision),
       updatedAt: rows[0].updatedAt ? new Date(rows[0].updatedAt).toISOString() : null,
     };
+  }
+
+  async getCredentialRecord() {
+    const { rows } = await this.pool.query(`
+      SELECT
+        password_hash AS "passwordHash",
+        revision,
+        registration_open AS "registrationOpen",
+        updated_at AS "updatedAt"
+      FROM reader_credentials
+      WHERE id=1
+    `);
+    if (!rows[0]) return null;
+    return copyCredentialRecord({
+      passwordHash: rows[0].passwordHash,
+      revision: Number(rows[0].revision),
+      registrationOpen: rows[0].registrationOpen,
+      updatedAt: new Date(rows[0].updatedAt).toISOString(),
+    });
+  }
+
+  async initializeCredentialRecord(passwordHash) {
+    const { rows } = await this.pool.query(`
+      INSERT INTO reader_credentials(id,password_hash,revision,registration_open,updated_at)
+      VALUES(1,$1,0,TRUE,NOW())
+      ON CONFLICT(id) DO NOTHING
+      RETURNING
+        password_hash AS "passwordHash",
+        revision,
+        registration_open AS "registrationOpen",
+        updated_at AS "updatedAt"
+    `, [passwordHash]);
+    if (rows[0]) {
+      return copyCredentialRecord({
+        passwordHash: rows[0].passwordHash,
+        revision: Number(rows[0].revision),
+        registrationOpen: rows[0].registrationOpen,
+        updatedAt: new Date(rows[0].updatedAt).toISOString(),
+      });
+    }
+    return this.getCredentialRecord();
+  }
+
+  async rotateCredentialRecord(passwordHash, expectedRevision, { closeRegistration = false } = {}) {
+    const { rows } = await this.pool.query(`
+      UPDATE reader_credentials
+      SET
+        password_hash=$1,
+        revision=revision+1,
+        registration_open=CASE WHEN $3 THEN FALSE ELSE registration_open END,
+        updated_at=NOW()
+      WHERE id=1 AND revision=$2 AND (NOT $3 OR registration_open)
+      RETURNING
+        password_hash AS "passwordHash",
+        revision,
+        registration_open AS "registrationOpen",
+        updated_at AS "updatedAt"
+    `, [passwordHash, expectedRevision, closeRegistration]);
+    if (!rows[0]) {
+      const current = await this.getCredentialRecord();
+      throw new CredentialConflictError(current?.revision);
+    }
+    return copyCredentialRecord({
+      passwordHash: rows[0].passwordHash,
+      revision: Number(rows[0].revision),
+      registrationOpen: rows[0].registrationOpen,
+      updatedAt: new Date(rows[0].updatedAt).toISOString(),
+    });
   }
 
   async saveProfile(document, expectedRevision) {

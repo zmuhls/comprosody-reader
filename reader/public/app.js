@@ -4,7 +4,12 @@ import {
   createBookmarkOperationQueue,
 } from './bookmark-ops.js';
 import { installGridMotion } from './grid-motion.js';
-import { initialReadingTarget, isCoverSection } from './reader-navigation.js';
+import { createPanelResizer } from './panel-resizer.js';
+import {
+  initialReadingTarget,
+  isCoverSection,
+  pageTurnForArrow,
+} from './reader-navigation.js';
 import {
   DEFAULT_PREFERENCES,
   FONT_PRESETS,
@@ -60,8 +65,12 @@ let ingestReturnFocus = null;
 let profileChangeVersion = 0;
 let profileSavedVersion = 0;
 let profileSaving = false;
+let profileSavePromise;
 let profileSaveTimer;
+let profileRetryDelay = 1_000;
 let readerThemeFrame;
+let panelReflowFrame;
+let panelReflowTimer;
 let ingestionPollTimer;
 let activeIngestionId;
 let activeIngestionController;
@@ -71,7 +80,53 @@ let ingestionCapability;
 let ingestionCapabilityPromise;
 const bookmarkSessions = new Map();
 
-const rubi = createRubiCompanion();
+const rubi = createRubiCompanion({
+  onCommit: (layout) => {
+    if (!profile?.layout?.rubi) return;
+    updateProfile((next) => {
+      next.layout.rubi = { ...layout };
+      return next;
+    }, { debounceMs: 350 });
+  },
+});
+const INTERACTIVE_ARROW_TARGET = [
+  'input',
+  'textarea',
+  'select',
+  'button',
+  'a[href]',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[role="textbox"]',
+  '[role="combobox"]',
+  '[role="slider"]',
+  '[role="spinbutton"]',
+  '[role="button"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="radio"]',
+  '[role="switch"]',
+  '[role="tab"]',
+  '[tabindex]:not([tabindex="-1"])',
+  'audio[controls]',
+  'video[controls]',
+].join(',');
+const panelResizer = createPanelResizer({
+  root: $('.app-shell'),
+  handle: $('#panel-resizer'),
+  panels: {
+    notes: $('#notes-panel'),
+    settings: $('#settings-panel'),
+    ingest: $('#ingest-panel'),
+  },
+  onCommit: (name, width) => {
+    if (!profile?.layout?.panels) return;
+    updateProfile((next) => {
+      next.layout.panels[name] = width;
+      return next;
+    }, { debounceMs: 350 });
+  },
+  onReflow: schedulePanelReflow,
+});
 
 let durableStorage;
 try { durableStorage = window.localStorage; } catch { durableStorage = undefined; }
@@ -168,8 +223,7 @@ function renderLibrary() {
   }
   const visible = catalogForDirectory(catalog, profile, selectedDirectoryId);
   const selectedDirectory = profile.directories.find((directory) => directory.id === selectedDirectoryId);
-  $('#library-title').textContent = selectedDirectory ? lower(selectedDirectory.name) : 'comprosody reader';
-  $('#library-subtitle').textContent = 'reader and note-taking library';
+  $('#library-title').textContent = selectedDirectory ? lower(selectedDirectory.name) : 'your private shelf';
   $('#book-list').innerHTML = visible.length ? visible.map((item, index) => {
     const catalogNumber = String(catalog.findIndex((entry) => entry.book === item.book) + 1).padStart(2, '0');
     return `
@@ -186,6 +240,8 @@ function renderLibrary() {
 async function loadCatalog() {
   [catalog, profile] = await Promise.all([api('/api/catalog'), api('/api/profile')]);
   profile.preferences = normalizePreferences(profile.preferences);
+  panelResizer.setLayout(profile.layout.panels);
+  rubi.setLayout?.(profile.layout.rubi, { persist: false, announce: false });
   profileChangeVersion = 0;
   profileSavedVersion = 0;
   applyProfileAppearance();
@@ -382,6 +438,7 @@ async function openBook(slug) {
   currentRendition.themes.default(buildReaderTheme(profile.preferences));
   currentRendition.on('rendered', (_section, view) => {
     view?.iframe?.setAttribute('title', `${item.title} — reading content`);
+    view?.document?.addEventListener('keydown', handleReaderArrow, { passive: false });
   });
   currentRendition.on('selected', (cfiRange, contents) => stageCurrentSelection(contents, cfiRange, currentSelectionEpoch));
   currentRendition.on('mouseup', (_event, contents) => scheduleSelectionFallback(contents, currentSelectionEpoch));
@@ -846,36 +903,55 @@ function applyProfileAppearance() {
 
 async function flushProfile() {
   clearTimeout(profileSaveTimer);
-  if (!profile || profileSaving || profileSavedVersion === profileChangeVersion) return;
-  profileSaving = true;
-  while (profileSavedVersion < profileChangeVersion) {
-    const sendingVersion = profileChangeVersion;
-    const draft = cloneProfile();
-    showProfileStatus('saving…');
-    try {
-      const saved = await api('/api/profile', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(draft),
-      });
-      if (profileChangeVersion === sendingVersion) profile = saved;
-      else {
-        profile.revision = saved.revision;
-        profile.updatedAt = saved.updatedAt;
-      }
-      profileSavedVersion = sendingVersion;
-      showProfileStatus('saved');
-    } catch (error) {
-      if (error.status === 409 && error.profile) {
-        profile.revision = error.profile.revision;
-        profile.updatedAt = error.profile.updatedAt;
-        continue;
-      }
-      showProfileStatus('not saved · retrying');
-      break;
-    }
+  if (!profile || profileSavedVersion === profileChangeVersion) return true;
+  if (profileSavePromise) {
+    const saved = await profileSavePromise;
+    if (!saved) return false;
+    if (profileSavedVersion < profileChangeVersion) return flushProfile();
+    return true;
   }
-  profileSaving = false;
+  profileSaving = true;
+  profileSavePromise = (async () => {
+    while (profileSavedVersion < profileChangeVersion) {
+      const sendingVersion = profileChangeVersion;
+      const draft = cloneProfile();
+      showProfileStatus('saving…');
+      try {
+        const saved = await api('/api/profile', {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(draft),
+          keepalive: true,
+        });
+        if (profileChangeVersion === sendingVersion) profile = saved;
+        else {
+          profile.revision = saved.revision;
+          profile.updatedAt = saved.updatedAt;
+        }
+        profileSavedVersion = sendingVersion;
+        showProfileStatus('saved');
+      } catch (error) {
+        if (error.status === 409 && error.profile) {
+          profile.revision = error.profile.revision;
+          profile.updatedAt = error.profile.updatedAt;
+          continue;
+        }
+        showProfileStatus('not saved · retrying');
+        const delay = profileRetryDelay;
+        profileRetryDelay = Math.min(30_000, profileRetryDelay * 2);
+        profileSaveTimer = setTimeout(() => { void flushProfile(); }, delay);
+        return false;
+      }
+    }
+    profileRetryDelay = 1_000;
+    return true;
+  })();
+  try {
+    return await profileSavePromise;
+  } finally {
+    profileSavePromise = null;
+    profileSaving = false;
+  }
 }
 
 function updateProfile(mutator, { structure = false, debounceMs = 240, message = '' } = {}) {
@@ -892,6 +968,7 @@ function updateProfile(mutator, { structure = false, debounceMs = 240, message =
   }
   if (message) showProfileStatus(message);
   clearTimeout(profileSaveTimer);
+  profileRetryDelay = 1_000;
   profileSaveTimer = setTimeout(() => { void flushProfile(); }, debounceMs);
 }
 
@@ -992,6 +1069,27 @@ function setMenuOpen(open) {
   $('#menu-toggle').setAttribute('aria-expanded', String(open));
 }
 
+function reflowReaderAndRubi() {
+  try { rendition?.resize?.(); } catch {}
+  rubi.reflow?.();
+}
+
+function schedulePanelReflow() {
+  if (panelReflowFrame) cancelAnimationFrame(panelReflowFrame);
+  clearTimeout(panelReflowTimer);
+  panelReflowFrame = requestAnimationFrame(() => {
+    panelReflowFrame = null;
+    reflowReaderAndRubi();
+  });
+  const transitionDelay = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    ? 0
+    : 220;
+  panelReflowTimer = setTimeout(() => {
+    panelReflowTimer = null;
+    reflowReaderAndRubi();
+  }, transitionDelay);
+}
+
 function updateOverlayInert() {
   const overlay = window.matchMedia('(max-width: 1099px)').matches
     && (!$('#notes-panel').hidden || !$('#settings-panel').hidden || !$('#ingest-panel').hidden);
@@ -1022,16 +1120,19 @@ function setNotesOpen(open, { returnFocus = true } = {}) {
   if (open) {
     notesReturnFocus = document.activeElement;
     panel.hidden = false;
+    panelResizer.activate('notes');
     $('#notes-toggle').setAttribute('aria-expanded', 'true');
     $('#notes-close').focus();
   } else {
     panel.hidden = true;
+    panelResizer.deactivate('notes');
     $('#notes-toggle').setAttribute('aria-expanded', 'false');
     updateOverlayInert();
     if (returnFocus && notesReturnFocus instanceof HTMLElement) notesReturnFocus.focus();
     notesReturnFocus = null;
   }
   if (open) updateOverlayInert();
+  schedulePanelReflow();
 }
 
 function setSettingsOpen(open, { returnFocus = true } = {}) {
@@ -1042,6 +1143,7 @@ function setSettingsOpen(open, { returnFocus = true } = {}) {
     setIngestOpen(false, { returnFocus: false });
     settingsReturnFocus = document.activeElement;
     panel.hidden = false;
+    panelResizer.activate('settings');
     $('.app-shell').classList.add('settings-open');
     $('#settings-toggle').setAttribute('aria-expanded', 'true');
     $('#settings-main').hidden = false;
@@ -1049,6 +1151,7 @@ function setSettingsOpen(open, { returnFocus = true } = {}) {
     $('#settings-close').focus();
   } else {
     panel.hidden = true;
+    panelResizer.deactivate('settings');
     $('.app-shell').classList.remove('settings-open');
     $('#settings-toggle').setAttribute('aria-expanded', 'false');
     updateOverlayInert();
@@ -1056,6 +1159,7 @@ function setSettingsOpen(open, { returnFocus = true } = {}) {
     settingsReturnFocus = null;
   }
   if (open) updateOverlayInert();
+  schedulePanelReflow();
 }
 
 function setIngestOpen(open, { returnFocus = true } = {}) {
@@ -1066,12 +1170,14 @@ function setIngestOpen(open, { returnFocus = true } = {}) {
     setSettingsOpen(false, { returnFocus: false });
     ingestReturnFocus = document.activeElement;
     panel.hidden = false;
+    panelResizer.activate('ingest');
     $('.app-shell').classList.add('ingest-open');
     $('#ingest-toggle').setAttribute('aria-expanded', 'true');
     $('#ingest-close').focus();
     void loadIngestionCapability({ force: true }).catch(() => {});
   } else {
     panel.hidden = true;
+    panelResizer.deactivate('ingest');
     $('.app-shell').classList.remove('ingest-open');
     $('#ingest-toggle').setAttribute('aria-expanded', 'false');
     updateOverlayInert();
@@ -1079,6 +1185,7 @@ function setIngestOpen(open, { returnFocus = true } = {}) {
     ingestReturnFocus = null;
   }
   if (open) updateOverlayInert();
+  schedulePanelReflow();
 }
 
 function returnToLibrary() {
@@ -1110,10 +1217,65 @@ function stepRange(input, amount) {
 function activeOverlay() {
   if ($('#organize-dialog').open) return $('#organize-dialog');
   if ($('#annotation-dialog').open) return $('#annotation-dialog');
+  if (!window.matchMedia('(max-width: 1099px)').matches) return null;
   if (!$('#ingest-panel').hidden) return $('#ingest-panel');
   if (!$('#settings-panel').hidden) return $('#settings-panel');
   if (!$('#notes-panel').hidden) return $('#notes-panel');
   return null;
+}
+
+function arrowTargetIsInteractive(target) {
+  return Boolean(target?.closest?.(INTERACTIVE_ARROW_TARGET));
+}
+
+function arrowSelectionIsActive(target) {
+  let selection;
+  try {
+    selection = target?.ownerDocument?.getSelection?.() || document.getSelection();
+  } catch {
+    selection = null;
+  }
+  return Boolean(
+    (selection && !selection.isCollapsed && selection.toString())
+    || pendingSelection
+    || !$('#selection-action').hidden,
+  );
+}
+
+function readingDirection(target) {
+  const contentDocument = target?.ownerDocument;
+  const explicit = contentDocument?.documentElement?.dir
+    || contentDocument?.body?.dir
+    || rendition?.settings?.direction
+    || book?.packaging?.metadata?.direction;
+  if (explicit) return String(explicit).toLowerCase();
+  try {
+    return contentDocument?.defaultView?.getComputedStyle?.(
+      contentDocument.documentElement,
+    )?.direction || 'ltr';
+  } catch {
+    return 'ltr';
+  }
+}
+
+function handleReaderArrow(event) {
+  const action = pageTurnForArrow({
+    key: event.key,
+    direction: readingDirection(event.target),
+    readerActive: Boolean(activeSlug && rendition && !$('#reader').hidden),
+    modified: event.altKey || event.ctrlKey || event.metaKey || event.shiftKey,
+    repeat: event.repeat,
+    composing: event.isComposing || event.keyCode === 229,
+    defaultPrevented: event.defaultPrevented,
+    interactive: arrowTargetIsInteractive(event.target),
+    selectionActive: arrowSelectionIsActive(event.target),
+    overlayOpen: Boolean(activeOverlay()),
+  });
+  if (!action) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  void rendition[action]();
+  return true;
 }
 
 function trapOverlayFocus(event) {
@@ -1559,6 +1721,8 @@ $('#logout').addEventListener('click', async () => {
     || [...bookmarkSessions.values()].some((session) => session.queue.dirty());
   if (hasUnsavedChanges && !window.confirm('changes are still saving. sign out?')) return;
   try {
+    const profileSaved = await flushProfile();
+    if (!profileSaved) throw new Error('layout not saved. retry sign out.');
     const response = await fetch('/api/logout', { method: 'POST' });
     if (!response.ok) throw new Error('could not sign out.');
     location.href = '/login.html';
@@ -1576,11 +1740,7 @@ document.addEventListener('keydown', (event) => {
     else setMenuOpen(false);
     return;
   }
-  const formControl = event.target instanceof HTMLElement
-    && (event.target.matches('input, textarea, select, button') || event.target.isContentEditable);
-  if (formControl || activeOverlay()) return;
-  if (event.key === 'ArrowLeft') void rendition?.prev();
-  if (event.key === 'ArrowRight') void rendition?.next();
+  handleReaderArrow(event);
 });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) return;
@@ -1604,6 +1764,12 @@ window.addEventListener('online', () => {
 window.addEventListener('resize', () => {
   updateOverlayInert();
   refreshReaderTheme();
+});
+$('#reader').addEventListener('transitionend', (event) => {
+  if (event.propertyName !== 'margin-right') return;
+  clearTimeout(panelReflowTimer);
+  panelReflowTimer = null;
+  reflowReaderAndRubi();
 });
 
 installGridMotion({

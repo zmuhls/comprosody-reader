@@ -18,7 +18,8 @@
   --grid-glint: rgb(241 238 229 / 2.2%);
   --danger: #dedbd2;
   --rail-width: 176px;
-  --notes-width: 368px;
+  --active-panel-width: 368px;
+  --notes-width: var(--active-panel-width);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -184,6 +185,7 @@ a:focus-visible {
   z-index: 1;
   min-height: 100dvh;
   padding-left: var(--rail-width);
+  --notes-width: var(--active-panel-width);
 }
 
 .app-header {
@@ -408,15 +410,15 @@ a:focus-visible {
 .book-meta > p {
   margin: 0 0 4px;
   color: var(--muted);
-  font: 550 12px/1.25 var(--mono);
-  letter-spacing: 0.075em;
+  font: 500 12px/1.35 var(--mono);
+  letter-spacing: 0.055em;
   text-transform: lowercase;
 }
 
 .book-meta h2 {
-  margin: 0 0 4px;
-  font: 400 clamp(30px, 3.7vw, 48px) / 1 var(--serif);
-  letter-spacing: -0.04em;
+  margin: 0 0 5px;
+  font: 400 clamp(30px, 3.7vw, 48px) / 1.03 var(--serif);
+  letter-spacing: -0.035em;
 }
 
 .book-meta > span {
@@ -483,6 +485,10 @@ dialog button {
 
 .app-shell.ingest-open .reader {
   margin-right: var(--notes-width);
+}
+
+.app-shell.is-panel-resizing .reader {
+  transition: none;
 }
 
 .reader-toolbar {
@@ -623,6 +629,38 @@ dialog button {
 
 .app-shell.settings-open #selection-action {
   left: calc(var(--rail-width) + (100vw - var(--rail-width) - var(--notes-width)) / 2);
+}
+
+.panel-resizer {
+  position: fixed;
+  z-index: 22;
+  top: 0;
+  right: calc(var(--active-panel-width) - 22px);
+  width: 44px;
+  height: 100dvh;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.panel-resizer::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--line);
+  content: "";
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.panel-resizer:hover::before,
+.panel-resizer:focus-visible::before,
+.app-shell.is-panel-resizing .panel-resizer::before {
+  opacity: .72;
 }
 
 .notes-panel {
@@ -1011,16 +1049,23 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .file-choice {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr auto;
   min-height: 56px;
   align-items: center;
-  border: 0;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
   color: var(--ink);
   cursor: pointer;
-  font: 500 12px/1.3 var(--mono);
-  letter-spacing: 0.035em;
+  font: 500 13px/1.35 var(--mono);
+  letter-spacing: 0.025em;
   text-transform: lowercase;
+}
+
+.file-choice > span,
+.file-choice output {
+  pointer-events: none;
 }
 
 .file-choice output {
@@ -1033,10 +1078,13 @@ input[type="range"]::-moz-range-thumb {
 
 #ingest-pdf {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .file-choice:focus-within {
@@ -1419,6 +1467,7 @@ dialog form > div {
 }
 
 .login-form {
+  grid-column: 2;
   display: grid;
   grid-template-columns: minmax(300px, 0.9fr) minmax(380px, 1.15fr);
   grid-template-rows: repeat(5, auto);
@@ -1435,14 +1484,6 @@ dialog form > div {
   margin: 0;
   font: 400 clamp(54px, 6vw, 88px) / 0.98 var(--serif);
   letter-spacing: -0.055em;
-}
-
-.login-form > p {
-  grid-column: 2;
-  margin: 8px 0 44px;
-  color: var(--muted);
-  font-size: 18px;
-  line-height: 1.5;
 }
 
 .login-form label {
@@ -1489,12 +1530,45 @@ dialog form > div {
   transition: background 160ms ease, color 160ms ease;
 }
 
-#login-error {
+.login-error,
+.login-status {
   grid-column: 2;
   min-height: 20px;
   margin-top: -8px;
-  color: var(--danger);
   font-size: 13px;
+}
+
+.login-error {
+  color: var(--danger);
+}
+
+.login-status {
+  color: var(--muted);
+}
+
+.login-switches {
+  grid-column: 2;
+  display: flex;
+  gap: 18px;
+}
+
+.login-switches > button,
+.login-switches > a {
+  display: inline-flex;
+  width: auto;
+  min-height: 44px;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: 550 11px/1.2 var(--mono);
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: lowercase;
 }
 
 @media (hover: hover) {
@@ -1548,8 +1622,12 @@ dialog form > div {
 }
 
 @media (max-width: 1099px) {
-  :root {
+  .app-shell {
     --notes-width: min(390px, 94vw);
+  }
+
+  .panel-resizer {
+    display: none !important;
   }
 
   .app-shell.notes-open .reader {
@@ -1696,15 +1774,19 @@ dialog form > div {
   }
 
   .book-meta > p {
-    font-size: 10px;
+    font-size: 11px;
+    line-height: 1.35;
+    letter-spacing: 0.045em;
   }
 
   .book-meta h2 {
-    font-size: clamp(25px, 7.3vw, 34px);
+    font-size: clamp(26px, 7.3vw, 34px);
+    line-height: 1.02;
   }
 
   .book-meta > span {
-    font-size: 12px;
+    font-size: 12.5px;
+    line-height: 1.35;
   }
 
   .book-meta > div {
@@ -1718,7 +1800,7 @@ dialog form > div {
   }
 
   .book-meta a {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .reader {
@@ -1809,16 +1891,12 @@ dialog form > div {
     font-size: clamp(52px, 15vw, 72px);
   }
 
-  .login-form > p {
-    margin: 28px 0 42px;
-    font-size: 16px;
-  }
-
   .login-form label {
     margin-bottom: 20px;
   }
 
-  #login-error {
+  .login-error,
+  .login-status {
     margin-top: -6px;
   }
 }

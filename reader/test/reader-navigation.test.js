@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { initialReadingTarget } from '../public/reader-navigation.js';
+import {
+  initialReadingTarget,
+  pageTurnForArrow,
+} from '../public/reader-navigation.js';
 
 test('starts at the first readable spine item when no progress is stored', () => {
   const spine = {
@@ -51,4 +54,46 @@ test('recognizes a cover from its spine id or properties', () => {
   };
 
   assert.equal(initialReadingTarget(spine, undefined), 'chapter-01.xhtml');
+});
+
+test('maps unmodified arrow keys to paginated reading direction', () => {
+  assert.equal(pageTurnForArrow({
+    key: 'ArrowLeft',
+    readerActive: true,
+  }), 'prev');
+  assert.equal(pageTurnForArrow({
+    key: 'ArrowRight',
+    readerActive: true,
+  }), 'next');
+  assert.equal(pageTurnForArrow({
+    key: 'ArrowLeft',
+    direction: 'rtl',
+    readerActive: true,
+  }), 'next');
+  assert.equal(pageTurnForArrow({
+    key: 'ArrowRight',
+    direction: 'RTL',
+    readerActive: true,
+  }), 'prev');
+});
+
+test('does not turn pages while another interaction owns the arrow keys', () => {
+  const guardedFields = [
+    'modified',
+    'repeat',
+    'composing',
+    'defaultPrevented',
+    'interactive',
+    'selectionActive',
+    'overlayOpen',
+  ];
+  for (const field of guardedFields) {
+    assert.equal(pageTurnForArrow({
+      key: 'ArrowRight',
+      readerActive: true,
+      [field]: true,
+    }), null, `${field} must retain the arrow key`);
+  }
+  assert.equal(pageTurnForArrow({ key: 'ArrowRight', readerActive: false }), null);
+  assert.equal(pageTurnForArrow({ key: 'PageDown', readerActive: true }), null);
 });

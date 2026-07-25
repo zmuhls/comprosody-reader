@@ -27,8 +27,19 @@ import {
   normalizeBookmarkItem,
 } from './lib/bookmarks.js';
 import {
+  accountSecretDigest,
+  CredentialValidationError,
+  hashPassword,
+  secureStringEqual,
+  validateNewPassword,
+  validatePasswordHash,
+  verifyAccountSecret,
+  verifyPassword,
+} from './lib/credentials.js';
+import {
   BookmarkLimitError,
   createStore,
+  CredentialConflictError,
   ProfileConflictError,
 } from './lib/store.js';
 
@@ -41,7 +52,9 @@ const deployed = process.env.NODE_ENV === 'production'
 if (deployed) {
   const invalid = [];
   if (!process.env.READINGS_USERNAME?.trim()) invalid.push('READINGS_USERNAME');
-  if (!process.env.READINGS_PASSWORD) invalid.push('READINGS_PASSWORD');
+  if (process.env.READINGS_ALLOW_PASSWORD_BOOTSTRAP === '1' && !process.env.READINGS_PASSWORD) {
+    invalid.push('READINGS_PASSWORD');
+  }
   if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
     invalid.push('SESSION_SECRET');
   }
@@ -53,7 +66,11 @@ if (deployed) {
 
 const username = process.env.READINGS_USERNAME || 'reader';
 const email = process.env.READINGS_EMAIL?.trim();
-const password = process.env.READINGS_PASSWORD || 'change-me-now';
+const recoveryKeyDigest = accountSecretDigest(process.env.READINGS_RECOVERY_KEY);
+const accessCodeDigest = accountSecretDigest(process.env.READINGS_ACCESS_CODE);
+const allowPasswordBootstrap = !deployed || process.env.READINGS_ALLOW_PASSWORD_BOOTSTRAP === '1';
+delete process.env.READINGS_RECOVERY_KEY;
+delete process.env.READINGS_ACCESS_CODE;
 const secret = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 const storePath = process.env.DATA_PATH || path.join(__dirname, 'data', 'reader-state.json');
 const catalogPath = process.env.CATALOG_PATH || path.join(__dirname, 'catalog.json');
@@ -81,6 +98,17 @@ const ingestionJobs = createIngestionJobManager({
   ttlMs: 15 * 60_000,
 });
 await store.init();
+let credential = await store.getCredentialRecord();
+if (!credential) {
+  const bootstrapPassword = process.env.READINGS_PASSWORD || (!deployed ? 'change-me-now' : null);
+  if (!allowPasswordBootstrap || !bootstrapPassword) {
+    throw new Error('The stored credential is missing and password bootstrap is disabled.');
+  }
+  credential = await store.initializeCredentialRecord(await hashPassword(bootstrapPassword));
+}
+delete process.env.READINGS_PASSWORD;
+delete process.env.READINGS_ALLOW_PASSWORD_BOOTSTRAP;
+validatePasswordHash(credential.passwordHash);
 
 app.use(helmet({
   contentSecurityPolicy: {
@@ -92,6 +120,7 @@ app.use(helmet({
       connectSrc: ["'self'", 'blob:'],
       frameSrc: ["'self'", 'blob:'],
       workerSrc: ["'self'", 'blob:'],
+      mediaSrc: ["'self'", 'blob:'],
       fontSrc: ["'self'", 'data:'],
       manifestSrc: ["'self'"],
       upgradeInsecureRequests: deployed ? [] : null,
@@ -134,6 +163,18 @@ const loginLimiter = rateLimit({
   message: { error: 'too many sign-in attempts. try again later.' },
 });
 
+const accountSetupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(clientIp(req)),
+  message: {
+    error: 'account_rate_limit',
+    message: 'too many account attempts. wait a few minutes and try again.',
+  },
+});
+
 const ingestionLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 6,
@@ -146,10 +187,16 @@ const ingestionLimiter = rateLimit({
   },
 });
 
-function equal(a, b) {
-  const left = Buffer.from(String(a));
-  const right = Buffer.from(String(b));
-  return left.length === right.length && crypto.timingSafeEqual(left, right);
+function validSessionSignature(signature, expected) {
+  const expectedBytes = Buffer.from(expected, 'base64url');
+  const canonical = typeof signature === 'string' && /^[A-Za-z0-9_-]{43}$/u.test(signature);
+  const suppliedBytes = canonical
+    ? Buffer.from(signature, 'base64url')
+    : Buffer.alloc(expectedBytes.length);
+  const comparable = suppliedBytes.length === expectedBytes.length
+    ? suppliedBytes
+    : Buffer.alloc(expectedBytes.length);
+  return canonical && crypto.timingSafeEqual(comparable, expectedBytes);
 }
 
 function sign(payload) {
@@ -158,14 +205,21 @@ function sign(payload) {
   return `${body}.${signature}`;
 }
 
-function verify(token = '') {
+async function verify(token = '') {
   const [body, signature] = token.split('.');
   if (!body || !signature) return null;
   const expected = crypto.createHmac('sha256', secret).update(body).digest('base64url');
-  if (!equal(signature, expected)) return null;
+  if (!validSessionSignature(signature, expected)) return null;
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString());
-    return payload.user === username && payload.exp > Date.now() ? payload : null;
+    if (payload.user !== username
+        || !Number.isFinite(payload.exp)
+        || payload.exp <= Date.now()) return null;
+    const current = await store.getCredentialRecord();
+    if (!current) return null;
+    validatePasswordHash(current.passwordHash);
+    const sessionRevision = Number.isSafeInteger(payload.cv) ? payload.cv : 0;
+    return sessionRevision === current.revision ? payload : null;
   } catch {
     return null;
   }
@@ -182,16 +236,20 @@ function accountScopeFor(accountId) {
     .digest('base64url');
 }
 
-function auth(req, res, next) {
-  const session = verify(req.cookies.readings_session);
-  if (session) {
-    req.accountId = accountIdFor(session.user);
-    return next();
+async function auth(req, res, next) {
+  try {
+    const session = await verify(req.cookies.readings_session);
+    if (session) {
+      req.accountId = accountIdFor(session.user);
+      return next();
+    }
+    if (req.path.startsWith('/api/') || req.path.startsWith('/books/')) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+    return res.redirect('/login.html');
+  } catch (error) {
+    return next(error);
   }
-  if (req.path.startsWith('/api/') || req.path.startsWith('/books/')) {
-    return res.status(401).json({ error: 'unauthorized' });
-  }
-  return res.redirect('/login.html');
 }
 
 function sameOrigin(req, res, next) {
@@ -288,28 +346,143 @@ function handleIngestionError(error, res, next) {
   return next(error);
 }
 
-app.get('/health', (_req, res) => res.json({ ok: true }));
-app.post('/api/login', loginLimiter, (req, res) => {
-  const suppliedName = req.body?.username;
-  const validName = equal(suppliedName, username)
-    || Boolean(email && equal(suppliedName, email));
-  if (!validName || !equal(req.body?.password, password)) {
-    return res.status(401).json({ error: 'incorrect sign-in' });
-  }
+const SESSION_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 30;
+
+function validAccountName(value) {
+  const usernameMatches = secureStringEqual(value, username);
+  const emailMatches = secureStringEqual(value, email || '');
+  return usernameMatches || Boolean(email && emailMatches);
+}
+
+function exactBody(value, requiredKeys) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length === requiredKeys.length
+    && requiredKeys.every((key) => Object.hasOwn(value, key));
+}
+
+function issueSession(res, revision) {
   const token = sign({
     user: username,
-    exp: Date.now() + 1000 * 60 * 60 * 24 * 30,
+    cv: revision,
+    exp: Date.now() + SESSION_MAX_AGE_MS,
   });
   res.cookie('readings_session', token, {
     httpOnly: true,
     sameSite: 'strict',
     secure: deployed,
-    maxAge: 1000 * 60 * 60 * 24 * 30,
+    path: '/',
+    maxAge: SESSION_MAX_AGE_MS,
   });
+}
+
+function clearSession(res) {
+  res.clearCookie('readings_session', {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: deployed,
+    path: '/',
+  });
+}
+
+async function rotateAccountPassword(req, res, {
+  secretField,
+  configuredSecretDigest,
+  closeRegistration = false,
+}) {
+  const responseStartedAt = Date.now();
+  const requiredKeys = ['username', secretField, 'password', 'passwordConfirmation'];
+  if (!exactBody(req.body, requiredKeys)) {
+    return res.status(400).json({
+      error: 'invalid_request',
+      message: 'account details are incomplete.',
+    });
+  }
+
+  let nextPassword;
+  try {
+    nextPassword = validateNewPassword(req.body.password, req.body.passwordConfirmation);
+  } catch (error) {
+    if (error instanceof CredentialValidationError) {
+      return res.status(400).json({
+        error: error.code,
+        field: error.field,
+        message: error.message,
+      });
+    }
+    throw error;
+  }
+
+  const accountMatches = validAccountName(req.body.username);
+  const secretMatches = verifyAccountSecret(req.body[secretField], configuredSecretDigest);
+  if (verifyAccountSecret(nextPassword, configuredSecretDigest)) {
+    return res.status(400).json({
+      error: 'invalid_credential',
+      field: 'password',
+      message: 'password must differ from the account code.',
+    });
+  }
+
+  const current = await store.getCredentialRecord();
+  if (!current) throw new Error('The credential record is missing.');
+  const eligible = accountMatches
+    && secretMatches
+    && (!closeRegistration || current.registrationOpen);
+  if (eligible) {
+    const passwordHash = await hashPassword(nextPassword);
+    try {
+      await store.rotateCredentialRecord(passwordHash, current.revision, { closeRegistration });
+    } catch (error) {
+      if (!(error instanceof CredentialConflictError)) throw error;
+    }
+  }
+  const minimumResponseMs = 300 + crypto.randomInt(0, 51);
+  const remainingDelay = minimumResponseMs - (Date.now() - responseStartedAt);
+  if (remainingDelay > 0) {
+    await new Promise((resolve) => setTimeout(resolve, remainingDelay));
+  }
+  clearSession(res);
+  return res.status(202).json({
+    ok: true,
+    message: 'if the details matched, the password was updated. sign in.',
+  });
+}
+
+app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/auth-capabilities', async (_req, res) => {
+  const current = await store.getCredentialRecord();
+  res.json({
+    schemaVersion: 1,
+    passwordReset: Boolean(recoveryKeyDigest),
+    registration: Boolean(accessCodeDigest && current?.registrationOpen),
+  });
+});
+app.post('/api/login', sameOrigin, loginLimiter, async (req, res) => {
+  const current = await store.getCredentialRecord();
+  if (!current) throw new Error('The credential record is missing.');
+  const validName = validAccountName(req.body?.username);
+  const validPassword = await verifyPassword(req.body?.password, current.passwordHash);
+  if (!validName || !validPassword) {
+    return res.status(401).json({ error: 'incorrect sign-in' });
+  }
+  issueSession(res, current.revision);
   return res.json({ ok: true });
 });
-app.post('/api/logout', (_req, res) => {
-  res.clearCookie('readings_session');
+app.post('/api/reset-password', sameOrigin, accountSetupLimiter, (req, res) => (
+  rotateAccountPassword(req, res, {
+    secretField: 'recoveryKey',
+    configuredSecretDigest: recoveryKeyDigest,
+  })
+));
+app.post('/api/register', sameOrigin, accountSetupLimiter, (req, res) => (
+  rotateAccountPassword(req, res, {
+    secretField: 'accessCode',
+    configuredSecretDigest: accessCodeDigest,
+    closeRegistration: true,
+  })
+));
+app.post('/api/logout', sameOrigin, (_req, res) => {
+  clearSession(res);
   res.json({ ok: true });
 });
 
@@ -484,6 +657,12 @@ app.get('/login.html', (_req, res) => {
 });
 app.get('/login.js', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'login.js'));
+});
+app.get('/register.html', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'register.html'));
+});
+app.get('/register.js', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'register.js'));
 });
 app.get('/styles.css', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'styles.css'));

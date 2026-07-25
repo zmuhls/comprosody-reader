@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="comprosody"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><meta name="theme-color" content="#0a0a0a"><meta name="color-scheme" content="dark">
-<title>comprosody reader</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/icons/comprosody-180.png"><link rel="icon" type="image/png" sizes="192x192" href="/icons/comprosody-192.png"><script src="/theme-bootstrap.js"></script><link rel="stylesheet" href="/styles.css"></head>
+<title>comprosody reader</title><link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" sizes="180x180" href="/icons/comprosody-180.png"><link rel="icon" type="image/png" sizes="192x192" href="/icons/comprosody-192.png"><script src="/theme-bootstrap.js"></script><link rel="stylesheet" href="/styles.css?v=9"></head>
 <body><div class="app-shell">
   <header class="app-header">
     <button class="brand" id="home-button">comprosody</button>
@@ -16,11 +16,12 @@
       </div>
     </div>
   </header>
-  <main id="library" class="library"><section class="library-intro"><h1 id="library-title">comprosody reader</h1><div class="library-intro-meta"><p id="library-subtitle">reader and note-taking library</p><button id="organize-open" class="organize-button">organize</button></div></section><section id="book-list" class="book-list" aria-live="polite"></section></main>
+  <main id="library" class="library"><section class="library-intro"><h1 id="library-title">your private shelf</h1><div class="library-intro-meta"><button id="organize-open" class="organize-button">organize</button></div></section><section id="book-list" class="book-list" aria-live="polite"></section></main>
   <main id="reader" class="reader" hidden>
     <nav class="reader-toolbar"><button id="back" aria-label="previous page">←</button><div><strong id="reader-title"></strong><span id="reader-location">opening…</span></div><div class="reader-toolbar-actions"><button id="forward" aria-label="next page">→</button><button id="bookmark-current" class="bookmark-button" type="button" aria-label="bookmark this page" aria-pressed="false" disabled>mark</button><button id="reader-settings" aria-label="reading settings">aa</button><div id="save-feedback" class="save-feedback"><span id="save-status" role="status" aria-live="polite"></span><button id="retry-save" type="button" hidden>retry</button></div></div></nav>
     <div id="viewer"></div><button id="selection-action" hidden>highlight + note</button>
   </main>
+  <div id="panel-resizer" class="panel-resizer" role="separator" aria-label="resize panel" aria-orientation="vertical" tabindex="0" hidden></div>
   <aside id="notes-panel" class="notes-panel" aria-label="bookmarks, highlights, and notes" hidden>
     <div class="notes-head"><h2>notes</h2><button id="notes-close">close</button></div>
     <section><h3>bookmarks</h3><div id="bookmark-list"></div><div class="bookmark-save"><span id="bookmark-status" role="status" aria-live="polite"></span><button id="retry-bookmarks" type="button" hidden>retry</button></div></section>

@@ -11,10 +11,38 @@ test('reader UI keeps only the public reader surface', () => {
   assert.match(markup, /id="bookmark-list"/u);
   assert.match(markup, /id="ingest-panel"/u);
   assert.match(markup, /id="settings-panel"/u);
+  assert.match(markup, /id="panel-resizer"[^>]*role="separator"/u);
+  assert.match(markup, /<h1 id="library-title">your private shelf<\/h1>/u);
+  assert.doesNotMatch(markup, /reader and note-taking library/u);
   assert.equal((markup.match(/class="header-actions"/gu) || []).length, 1);
   assert.equal((markup.match(/<a\s/gu) || []).length, 1);
+  assert.match(markup, /href="\/styles\.css\?v=9"/u);
   assert.doesNotMatch(app, /authorFor/u);
   assert.equal((app.match(/<article class="book-row"/gu) || []).length, 1);
+});
+
+test('library typography and the PDF picker retain their measured touch balance', () => {
+  const styles = read('public/styles.css');
+  assert.match(
+    styles,
+    /\.book-meta > p\s*\{[^}]*font:\s*500 12px\/1\.35 var\(--mono\)[^}]*letter-spacing:\s*0\.055em/u,
+  );
+  assert.match(
+    styles,
+    /\.book-meta h2\s*\{[^}]*font:\s*400 clamp\(30px, 3\.7vw, 48px\) \/ 1\.03 var\(--serif\)[^}]*letter-spacing:\s*-0\.035em/u,
+  );
+  assert.match(
+    styles,
+    /\.file-choice\s*\{[^}]*position:\s*relative[^}]*overflow:\s*hidden/u,
+  );
+  assert.match(
+    styles,
+    /\.file-choice > span,\s*\.file-choice output\s*\{[^}]*pointer-events:\s*none/u,
+  );
+  assert.match(
+    styles,
+    /#ingest-pdf\s*\{[^}]*inset:\s*0[^}]*width:\s*100%[^}]*height:\s*100%[^}]*opacity:\s*0/u,
+  );
 });
 
 test('palette is black, neutral gray, and sparing eggshell without purple', () => {
@@ -85,6 +113,7 @@ test('home-screen metadata is generic, installable, and download-only', () => {
 test('mobile controls respect safe areas, coarse landscape, and accessible labels', () => {
   const markup = read('public/index.html');
   const loginMarkup = read('public/login.html');
+  const registerMarkup = read('public/register.html');
   const app = read('public/app.js');
   const login = read('public/login.js');
   const styles = read('public/styles.css');
@@ -95,6 +124,10 @@ test('mobile controls respect safe areas, coarse landscape, and accessible label
   assert.match(markup, /aria-labelledby="organize-heading"/u);
   assert.match(markup, /id="organize-heading"/u);
   assert.match(loginMarkup, /<script type="module" src="\/login\.js"><\/script>/u);
+  assert.match(registerMarkup, /<script type="module" src="\/register\.js"><\/script>/u);
+  assert.match(loginMarkup, /id="reset-form"/u);
+  assert.match(registerMarkup, /name="accessCode"/u);
+  assert.doesNotMatch(loginMarkup, /reader and note-taking library/u);
   assert.match(login, /import \{ installGridMotion \} from '\.\/grid-motion\.js'/u);
   assert.doesNotMatch(login, /Signing in|Too many|That username|Could not reach/u);
   assert.match(app, /installGridMotion\(\{[\s\S]*?#notes-panel[\s\S]*?#ingest-panel/u);
@@ -113,12 +146,10 @@ test('mobile controls respect safe areas, coarse landscape, and accessible label
   assert.match(styles, /\.library-intro\s*\{[^}]*border:\s*0;/u);
   assert.match(styles, /\.book-row\s*\{[^}]*border:\s*0;/u);
   assert.doesNotMatch(styles, /\.book-row::before/u);
-  assert.match(
-    rubi,
-    /@media \(max-width: 720px\), \(max-height: 500px\) and \(pointer: coarse\)/u,
-  );
-  assert.match(rubi, /right:\s*max\(2px, env\(safe-area-inset-right, 0px\)\)/u);
-  assert.match(rubi, /top:\s*54%/u);
+  assert.match(rubi, /@media \(max-width: 760px\)/u);
+  assert.match(rubi, /--rubi-size:\s*52px/u);
+  assert.match(rubi, /setPointerCapture/u);
+  assert.match(rubi, /data-rubi-edge/u);
 });
 
 test('bookmark, resume, and ingestion clients retain offline and privacy boundaries', () => {
@@ -134,8 +165,14 @@ test('bookmark, resume, and ingestion clients retain offline and privacy boundar
   assert.match(app, /if \(!bookmarkHydrated \|\| !activeBookmarkSession \|\| !activeSlug\) return;/u);
   assert.match(
     app,
-    /import \{ initialReadingTarget, isCoverSection \} from '\.\/reader-navigation\.js'/u,
+    /pageTurnForArrow/u,
   );
+  assert.match(app, /view\?\.document\?\.addEventListener\('keydown', handleReaderArrow/u);
+  assert.match(app, /\[role="button"\]/u);
+  assert.match(app, /audio\[controls\]/u);
+  assert.match(app, /if \(!window\.matchMedia\('\(max-width: 1099px\)'\)\.matches\) return null;/u);
+  assert.match(app, /keepalive:\s*true/u);
+  assert.match(app, /const profileSaved = await flushProfile\(\)/u);
   assert.match(
     app,
     /if \(isCoverSection\(locatedSection\)\) \{[\s\S]*?readerAtCover = true;[\s\S]*?return;[\s\S]*?readerAtCover = false;[\s\S]*?progress = location\.start\.cfi;/u,

@@ -35,6 +35,19 @@ export const DEFAULT_PREFERENCES = Object.freeze({
   padding: 48,
 });
 
+export const DEFAULT_LAYOUT = Object.freeze({
+  panels: Object.freeze({
+    notes: 368,
+    settings: 368,
+    ingest: 368,
+  }),
+  rubi: Object.freeze({
+    state: 'expanded',
+    edge: 'left',
+    y: 0.58,
+  }),
+});
+
 export const PAGE_WIDTHS = Object.freeze([544, 640, 736, 832, 928]);
 export const MARGINS = Object.freeze([24, 36, 48, 64, 80]);
 export const PADDINGS = Object.freeze([16, 24, 32, 48, 64]);
@@ -47,6 +60,8 @@ const MAX_DIRECTORIES = 100;
 const MAX_DIRECTORY_DEPTH = 8;
 const MAX_POSITION = 10_000;
 const MAX_PROFILE_REVISION = 2_147_483_646;
+const RUBI_STATES = new Set(['expanded', 'collapsed', 'hidden']);
+const RUBI_EDGES = new Set(['left', 'right']);
 
 export class ProfileValidationError extends Error {
   constructor(field, message) {
@@ -137,6 +152,38 @@ function validatePreferences(value) {
     pageWidth: requireChoiceNumber(value.pageWidth, 'preferences.pageWidth', PAGE_WIDTHS),
     margins: requireChoiceNumber(value.margins, 'preferences.margins', MARGINS),
     padding: requireChoiceNumber(value.padding, 'preferences.padding', PADDINGS),
+  };
+}
+
+function defaultLayout() {
+  return {
+    panels: { ...DEFAULT_LAYOUT.panels },
+    rubi: { ...DEFAULT_LAYOUT.rubi },
+  };
+}
+
+function validateLayout(value) {
+  if (value === undefined) return defaultLayout();
+  requireExactKeys(value, 'layout', ['panels', 'rubi']);
+  requireExactKeys(value.panels, 'layout.panels', ['notes', 'settings', 'ingest']);
+  requireExactKeys(value.rubi, 'layout.rubi', ['state', 'edge', 'y']);
+  if (!RUBI_STATES.has(value.rubi.state)) {
+    fail('layout.rubi.state', 'must be expanded, collapsed, or hidden');
+  }
+  if (!RUBI_EDGES.has(value.rubi.edge)) {
+    fail('layout.rubi.edge', 'must be left or right');
+  }
+  return {
+    panels: {
+      notes: requireSafeInteger(value.panels.notes, 'layout.panels.notes', 280, 720),
+      settings: requireSafeInteger(value.panels.settings, 'layout.panels.settings', 280, 720),
+      ingest: requireSafeInteger(value.panels.ingest, 'layout.panels.ingest', 280, 720),
+    },
+    rubi: {
+      state: value.rubi.state,
+      edge: value.rubi.edge,
+      y: requireFiniteNumber(value.rubi.y, 'layout.rubi.y', 0, 1, 4),
+    },
   };
 }
 
@@ -246,6 +293,7 @@ export function createDefaultProfile(bookSlugs) {
   return {
     schemaVersion: PROFILE_SCHEMA_VERSION,
     preferences: { ...DEFAULT_PREFERENCES },
+    layout: defaultLayout(),
     directories: [],
     books: slugs.map((book, position) => ({ book, directoryId: null, position })),
   };
@@ -253,12 +301,13 @@ export function createDefaultProfile(bookSlugs) {
 
 export function validateProfileDocument(value, bookSlugs) {
   const slugs = catalogSlugs(bookSlugs);
-  requireExactKeys(value, '', ['schemaVersion', 'preferences', 'directories', 'books']);
+  requireExactKeys(value, '', ['schemaVersion', 'preferences', 'directories', 'books'], ['layout']);
   if (value.schemaVersion !== PROFILE_SCHEMA_VERSION) fail('schemaVersion', `must be ${PROFILE_SCHEMA_VERSION}`);
   const directories = validateDirectories(value.directories);
   return {
     schemaVersion: PROFILE_SCHEMA_VERSION,
     preferences: validatePreferences(value.preferences),
+    layout: validateLayout(value.layout),
     directories,
     books: validateBooks(value.books, slugs, new Set(directories.map((directory) => directory.id))),
   };
@@ -268,7 +317,7 @@ export function validateProfileUpdate(value, bookSlugs) {
   requireExactKeys(
     value,
     '',
-    ['schemaVersion', 'revision', 'preferences', 'directories', 'books'],
+    ['schemaVersion', 'revision', 'preferences', 'layout', 'directories', 'books'],
     ['updatedAt'],
   );
   const revision = requireSafeInteger(value.revision, 'revision', 0, MAX_PROFILE_REVISION);
@@ -283,6 +332,7 @@ export function validateProfileUpdate(value, bookSlugs) {
     document: validateProfileDocument({
       schemaVersion: value.schemaVersion,
       preferences: value.preferences,
+      layout: value.layout,
       directories: value.directories,
       books: value.books,
     }, bookSlugs),
@@ -332,6 +382,7 @@ export function reconcileStoredProfile(value, bookSlugs) {
   const candidate = {
     schemaVersion: value.schemaVersion,
     preferences: value.preferences,
+    layout: value.layout,
     directories: value.directories,
     books: reindexBooks(Array.isArray(value.books) ? value.books : [], slugs),
   };

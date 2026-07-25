@@ -86,7 +86,7 @@ async function startServer(t, catalog = []) {
 async function login(origin) {
   const response = await fetch(`${origin}/api/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', origin },
     body: JSON.stringify({
       username: 'reader-tester',
       password: 'test-password',
@@ -116,6 +116,7 @@ test('empty public catalog is valid and exposes no arbitrary book state', async 
   assert.equal(manifestResponse.headers.get('cache-control'), 'private, no-store');
   const loginPage = await fetch(`${origin}/login.html`);
   assert.match(loginPage.headers.get('content-security-policy'), /manifest-src 'self'/u);
+  assert.match(loginPage.headers.get('content-security-policy'), /media-src 'self' blob:/u);
   const cookie = await login(origin);
   assert.deepEqual(
     await fetch(`${origin}/api/catalog`, { headers: { cookie } }).then((response) => response.json()),
