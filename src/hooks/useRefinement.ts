@@ -11,7 +11,7 @@ import {
   buildSelectionPrompt,
   buildSystemPrompt,
 } from '../lib/prompts';
-import { streamRefinement, generateVariantsApi } from '../lib/claude';
+import { streamRefinement, generateVariantsApi } from '../lib/refinementApi';
 import {
   recordImprovementEvent,
   wordCount,
@@ -150,7 +150,7 @@ function recordRefinementMetric({
   void recordImprovementEvent({
     eventType: 'refinement',
     outcome,
-    provider: 'anthropic',
+    provider: 'ollama',
     mode,
     autoTriggered,
     durationMs: performance.now() - startedAt,

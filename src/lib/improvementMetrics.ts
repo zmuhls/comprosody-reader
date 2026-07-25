@@ -21,7 +21,7 @@ export type ImprovementEvent =
     })
   | (ImprovementEventBase & {
       eventType: 'refinement';
-      provider: 'anthropic';
+      provider: 'ollama';
       mode: 'faithful' | 'overhaul' | 'selection' | 'variants';
       autoTriggered: boolean;
       inputUnits?: number;

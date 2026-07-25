@@ -83,7 +83,7 @@ describe('privacy-bounded improvement metrics', () => {
       recordImprovementEvent({
         eventType: 'refinement',
         outcome: 'succeeded',
-        provider: 'anthropic',
+        provider: 'ollama',
         mode: 'faithful',
         autoTriggered: true,
         durationMs: 900,
@@ -103,7 +103,7 @@ describe('privacy-bounded improvement metrics', () => {
     const body = JSON.parse(String(init.body));
     expect(body.events[0]).toMatchObject({
       eventType: 'refinement',
-      provider: 'anthropic',
+      provider: 'ollama',
       mode: 'faithful',
       autoTriggered: true,
     });

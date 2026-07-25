@@ -15,7 +15,7 @@ vi.mock('../context/AppContext', () => ({
   useApp: services.useApp,
 }));
 
-vi.mock('../lib/claude', () => ({
+vi.mock('../lib/refinementApi', () => ({
   generateVariantsApi: services.generateVariantsApi,
   streamRefinement: services.streamRefinement,
 }));

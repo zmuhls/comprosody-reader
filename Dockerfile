@@ -20,7 +20,7 @@ WORKDIR /app
 # server-only manifest so build tools and the React bundle do not enter the
 # runtime image.
 COPY package.json package-lock.json ./
-RUN node -e "const fs=require('node:fs'); const pkg=require('./package.json'); const names=new Set(['@anthropic-ai/sdk','cors','dotenv','express']); pkg.dependencies=Object.fromEntries(Object.entries(pkg.dependencies).filter(([name])=>names.has(name))); delete pkg.devDependencies; fs.writeFileSync('package.json', JSON.stringify(pkg,null,2)+'\n');" \
+RUN node -e "const fs=require('node:fs'); const pkg=require('./package.json'); const names=new Set(['cors','dotenv','express']); pkg.dependencies=Object.fromEntries(Object.entries(pkg.dependencies).filter(([name])=>names.has(name))); delete pkg.devDependencies; fs.writeFileSync('package.json', JSON.stringify(pkg,null,2)+'\n');" \
     && npm ci --omit=dev --ignore-scripts \
     && npm cache clean --force
 

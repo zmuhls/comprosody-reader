@@ -79,14 +79,18 @@ works with Railway's dual-stack private network. Add provider credentials only
 for enabled operations:
 
 ```dotenv
-ANTHROPIC_API_KEY=<server-side key>
+OLLAMA_API_KEY=<server-side key>
+OLLAMA_MODEL=qwen3.5:397b
+OLLAMA_BASE_URL=https://ollama.com
 ELEVENLABS_API_KEY=<server-side key>
 ELEVENLABS_SCRIBE_MODEL=scribe_v2
 TRANSCRIPTION_PROVIDER=elevenlabs
 ```
 
-Only add a newly rotated ElevenLabs credential through Railway's secret
-variable input; never commit it or compile it into a `VITE_` variable.
+Only add newly rotated Ollama and ElevenLabs credentials through Railway's
+secret variable input; never commit either credential or compile it into a
+`VITE_` variable. `OLLAMA_MODEL` and `OLLAMA_BASE_URL` are non-secret
+configuration; the service validates both before making a refinement request.
 ElevenLabs is the practical hosted default. The image also includes
 faster-whisper and FFmpeg, but a local Whisper model is downloaded into
 ephemeral container storage and can create substantial cold-start, memory, and

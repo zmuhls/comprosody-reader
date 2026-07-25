@@ -1,6 +1,9 @@
 import { Router, type Request, type Response } from 'express';
-import Anthropic from '@anthropic-ai/sdk';
-import { streamRefinement, refineComplete } from '../lib/claude.js';
+import {
+  OllamaRefinementError,
+  streamRefinement,
+  refineComplete,
+} from '../lib/ollama.js';
 
 export const refineRouter = Router();
 
@@ -75,17 +78,8 @@ function abortOnDisconnect(
 }
 
 function classifyError(err: unknown): { status: number; message: string } {
-  if (err instanceof Anthropic.RateLimitError) {
-    return { status: 429, message: 'Rate limited — retry shortly' };
-  }
-  if (err instanceof Anthropic.AuthenticationError) {
-    return { status: 401, message: 'Invalid API key' };
-  }
-  if (err instanceof Anthropic.BadRequestError) {
-    return { status: 400, message: err.message };
-  }
-  if (err instanceof Anthropic.APIError) {
-    return { status: err.status ?? 500, message: err.message };
+  if (err instanceof OllamaRefinementError) {
+    return { status: err.status, message: err.message };
   }
   if (err instanceof Error && err.name === 'AbortError') {
     return { status: 504, message: 'Refinement request timed out' };

@@ -57,22 +57,22 @@ I was able to verify the backend code by temporarily compiling `server/*.ts` to 
 
 This may be environment-specific, but if Claude sees weird `tsx` behavior, that is the reason to check first.
 
-### 2. Anthropic configuration is missing
+### 2. Ollama Cloud configuration is missing
 
 There is no local `.env` file.
 
 `POST /api/refine/complete` returns:
 
 ```http
-HTTP/1.1 500 Internal Server Error
+HTTP/1.1 503 Service Unavailable
 ...
-{"error":"ANTHROPIC_API_KEY not set"}
+{"error":"OLLAMA_API_KEY is not configured"}
 ```
 
 Required config from `.env.example`:
 
 ```dotenv
-ANTHROPIC_API_KEY=sk-ant-...
+OLLAMA_API_KEY=your-ollama-api-key
 PORT=3001
 ```
 
@@ -139,7 +139,7 @@ and then stalled.
 
 ## Suggested next steps for Claude
 
-1. Create a real `.env` from `.env.example` and add `ANTHROPIC_API_KEY`.
+1. Create a real `.env` from `.env.example` and add `OLLAMA_API_KEY`.
 2. Install Python transcription deps, starting with `faster-whisper`.
 3. Improve `server/lib/transcribe.ts` so Python stdout errors are surfaced when the subprocess exits non-zero.
 4. Re-run end-to-end recording/refinement after config is present.

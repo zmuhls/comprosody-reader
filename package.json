@@ -16,7 +16,6 @@
     "server:prod": "NODE_ENV=production npx tsx server/index.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.78.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tiptap/extension-placeholder": "^3.28.0",
     "@tiptap/markdown": "^3.28.0",

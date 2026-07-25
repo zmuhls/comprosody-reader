@@ -5,7 +5,7 @@ remaining issues are organized by severity below.
 
 ## Already Fixed (since review)
 
-- [x] Model identifier updated to `claude-sonnet-4-20250514` (was `claude-3-7-sonnet-20250219`)
+- [x] Refinement provider replaced with Ollama Cloud and a configurable model
 - [x] Production server script added (`npm run server:prod`)
 - [x] localStorage writes debounced (500ms via `useDebouncedSaver`)
 - [x] WhisperModel loaded once via persistent worker (`whisperWorker.ts` / `whisper_worker.py`)
@@ -49,8 +49,7 @@ remaining issues are organized by severity below.
       `src/hooks/useSpeechRecognition.ts:71-78`
 - [ ] `activeEntry` lookup duplicated everywhere — extract to a `useActiveEntry` hook
       `src/hooks/useRefinement.ts:19-21`, `src/components/editor/Editor.tsx:19-21`, etc.
-- [ ] Prompt cache `ephemeral` with no cache-breaker strategy or measurement
-      `server/lib/claude.ts:48-53`
+- [x] Provider-specific prompt-cache configuration removed with the Ollama adapter
 - [ ] No accessibility labels on toggles/buttons
       `src/components/dictation/VoiceConfigToggles.tsx`, `src/components/editor/Toolbar.tsx`
 - [ ] UI is not responsive — fixed sidebar width, two-pane split, tiny `text-[9px]`
@@ -75,7 +74,7 @@ remaining issues are organized by severity below.
       `src/components/dictation/Waveform.tsx:11-15`
 - [ ] `VariantCards` truncates at 300 chars with hardcoded ellipsis
       `src/components/editor/VariantCards.tsx:44-45`
-- [ ] Health check doesn't verify downstream deps (Anthropic/Whisper)
+- [ ] Health check doesn't verify downstream deps (Ollama Cloud/Whisper)
       `server/index.ts:50-52`
 - [ ] `VoiceConfigToggles` uses inline object dispatch (harmless but creates new refs)
       `src/components/dictation/VoiceConfigToggles.tsx:14-16`

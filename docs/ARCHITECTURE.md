@@ -30,9 +30,9 @@ Express API
 │     ├─ local: persistent faster-whisper Python worker
 │     └─ cloud: ElevenLabs Scribe v2 adapter
 ├─ /api/refine + /api/refine/complete
-│  └─ Anthropic streaming/completion adapter
+│  └─ Ollama Cloud native chat streaming/completion adapter
 └─ /api/variants
-   └─ sequential Anthropic completion calls
+   └─ sequential Ollama Cloud completion calls
 ```
 
 The frontend works with provider-neutral transcription results:
@@ -102,7 +102,7 @@ This is spelling and vocabulary adaptation, not acoustic speaker adaptation. A f
 
 ## Refinement modes
 
-Prompt construction lives in `src/lib/prompts.ts`; transport lives behind `src/lib/claude.ts` and the Express routes. Keeping those responsibilities separate makes prompt behavior testable without a live model and leaves room for a future model-provider interface.
+Prompt construction lives in `src/lib/prompts.ts`; browser transport lives behind `src/lib/refinementApi.ts`, while the Ollama Cloud contract lives in `server/lib/ollama.ts` behind the Express routes. Keeping those responsibilities separate makes prompt behavior testable without a live model and leaves room for a future fully local provider.
 
 ### Faithful edit (default)
 
@@ -128,7 +128,7 @@ Full overhaul is intentionally a separate action. It may find an idea recurring 
 | Voice-profile derivation | No | Browser-local text and aggregate metrics |
 | Local faster-whisper | No external service | Audio and hints reach the locally running API/worker |
 | ElevenLabs transcription | Yes | Audio and selected vocabulary hints |
-| Anthropic refinement | Yes | Source/edited text, instruction, vocabulary hints already present in that request, active-entry prosody guidance |
+| Ollama Cloud refinement | Yes | Source/edited text, instruction, vocabulary hints already present in that request, active-entry prosody guidance |
 
 Service keys remain server-side. The API binds to loopback by default and requires shared-secret authentication before it will bind to a non-loopback host. The current profile is not suitable for authentication, medical inference, or forensic identification. Users handling sensitive notes should understand both the selected transcription provider and whether they invoke cloud refinement.
 

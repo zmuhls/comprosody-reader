@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { streamRefinement } from './claude';
+import { streamRefinement } from './refinementApi';
 
 function responseStream(chunks: string[]) {
   const encoder = new TextEncoder();

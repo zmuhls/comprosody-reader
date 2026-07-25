@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Comprosody — oral dictation to refined prose. Records speech, transcribes via faster-whisper with word-level timestamps, computes prosody metrics (pace, energy, fluency, lexical density), then refines the transcript through Claude with genre-aware, prosody-informed system prompts.
+Comprosody — oral dictation to refined prose. Records speech, transcribes via faster-whisper with word-level timestamps, computes prosody metrics (pace, energy, fluency, lexical density), then refines the transcript through Ollama Cloud with genre-aware, prosody-informed system prompts.
 
 ## Commands
 
@@ -22,13 +22,13 @@ Run a single test file: `npx vitest run src/lib/comprosody.test.ts`
 
 Both `dev` and `server` must run simultaneously. The Vite dev server proxies `/api/*` to `localhost:3001`.
 
-The server requires `ANTHROPIC_API_KEY` in a `.env` file (see `.env.example`). Whisper transcription requires `pip install faster-whisper`.
+Cloud refinement requires the server-only `OLLAMA_API_KEY` in a `.env` file (see `.env.example`). Whisper transcription requires `pip install faster-whisper`.
 
 ## Architecture
 
 ### Two-process model
 - **Frontend** (React 19 + Vite + Tailwind 4): SPA with recording UI, prosody display, split-pane editor
-- **Backend** (Express + tsx): proxies Claude API calls (no API key in browser), runs faster-whisper transcription via Python subprocess
+- **Backend** (Express + tsx): proxies Ollama Cloud calls (no API key in browser), runs faster-whisper transcription via Python subprocess
 
 ### Data flow
 ```
@@ -36,7 +36,7 @@ Record → [MediaRecorder + AudioAnalyser + Web Speech API (interim)]
   → Stop → audio blob POST /api/transcribe
   → faster-whisper returns {transcript, words: [{word, start, end}]}
   → User clicks Refine → buildSystemPrompt(genre, prosody, voiceConfig)
-  → POST /api/refine (SSE streaming) → Claude Opus 4.6 with adaptive thinking
+  → POST /api/refine (SSE streaming) → Ollama Cloud native chat API
   → Streamed refined text displayed in editor
 ```
 
@@ -47,9 +47,9 @@ Two React contexts (useReducer, no external state library):
 
 ### Key modules
 - `src/lib/comprosody.ts` — prosody computation (WPM, energy RMS, fluency, lexical density) + interpretation labels
-- `src/lib/prompts.ts` — builds genre/scale/prosody/voiceConfig-aware system prompts for Claude
-- `src/lib/claude.ts` — client-side fetch wrappers for `/api/refine` (SSE), `/api/refine/complete`, `/api/variants`
-- `server/lib/claude.ts` — server-side Anthropic SDK: Opus 4.6, adaptive thinking, prompt caching (`cache_control: ephemeral`)
+- `src/lib/prompts.ts` — builds genre/scale/prosody/voiceConfig-aware system prompts
+- `src/lib/refinementApi.ts` — client-side fetch wrappers for `/api/refine` (SSE), `/api/refine/complete`, `/api/variants`
+- `server/lib/ollama.ts` — server-side Ollama native chat adapter with NDJSON streaming and strict completion checks
 - `server/lib/transcribe.ts` — spawns `python3 server/scripts/transcribe.py` with audio file, parses JSON output
 
 ### Recording flow

@@ -20,7 +20,7 @@ Scholarship search is deliberately **not implemented yet**. The slim search rail
 
 ## Quick start
 
-Prerequisites: a current Node.js LTS release, npm, Python 3, and a browser with microphone support. Local transcription and note editing run without cloud credentials. Add an Anthropic key only when you want AI refinement.
+Prerequisites: a current Node.js LTS release, npm, Python 3, and a browser with microphone support. Local transcription and note editing run without cloud credentials. Add an Ollama Cloud key only when you want AI refinement.
 
 ```bash
 npm install
@@ -35,7 +35,10 @@ cp .env.example .env
 To enable refinement, edit `.env` and set its server-side credential:
 
 ```dotenv
-ANTHROPIC_API_KEY=your-anthropic-key
+OLLAMA_API_KEY=your-ollama-api-key
+# Optional non-secret overrides:
+# OLLAMA_MODEL=qwen3.5:397b
+# OLLAMA_BASE_URL=https://ollama.com
 ```
 
 Never put service keys in frontend code, commit `.env`, or paste keys into notes. All supported service credentials are read by the Express server.
@@ -91,7 +94,7 @@ The default settings are academic register, sentence scale, temperature `0.2`, f
 
 Focused instructions apply to the current selection when text is selected and to the whole note otherwise. Full overhaul may reorder and consolidate passages around an intermittently recurring idea, but it retains the same factuality and voice-preservation constraints. Refinement streams from the server and records the completed edit in note history.
 
-The current refinement adapter is Anthropic-specific. Its server-side boundary is intentionally separate from transcription so a later local or alternate language-model adapter can replace it without changing the editor.
+Refinement uses Ollama Cloud's native chat API through a server-only adapter. The default direct-API model is `qwen3.5:397b`; `OLLAMA_MODEL` and `OLLAMA_BASE_URL` are validated server-side overrides. Streaming responses are accepted only after Ollama emits `done: true`, so an interrupted response cannot silently replace a note with partial prose. The provider boundary remains separate from transcription so a later fully local adapter can replace it without changing the editor.
 
 ## Local data and privacy
 
@@ -110,7 +113,7 @@ Privacy depends on the operation:
 
 - Local transcription keeps audio and vocabulary hints on the machine running the browser and server.
 - ElevenLabs transcription uploads audio and selected vocabulary hints to ElevenLabs.
-- Anthropic refinement sends the active note text, focused instruction, only learned terms already present in that request, and the active entry's derived prosody guidance to Anthropic.
+- Ollama Cloud refinement sends the active note text, focused instruction, only learned terms already present in that request, and the active entry's derived prosody guidance to the configured Ollama host.
 - Cadence does not persist raw microphone audio in IndexedDB, localStorage, or recording-session state after transcription.
 
 For sensitive material, run Cadence on a machine you control, choose Private
