@@ -100,6 +100,22 @@ test('empty public catalog is valid and exposes no arbitrary book state', async 
   const { origin } = await startServer(t);
   assert.equal((await fetch(`${origin}/grid-motion.js`)).status, 200);
   assert.equal((await fetch(`${origin}/login.js`)).status, 200);
+  const installPaths = [
+    '/manifest.webmanifest',
+    '/apple-touch-icon.png',
+    '/icons/comprosody-180.png',
+    '/icons/comprosody-192.png',
+    '/icons/comprosody-512.png',
+    '/icons/comprosody-maskable-512.png',
+  ];
+  for (const pathname of installPaths) {
+    assert.equal((await fetch(`${origin}${pathname}`)).status, 200, pathname);
+  }
+  const manifestResponse = await fetch(`${origin}/manifest.webmanifest`);
+  assert.match(manifestResponse.headers.get('content-type'), /^application\/manifest\+json\b/u);
+  assert.equal(manifestResponse.headers.get('cache-control'), 'private, no-store');
+  const loginPage = await fetch(`${origin}/login.html`);
+  assert.match(loginPage.headers.get('content-security-policy'), /manifest-src 'self'/u);
   const cookie = await login(origin);
   assert.deepEqual(
     await fetch(`${origin}/api/catalog`, { headers: { cookie } }).then((response) => response.json()),

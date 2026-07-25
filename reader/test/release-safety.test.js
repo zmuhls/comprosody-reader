@@ -33,7 +33,8 @@ test('public snapshot starts with an empty catalog and no private artifact class
 });
 
 test('source contains no private titles, unrelated product surfaces, or credential values', () => {
-  const sourceFiles = filesUnder().filter((file) => /\.(?:js|json|html|css|md|toml)$/u.test(file));
+  const sourceFiles = filesUnder()
+    .filter((file) => /\.(?:js|json|html|css|md|toml|webmanifest)$/u.test(file));
   const authored = sourceFiles
     .map((file) => fs.readFileSync(file, 'utf8'))
     .join('\n');
@@ -61,6 +62,43 @@ test('source contains no private titles, unrelated product surfaces, or credenti
     authored,
     /c[f]fcf[0-9a-z.]+|(?:api[_-]?key|token)\s*[:=]\s*["'][a-z0-9._-]{24,}["']/iu,
   );
+});
+
+test('home-screen assets are generic metadata without expanded file-handling surfaces', () => {
+  const manifest = JSON.parse(fs.readFileSync('public/manifest.webmanifest', 'utf8'));
+  assert.equal(manifest.id, '/');
+  assert.equal(manifest.start_url, '/');
+  assert.equal(manifest.scope, '/');
+  assert.equal(manifest.display, 'standalone');
+  for (const key of [
+    'share_target',
+    'file_handlers',
+    'shortcuts',
+    'screenshots',
+    'serviceworker',
+  ]) {
+    assert.equal(Object.hasOwn(manifest, key), false, key);
+  }
+  assert.doesNotMatch(JSON.stringify(manifest), /@|https?:|token|account/iu);
+  assert.deepEqual(
+    fs.readdirSync('public/icons').sort(),
+    [
+      'comprosody-180.png',
+      'comprosody-192.png',
+      'comprosody-512.png',
+      'comprosody-maskable-512.png',
+    ],
+  );
+  const files = filesUnder();
+  assert.equal(
+    files.some((file) => /(?:^|\/)(?:service-worker|sw)\.js$/iu.test(file)),
+    false,
+  );
+  const scripts = files
+    .filter((file) => /\.js$/u.test(file))
+    .map((file) => fs.readFileSync(file, 'utf8'))
+    .join('\n');
+  assert.doesNotMatch(scripts, /navigator\.serviceWorker/u);
 });
 
 test('deployment and Git ignore policies deny private and generated artifacts', () => {

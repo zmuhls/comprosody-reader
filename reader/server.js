@@ -93,6 +93,7 @@ app.use(helmet({
       frameSrc: ["'self'", 'blob:'],
       workerSrc: ["'self'", 'blob:'],
       fontSrc: ["'self'", 'data:'],
+      manifestSrc: ["'self'"],
       upgradeInsecureRequests: deployed ? [] : null,
     },
   },
@@ -492,6 +493,25 @@ app.get('/theme-bootstrap.js', (_req, res) => {
 });
 app.get('/grid-motion.js', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'grid-motion.js'));
+});
+app.get('/manifest.webmanifest', (_req, res) => {
+  res.type('application/manifest+json');
+  res.sendFile(path.join(__dirname, 'public', 'manifest.webmanifest'));
+});
+app.get('/apple-touch-icon.png', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'icons', 'comprosody-180.png'));
+});
+app.get('/icons/comprosody-180.png', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'icons', 'comprosody-180.png'));
+});
+app.get('/icons/comprosody-192.png', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'icons', 'comprosody-192.png'));
+});
+app.get('/icons/comprosody-512.png', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'icons', 'comprosody-512.png'));
+});
+app.get('/icons/comprosody-maskable-512.png', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'icons', 'comprosody-maskable-512.png'));
 });
 app.get(/\.pdf$/iu, auth, (_req, res) => res.sendStatus(404));
 app.use(auth, express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));

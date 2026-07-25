@@ -26,6 +26,62 @@ test('palette is black, neutral gray, and sparing eggshell without purple', () =
   assert.match(styles, /linear-gradient\(-45deg/u);
 });
 
+test('home-screen metadata is generic, installable, and download-only', () => {
+  const app = read('public/app.js');
+  const manifest = JSON.parse(read('public/manifest.webmanifest'));
+  for (const file of ['public/index.html', 'public/login.html']) {
+    const markup = read(file);
+    assert.match(markup, /rel="manifest"\s+href="\/manifest\.webmanifest"/u);
+    assert.match(
+      markup,
+      /rel="apple-touch-icon"\s+sizes="180x180"\s+href="\/icons\/comprosody-180\.png"/u,
+    );
+    assert.match(markup, /name="apple-mobile-web-app-capable"\s+content="yes"/u);
+    assert.match(markup, /name="apple-mobile-web-app-title"\s+content="comprosody"/u);
+    assert.match(
+      markup,
+      /name="apple-mobile-web-app-status-bar-style"\s+content="black-translucent"/u,
+    );
+  }
+  assert.deepEqual(manifest, {
+    id: '/',
+    name: 'comprosody reader',
+    short_name: 'comprosody',
+    description: 'private epub reader and note-taking library',
+    lang: 'en',
+    start_url: '/',
+    scope: '/',
+    display: 'standalone',
+    background_color: '#0a0a0a',
+    theme_color: '#0a0a0a',
+    icons: [
+      {
+        src: '/icons/comprosody-192.png',
+        sizes: '192x192',
+        type: 'image/png',
+        purpose: 'any',
+      },
+      {
+        src: '/icons/comprosody-512.png',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'any',
+      },
+      {
+        src: '/icons/comprosody-maskable-512.png',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'maskable',
+      },
+    ],
+  });
+  assert.match(
+    app,
+    /href="\/books\/\$\{encodeURIComponent\(item\.book\)\}\.epub"\s+download>download epub/u,
+  );
+  assert.doesNotMatch(app, /navigator\.share|data-epub-share/u);
+});
+
 test('mobile controls respect safe areas, coarse landscape, and accessible labels', () => {
   const markup = read('public/index.html');
   const loginMarkup = read('public/login.html');

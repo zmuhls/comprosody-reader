@@ -49,6 +49,12 @@ The ingest panel first checks an authenticated readiness endpoint and keeps conv
 
 PDF bytes are read only in the browser with PDF.js. The client submits extracted text and entered metadata to the server; it does not upload the PDF file. The server runs three conservative GLM-5.2 remediation passes and returns a temporary EPUB download. Set `OLLAMA_API_KEY` only as a server-side environment variable to enable this feature.
 
+## install on iphone
+
+On iPhone, sign in and tap `download epub`, then open the downloaded file in Books or save it in Files. To install the web reader itself, use Safari’s Share menu and Add to Home Screen. The install metadata includes a neutral Rubi icon and launches at the signed-in library or, when the session has expired, the sign-in page.
+
+The app intentionally has no service worker. Home Screen installation works online, while authenticated EPUBs, profiles, bookmarks, highlights, and annotations remain `private, no-store` and are never copied into browser Cache Storage.
+
 ## railway
 
 When this project is kept in the repository’s `reader/` subtree, set the Railway service root directory to `/reader`.
