@@ -57,6 +57,7 @@ describe('mobile touch target stylesheet contract', () => {
       declarationsFor(
         '.entry-primary-action',
         '.tree-row',
+        '.breadcrumb',
         '.mobile-workspace-switch button',
       ),
     ).toContain('min-height: 44px');

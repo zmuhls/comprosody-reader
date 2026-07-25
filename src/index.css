@@ -2543,6 +2543,7 @@ textarea:focus-visible,
   .entry-primary-action,
   .tree-row,
   .sidebar-footer-row,
+  .breadcrumb,
   .mobile-workspace-switch button {
     min-height: 44px;
   }
