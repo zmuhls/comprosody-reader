@@ -189,15 +189,6 @@ export function SpeechProvider({ children }: { children: ReactNode }) {
           voiceId: selectedVoiceId,
         });
         if (request.signal.aborted) return;
-        void recordImprovementEvent({
-          eventType: 'speech_synthesis',
-          outcome: 'succeeded',
-          provider: 'elevenlabs',
-          durationMs: performance.now() - metricStartedAt,
-          inputUnits: normalizedText.length,
-          speechSpeed: speed,
-        });
-        metricRecorded = true;
         const audioUrl = URL.createObjectURL(audioBlob);
         const audio = new Audio(audioUrl);
         audioRef.current = audio;
@@ -212,6 +203,15 @@ export function SpeechProvider({ children }: { children: ReactNode }) {
           setPlaybackState('idle');
         };
         await audio.play();
+        void recordImprovementEvent({
+          eventType: 'speech_synthesis',
+          outcome: 'succeeded',
+          provider: 'elevenlabs',
+          durationMs: performance.now() - metricStartedAt,
+          inputUnits: normalizedText.length,
+          speechSpeed: speed,
+        });
+        metricRecorded = true;
         setPlaybackState('playing');
       } catch (caught) {
         if (!metricRecorded) {
