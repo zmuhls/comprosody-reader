@@ -2525,6 +2525,148 @@ textarea:focus-visible,
   }
 }
 
+@media (max-width: 600px) {
+  .sidebar-header .icon-button,
+  .entry-folder-action,
+  .tree-delete,
+  .editor-topbar .icon-button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .entry-actions {
+    min-height: 52px;
+  }
+
+  .entry-primary-action,
+  .tree-row,
+  .sidebar-footer-row,
+  .mobile-workspace-switch button {
+    min-height: 44px;
+  }
+
+  .tree-delete {
+    flex-basis: 44px;
+  }
+
+  .editor-topbar {
+    gap: 4px;
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .editor-topbar .topbar-actions {
+    gap: 0;
+  }
+
+  .document-title {
+    min-height: 44px;
+  }
+
+  .refinement-input-shell,
+  .refinement-input-shell input,
+  .refinement-send,
+  .text-action,
+  .auto-refine-control {
+    min-height: 44px;
+  }
+
+  .refinement-input-shell {
+    height: 44px;
+  }
+
+  .refinement-send {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .text-action {
+    display: inline-flex;
+    align-items: center;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .auto-refine-control {
+    gap: 0;
+  }
+
+  .mini-switch {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .mini-switch::before {
+    position: absolute;
+    top: 15px;
+    left: 10px;
+    width: 23px;
+    height: 12px;
+    border: 1px solid var(--color-border);
+    border-radius: 7px;
+    background: var(--color-surface-overlay);
+    content: "";
+  }
+
+  .mini-switch[data-state="checked"] {
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .mini-switch[data-state="checked"]::before {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+  }
+
+  .mini-switch-thumb {
+    position: absolute;
+    top: 17px;
+    left: 12px;
+    transform: none;
+  }
+
+  .mini-switch[data-state="checked"] .mini-switch-thumb {
+    left: 24px;
+    transform: none;
+  }
+
+  .record-control {
+    top: 6px;
+  }
+
+  .record-button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .interaction-dock[data-recording="true"] .record-control,
+  .interaction-dock[data-busy="true"] .record-control,
+  .interaction-dock:focus-within .record-control {
+    top: 14px;
+  }
+
+  .provider-trigger {
+    height: 44px;
+    min-height: 44px;
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+
+  .ui-menu-item {
+    min-height: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
