@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "name": "rubi",
+  "animation": "idle",
+  "frameCount": 6,
+  "frameSize": 96,
+  "fps": 3.0,
+  "anchor": "bottom-center",
+  "padding": 4,
+  "scale": 0.21052632,
+  "frames": [
+    "frames/01.png",
+    "frames/02.png",
+    "frames/03.png",
+    "frames/04.png",
+    "frames/05.png",
+    "frames/06.png"
+  ],
+  "strip": {
+    "webp": "idle-strip.webp",
+    "width": 576,
+    "height": 96
+  },
+  "preview": {
+    "loop": "idle-loop.webp"
+  },
+  "source": {
+    "fileName": "idle.png",
+    "sha256": "bd8742160b8a684700c59102568f60be897aede3b13571610e3827e2475391a9",
+    "keyColor": "#00ff00"
+  },
+  "qa": {
+    "frameMetrics": [
+      {
+        "bounds": [
+          20,
+          4,
+          75,
+          92
+        ],
+        "transparentPixels": 5227,
+        "visiblePixels": 3713
+      },
+      {
+        "bounds": [
+          21,
+          4,
+          75,
+          92
+        ],
+        "transparentPixels": 5295,
+        "visiblePixels": 3661
+      },
+      {
+        "bounds": [
+          21,
+          5,
+          75,
+          92
+        ],
+        "transparentPixels": 5323,
+        "visiblePixels": 3633
+      },
+      {
+        "bounds": [
+          20,
+          5,
+          75,
+          92
+        ],
+        "transparentPixels": 5255,
+        "visiblePixels": 3703
+      },
+      {
+        "bounds": [
+          21,
+          4,
+          75,
+          92
+        ],
+        "transparentPixels": 5296,
+        "visiblePixels": 3665
+      },
+      {
+        "bounds": [
+          21,
+          4,
+          75,
+          92
+        ],
+        "transparentPixels": 5297,
+        "visiblePixels": 3650
+      }
+    ],
+    "allFramesTransparent": true,
+    "allFramesVisible": true,
+    "sharedBottom": [
+      92
+    ]
+  }
+}

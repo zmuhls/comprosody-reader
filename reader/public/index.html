@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="theme-color" content="#0a0a0a"><meta name="color-scheme" content="dark">
+<title>comprosody reader</title><script src="/theme-bootstrap.js"></script><link rel="stylesheet" href="/styles.css"></head>
+<body><div class="app-shell">
+  <header class="app-header">
+    <button class="brand" id="home-button">comprosody</button>
+    <button class="menu-toggle" id="menu-toggle" aria-controls="navigation-stack" aria-expanded="false">menu</button>
+    <div id="navigation-stack" class="navigation-stack">
+      <nav id="directory-nav" class="directory-nav" aria-label="directories"></nav>
+      <div class="header-actions" id="header-actions">
+        <button id="ingest-toggle" aria-controls="ingest-panel" aria-expanded="false">ingest</button>
+        <button id="notes-toggle" aria-controls="notes-panel" aria-expanded="false">notes</button>
+        <button id="settings-toggle" aria-controls="settings-panel" aria-expanded="false">settings</button>
+        <button id="logout">sign out</button>
+      </div>
+    </div>
+  </header>
+  <main id="library" class="library"><section class="library-intro"><h1 id="library-title">comprosody reader</h1><div class="library-intro-meta"><p id="library-subtitle">reader and note-taking library</p><button id="organize-open" class="organize-button">organize</button></div></section><section id="book-list" class="book-list" aria-live="polite"></section></main>
+  <main id="reader" class="reader" hidden>
+    <nav class="reader-toolbar"><button id="back" aria-label="previous page">←</button><div><strong id="reader-title"></strong><span id="reader-location">opening…</span></div><div class="reader-toolbar-actions"><button id="forward" aria-label="next page">→</button><button id="bookmark-current" class="bookmark-button" type="button" aria-label="bookmark this page" aria-pressed="false" disabled>mark</button><button id="reader-settings" aria-label="reading settings">aa</button><div id="save-feedback" class="save-feedback"><span id="save-status" role="status" aria-live="polite"></span><button id="retry-save" type="button" hidden>retry</button></div></div></nav>
+    <div id="viewer"></div><button id="selection-action" hidden>highlight + note</button>
+  </main>
+  <aside id="notes-panel" class="notes-panel" aria-label="bookmarks, highlights, and notes" hidden>
+    <div class="notes-head"><h2>notes</h2><button id="notes-close">close</button></div>
+    <section><h3>bookmarks</h3><div id="bookmark-list"></div><div class="bookmark-save"><span id="bookmark-status" role="status" aria-live="polite"></span><button id="retry-bookmarks" type="button" hidden>retry</button></div></section>
+    <section><h3>highlights</h3><div id="notes-list" data-note-actions="jump edit"></div></section>
+  </aside>
+  <aside id="settings-panel" class="settings-panel" aria-label="reading settings" hidden>
+    <div class="notes-head"><h2 id="settings-heading">reading</h2><button id="settings-close">done</button></div>
+    <div id="settings-main">
+      <fieldset class="setting-row mode-setting"><legend>mode</legend><div class="mode-dial" role="radiogroup" aria-label="mode"><label><input type="radio" name="theme" value="light"><span>light</span></label><label><input type="radio" name="theme" value="dark"><span>dark</span></label></div></fieldset>
+      <button id="font-open" class="setting-disclosure" type="button"><span>font</span><output id="font-value">iowan old style</output><span aria-hidden="true">→</span></button>
+      <section class="setting-row range-setting"><div><label for="font-size">size</label><output id="font-size-value" for="font-size">18 px</output></div><div class="range-line"><button type="button" data-step-for="font-size" data-step="-1" aria-label="decrease size">−</button><input id="font-size" type="range" min="12" max="40" step="1"><button type="button" data-step-for="font-size" data-step="1" aria-label="increase size">+</button></div></section>
+      <section class="setting-row range-setting"><div><label for="line-height">line</label><output id="line-height-value" for="line-height">1.60</output></div><div class="range-line"><button type="button" data-step-for="line-height" data-step="-0.05" aria-label="decrease line height">−</button><input id="line-height" type="range" min="1.2" max="2.4" step="0.05"><button type="button" data-step-for="line-height" data-step="0.05" aria-label="increase line height">+</button></div></section>
+      <section class="setting-row range-setting"><div><label for="page-width">width</label></div><input id="page-width" type="range" min="0" max="4" step="1" aria-valuetext="medium"><div class="range-ends"><span>narrow</span><span>wide</span></div></section>
+      <section class="setting-row range-setting"><div><label for="page-margin">margin</label></div><input id="page-margin" type="range" min="0" max="4" step="1" aria-valuetext="medium"><div class="range-ends"><span>less</span><span>more</span></div></section>
+      <section class="setting-row range-setting"><div><label for="page-padding">padding</label></div><input id="page-padding" type="range" min="0" max="4" step="1" aria-valuetext="medium"><div class="range-ends"><span>less</span><span>more</span></div></section>
+      <button id="rubi-visibility" class="setting-disclosure" type="button"><span>rubi</span><output id="rubi-value">shown</output><span aria-hidden="true">↔</span></button>
+      <button id="settings-reset" class="settings-reset" type="button">reset</button>
+      <p id="settings-status" class="panel-status" role="status" aria-live="polite"></p>
+    </div>
+    <section id="font-picker" class="font-picker" hidden><div class="font-picker-head"><h3>font</h3><button id="font-back" type="button">back</button></div><div id="font-options"></div></section>
+  </aside>
+  <aside id="ingest-panel" class="ingest-panel" aria-label="pdf to epub" hidden>
+    <div class="notes-head"><h2>ingest</h2><button id="ingest-close" type="button">done</button></div>
+    <form id="ingest-form" class="ingest-form">
+      <label class="file-choice"><span>pdf</span><output id="ingest-file">choose</output><input id="ingest-pdf" type="file" accept="application/pdf,.pdf" required></label>
+      <label for="ingest-title">title</label><input id="ingest-title" maxlength="180" required>
+      <label for="ingest-author">author</label><input id="ingest-author" maxlength="180">
+      <label for="ingest-language">language</label><input id="ingest-language" value="en" maxlength="16" required>
+      <p>pdf stays on this device. extracted text runs through three fidelity passes.</p>
+      <button id="ingest-start" type="submit">make epub</button>
+      <button id="ingest-cancel" type="button" hidden>cancel</button>
+    </form>
+    <section class="ingest-activity" aria-labelledby="ingest-activity-heading">
+      <h3 id="ingest-activity-heading">activity</h3>
+      <p id="ingest-status" role="status" aria-live="polite">idle</p>
+      <p id="ingest-progress" aria-hidden="true"></p>
+      <ol id="ingest-log" role="log" aria-live="off"></ol>
+      <a id="ingest-download" hidden>download epub</a>
+    </section>
+  </aside>
+  <dialog id="annotation-dialog" aria-labelledby="annotation-heading"><form method="dialog"><h2 id="annotation-heading">annotate</h2><blockquote id="selected-text"></blockquote><label for="note-text">note <span>(optional)</span></label><textarea id="note-text"></textarea><p id="annotation-error" class="form-error" role="alert" aria-live="assertive"></p><div><button value="cancel">cancel</button><button id="save-note" value="default">save</button></div></form></dialog>
+  <dialog id="organize-dialog" class="organize-dialog" aria-labelledby="organize-heading"><div class="organize-head"><h2 id="organize-heading">organize</h2><button id="organize-close" type="button">done</button></div><form id="new-folder-form" class="new-folder-form"><label for="new-folder-name">new folder</label><input id="new-folder-name" name="name" maxlength="80" autocomplete="off" placeholder="name" required><select id="new-folder-parent" name="parent" aria-label="parent folder"></select><button type="submit">create</button></form><section><h3>folders</h3><div id="folder-organizer"></div></section><section><h3>readings</h3><div id="book-organizer"></div></section><p id="organize-status" class="panel-status" role="status" aria-live="polite"></p></dialog>
+</div><script src="/vendor-reader.js"></script><script type="module" src="/app.js"></script></body></html>
