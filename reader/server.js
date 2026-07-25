@@ -473,6 +473,7 @@ app.get('/theme-bootstrap.js', (_req, res) => {
 app.get('/grid-motion.js', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'grid-motion.js'));
 });
+app.get(/\.pdf$/iu, auth, (_req, res) => res.sendStatus(404));
 app.use(auth, express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 app.get('/*splat', auth, (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

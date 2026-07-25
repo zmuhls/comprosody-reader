@@ -121,6 +121,28 @@ test('empty public catalog is valid and exposes no arbitrary book state', async 
   }
 });
 
+test('authenticated PDF-looking routes fail closed before the reader fallback', async (t) => {
+  const { origin } = await startServer(t);
+  const cookie = await login(origin);
+  for (const pathname of [
+    '/source/example.pdf',
+    '/books/example.pdf',
+    '/example.pdf',
+    '/nested/EXAMPLE.PDF?download=1',
+  ]) {
+    const response = await fetch(`${origin}${pathname}`, {
+      headers: { cookie },
+      redirect: 'manual',
+    });
+    assert.equal(response.status, 404, pathname);
+    assert.doesNotMatch(
+      response.headers.get('content-type') || '',
+      /(?:text\/html|application\/pdf)/iu,
+      pathname,
+    );
+  }
+});
+
 test('resume state and bookmarks persist under the verified account identity', async (t) => {
   const catalog = [{
     book: 'example-reading',
