@@ -1,44 +1,68 @@
 # TODO
 
-Audit findings from 2026-04-10. The app is functionally wired up end-to-end — recording, transcription, refinement, and variants all work. Items below are improvements, not blockers, unless flagged otherwise.
+Audit findings from 2026-04-10, resolved in the 2026-07-26 optimization pass (branch `optimization-pass`). One item remains open below; everything else moved to Done with its resolution.
 
-## Critical
+## Open
 
-- [ ] **Selection refinement can corrupt text** — `src/hooks/useRefinement.ts` `refineSelection` captures `selectionStart`/`selectionEnd` at call time but the textarea stays editable during the async API call. If the user types during refinement, the splice lands at the wrong position. Fix: lock the textarea (`readOnly`) while the selection refinement is in flight, or re-find the original substring before splicing.
-- [ ] **No timeouts on upstream `fetch` calls** — `server/lib/claude.ts` and `server/lib/transcribe.ts` call OpenRouter with no timeout. A hung connection holds the Express response open indefinitely. Add `AbortController` with a sane timeout (e.g. 60s for refine, 120s for transcribe).
-- [ ] **No input validation on backend routes** — all three refine endpoints and `/api/transcribe` pass body fields straight to upstream calls. Missing/wrong-type fields produce opaque OpenRouter errors instead of helpful 400s. Add a small validator (zod or hand-rolled) at each route.
-- [ ] **`/api/variants` is fail-fast** — `server/routes/refine.ts` uses `Promise.all`, so one failed variant call discards all completed variants. Switch to `Promise.allSettled` and return partial results.
-
-## High
-
-- [ ] **`refineComplete` is dead code** — `src/lib/claude.ts` exports `refineComplete()` calling `POST /api/refine/complete`. Nothing imports it. Either wire it into a UI affordance or delete both the client function and the server route.
-- [ ] **Word timestamps pipeline is inert** — `server/lib/transcribe.ts` hardcodes `words: []`, `duration: 0`, `language: 'en'`. The frontend loop in `src/hooks/useTranscription.ts:46-52` that would dispatch `ADD_WORD_TIMESTAMP` never runs. Either make the transcribe model return word-level timing (and parse it) or remove the dead dispatch and the `wordTimestamps` field from `RecordingSession`.
-- [ ] **VoiceConfigToggles label click dead zone** — `src/components/dictation/VoiceConfigToggles.tsx` `Toggle` subcomponent: the `<label>` wraps no `<input>` and has no `htmlFor`, so clicking the text label does nothing — only the small toggle square is clickable. Fix: move the `onClick` to the outer `label`, or convert to a real `<input type="checkbox">` with `htmlFor`.
-- [ ] **`@anthropic-ai/sdk` is an unused dependency** — listed in `package.json` but never imported. Remove it.
-- [ ] **No global JSON error handler on Express** — `server/index.ts` has no `app.use((err, req, res, next) => ...)`. Express 5's default handler returns HTML, which breaks JSON-expecting clients. Add a JSON error middleware.
-
-## Medium
-
-- [ ] **`SET_AUDIO_BLOB` dispatch is dead** — `src/hooks/useTranscription.ts:55` stores the blob in `RecordingContext.session.audioBlob` but nothing reads it. Remove the dispatch and the field, or wire up a "play back recording" affordance.
-- [ ] **Stale-closure fallback may lose final phrase** — when `/api/transcribe` fails and we fall back to Web Speech API, `recState.session.finalTranscript` may be missing the last phrase due to React's batched state update after `speech.stop()`. Capture `finalTranscript` via a ref synced in `useSpeechRecognition`.
-- [ ] **`OPENROUTER_TRANSCRIBE_MODEL` missing from `.env.example`** — used in `server/lib/transcribe.ts` but undocumented for new contributors.
-- [ ] **No size limit on raw audio uploads** — `/api/transcribe` reads the body stream with no cap. The global `express.json({ limit: '10mb' })` doesn't apply to non-JSON bodies. Add an explicit byte limit.
-- [ ] **`max_tokens: 64000` in `streamRefinement`** — exceeds most model context windows. OpenRouter silently clamps for some models, errors for others. Lower to a realistic value (e.g. 8192).
-- [ ] **Empty content silently returns 200** — `refineComplete` and per-variant calls in `server/lib/claude.ts` use `?? ''`, so an empty upstream response looks like a successful empty result. Surface this as an error.
-
-## Low
-
-- [ ] **No localStorage write debounce** — `src/context/AppContext.tsx` persists the entire entries map on every keystroke. Add a 200–500ms debounce.
-- [ ] **`generateVariants` missing `dispatch` in deps** — `src/hooks/useRefinement.ts:160`. `dispatch` is stable from `useReducer` so no runtime bug, but it violates `react-hooks/exhaustive-deps`.
-- [ ] **`VariantCards` `LABEL_STYLES` weak typing** — typed as `Record<string, ...>` instead of `Record<'cool' | 'warm' | 'hot', ...>`. Tighten the type.
-- [ ] **Compounding CSS transparency** — `bg-surface/80` on the Sidebar applies 80% opacity to a token that's already `rgba(..., 0.82)`. Pick one source of transparency.
-- [ ] **Waveform rAF lifecycle coupling** — `src/components/dictation/Waveform.tsx` cannot cancel its own rAF loop. It relies on `MainPanel.handleStop` calling `audio.stop()`. Fragile if a new stop path is added. Make `Waveform` cancel on unmount/`isRecording=false`.
-- [ ] **`response.body!` non-null assertion** — `src/lib/claude.ts:16` and `server/lib/claude.ts:50`. Replace with explicit null check.
-- [ ] **Duplicated API key access** — `server/lib/transcribe.ts` reads `process.env.OPENROUTER_API_KEY` inline instead of using the `getApiKey()` helper from `server/lib/claude.ts`.
-- [ ] **No `X-Accel-Buffering: no` header on SSE** — only matters if deployed behind nginx, but worth adding pre-emptively.
-- [ ] **CORS fully open** — `server/index.ts` uses `cors()` with no origin whitelist. Fine for local dev, restrict before any deploy.
-- [ ] **`isTranscribing` does not disable `RecordButton`** — user can start a new recording while a previous transcription POST is still in flight, racing the pending `appendTranscript` call.
+- [ ] **`.env.example` missing new vars** — needs two additions (blocked for automation by the protected-files hook; edit manually):
+  - `OPENROUTER_TRANSCRIBE_MODEL=google/gemini-2.5-flash` (used by `server/lib/transcribe.ts`)
+  - `CORS_ORIGIN=http://localhost:5173` (comma-separated allowlist read by `server/index.ts`)
 
 ## Done
 
-(none yet)
+### Critical
+
+- [x] **Selection refinement can corrupt text** — refined textarea is `readOnly` while refining (`aria-busy`, visual cue); `refineSelection` re-checks the captured selection against the current entry text before splicing and errors with `selection changed during refinement` on mismatch.
+- [x] **No timeouts on upstream `fetch` calls** — `AbortSignal.timeout(60_000)` on `refineComplete`, `120_000` on transcribe; `streamRefinement` gets an idle-timeout controller (60s to first byte, 30s per chunk) combined with an optional external signal via `AbortSignal.any`.
+- [x] **No input validation on backend routes** — hand-rolled `server/lib/validate.ts` (`HttpError`, `reqObject`, `reqString`, `reqNumber`) validates `/api/refine` before SSE headers and `/api/variants` including the temperatures array; unit-tested.
+- [x] **`/api/variants` is fail-fast** — `Promise.allSettled`; responds `{ variants, errors }` with partial results, 502 only when all fail. Client surfaces "n of m variants returned".
+
+### High
+
+- [x] **`refineComplete` is dead code** — client function and `/api/refine/complete` route both deleted (`server/lib/claude.ts#refineComplete` kept — `/api/variants` uses it).
+- [x] **Word timestamps pipeline is inert** — removed end to end: server returns `{ transcript }` only; `WordTimestamp`, `session.wordTimestamps`, and `ADD_WORD_TIMESTAMP` deleted from the frontend.
+- [x] **VoiceConfigToggles label click dead zone** — converted to a real `<input type="checkbox">` (peer + sr-only) inside the label, with keyboard focus ring.
+- [x] **`@anthropic-ai/sdk` is an unused dependency** — removed (`idb-keyval` and `diff` added instead, both actively used).
+- [x] **No global JSON error handler on Express** — 4-arity JSON error middleware in `server/index.ts` (`headersSent` guard, `HttpError` status mapping); redundant per-route try/catch removed.
+
+### Medium
+
+- [x] **`SET_AUDIO_BLOB` dispatch is dead** — action and `session.audioBlob` removed; recordings now persist durably to IndexedDB (`src/lib/audioStore.ts`) with a per-entry takes player in the editor.
+- [x] **Stale-closure fallback may lose final phrase** — `finalTranscriptRef` + `getFinalTranscript()` in `useSpeechRecognition`; fallback reads go through the ref.
+- [x] **No size limit on raw audio uploads** — 25 MB cap in `/api/transcribe`: Content-Length pre-check (413) plus streamed byte counting with `req.destroy()`.
+- [x] **`max_tokens: 64000` in `streamRefinement`** — shared `MAX_OUTPUT_TOKENS = 8192` used by both refinement paths.
+- [x] **Empty content silently returns 200** — `refineComplete` throws on empty content; `/api/refine` emits an error event when the stream produces zero chunks.
+
+### Low
+
+- [x] **No localStorage write debounce** — `createDebouncedPersist` (trailing 300 ms) for entries/directories with flush on `pagehide`/`visibilitychange`; settings save immediately; all savers quota-safe.
+- [x] **`generateVariants` missing `dispatch` in deps** — stale finding: the dep array already includes `dispatch` in current code; no change needed.
+- [x] **`VariantCards` `LABEL_STYLES` weak typing** — typed `Record<Variant['label'], ...>`.
+- [x] **Compounding CSS transparency** — Sidebar uses `bg-surface` (token already carries alpha).
+- [x] **Waveform rAF lifecycle coupling** — `drawWaveform` returns a cancel function; `Waveform` cancels in its own effect cleanup. HiDPI drawing bug (device-pixel coords on a pre-scaled context) fixed alongside.
+- [x] **`response.body!` non-null assertion** — explicit null checks with clear errors, client and server.
+- [x] **Duplicated API key access** — `getApiKey()` exported from `server/lib/claude.ts`, shared by transcribe.
+- [x] **No `X-Accel-Buffering: no` header on SSE** — added, plus `flushHeaders()` after validation.
+- [x] **CORS fully open** — allowlist from `CORS_ORIGIN` env (default `http://localhost:5173`).
+- [x] **`isTranscribing` does not disable `RecordButton`** — disabled while a transcription is in flight (`aria-pressed`, reason in title).
+
+### Fixed beyond the audit
+
+- [x] Client disconnect on `/api/refine` now aborts the upstream OpenRouter stream (stops token billing).
+- [x] `DELETE_DIRECTORY` recursively cascades through nested sub-directories (was orphaning grandchildren permanently); IndexedDB recordings cascade too.
+- [x] Stale interim transcript no longer bakes into the editor after recording stops.
+- [x] `useProsody` interval no longer restarts on every render tick.
+- [x] Safari support: MediaRecorder mimeType probe (`webm;codecs=opus` → `webm` → `mp4`), server maps Content-Type to upstream audio format.
+- [x] localStorage load normalization/migration (`schemaVersion` 2) backfills new entry metadata on legacy data.
+
+### New features (2026-07-26)
+
+- [x] Durable audio takes: IndexedDB persistence + per-entry takes player with native audio controls.
+- [x] Transcription retry UX: failed uploads offer `retry upload` / `use live transcript` instead of silently falling back; live transcript auto-rescued if a new recording starts.
+- [x] Export/copy: markdown download and clipboard copy per entry (`src/lib/export.ts`).
+- [x] Undo: `draftHistory` (cap 10) with toolbar undo across refine/splice/variant overwrites.
+- [x] Raw-vs-refined diff view (`diffWords`) toggle in the refined pane.
+- [x] Sidebar search over name/transcript/draft with directory-aware filtering.
+- [x] Keyboard shortcuts: Ctrl/Cmd+Shift+Space record toggle, Ctrl/Cmd+Enter refine, Ctrl/Cmd+Shift+C copy.
+- [x] Live recording stats (elapsed `m:ss`, running word count) in the footer; per-entry word badge in the sidebar; take-duration chip in the editor.
+- [x] Delete confirmations on entries/directories; health check re-polls every 30 s and on window focus.

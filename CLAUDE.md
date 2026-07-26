@@ -23,6 +23,7 @@ All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs)
 - `OPENROUTER_API_KEY` — required
 - `OPENROUTER_MODEL` — refinement LLM (default: `moonshotai/kimi-k2-0905`)
 - `OPENROUTER_TRANSCRIBE_MODEL` — audio transcription (default: `google/gemini-2.5-flash`)
+- `CORS_ORIGIN` — comma-separated CORS allowlist (default: `http://localhost:5173`)
 
 ## Architecture
 
@@ -34,27 +35,33 @@ All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs)
 
 ### Server routes and libs
 
-- `server/lib/claude.ts` — `streamRefinement()` (SSE generator) and `refineComplete()` via OpenRouter `/chat/completions`. Both use direct `fetch`, no SDK.
-- `server/lib/transcribe.ts` — `transcribe()` sends base64-encoded webm audio as `input_audio` content type to an audio-capable model. Returns transcript text (no word-level timestamps).
-- `server/routes/refine.ts` — `POST /api/refine` (SSE stream), `POST /api/refine/complete`, `POST /api/variants` (3 temperatures in parallel)
-- `server/routes/transcribe.ts` — `POST /api/transcribe` receives raw audio buffer
+- `server/lib/claude.ts` — `streamRefinement()` (SSE generator, idle-timeout abort: 60s to first byte / 30s per chunk, accepts an external signal) and `refineComplete()` (60s timeout, throws on empty content) via OpenRouter `/chat/completions`. Direct `fetch`, no SDK. Shared `getApiKey()` and `MAX_OUTPUT_TOKENS` (8192).
+- `server/lib/transcribe.ts` — `transcribe()` sends base64 audio as `input_audio` to an audio-capable model (120s timeout). Returns `{ transcript }`. `audioFormatFromContentType()` maps the request Content-Type (webm/mp4/ogg/wav) to the upstream format string.
+- `server/lib/validate.ts` — hand-rolled request validation: `HttpError`, `reqObject`, `reqString`, `reqNumber`. Async route rejections flow to the global 4-arity JSON error middleware in `server/index.ts`.
+- `server/routes/refine.ts` — `POST /api/refine` (SSE stream; validates before headers; client disconnect aborts upstream), `POST /api/variants` (`Promise.allSettled` → `{ variants, errors }`, 502 only when all fail)
+- `server/routes/transcribe.ts` — `POST /api/transcribe` receives a raw audio buffer (25 MB cap: Content-Length pre-check plus streamed byte counting)
+- `GET /api/health` — `{ status: 'ok', keyConfigured }`
 
 ### Frontend state (two contexts, both useReducer)
 
-**AppContext** — entries (`Record<string, Entry>`), directories, `activeEntryId`, refinementSettings (genre, scale, temperature). Persisted to localStorage via `src/lib/storage.ts` on every reducer dispatch.
+**AppContext** — entries (`Record<string, Entry>`), directories, `activeEntryId`, refinementSettings (genre, scale, temperature). Entries/directories persist to localStorage via a 300 ms trailing debounce (`createDebouncedPersist` in `src/lib/storage.ts`) with flush on `pagehide`/`visibilitychange`; settings save immediately. All savers are quota-safe. `loadEntries` normalizes legacy data (backfills `wordCount`, `recordedDurationMs`, `audioTakes`, `draftHistory`; `schemaVersion` `'2'`). `DELETE_DIRECTORY` cascades recursively (shared `collectDirectoryCascade` BFS, also used by `useStorage` to cascade IndexedDB deletes).
 
-**RecordingContext** — `isRecording`, session (interim/final transcripts, word timestamps, pauses, volume samples, audioBlob), prosody diagnostics (`ProsodyDiagnostics`), voice config (`VoiceConfig`). Ephemeral — resets each recording.
+**RecordingContext** — `isRecording`, session (interim/final transcripts, pauses, volume samples), prosody diagnostics (`ProsodyDiagnostics`), voice config (`VoiceConfig`). Ephemeral — resets each recording. Audio itself persists durably to IndexedDB via `src/lib/audioStore.ts` (idb-keyval; one record per take, keyed `${entryId}:${recordedAt}`), surfaced by the `AudioTakes` player in the editor.
 
 ### Recording pipeline
 
 `MainPanel` orchestrates four hooks sharing one `MediaStream`:
 
 1. **useAudioAnalyser** — Web Audio `AnalyserNode` for waveform canvas drawing + `getTimeDomainData()` for energy measurement
-2. **useMediaRecorder** — captures audio chunks into a Blob (webm/opus, 1s intervals)
-3. **useSpeechRecognition** — Web Speech API for real-time interim transcript display (fallback if server transcription fails)
-4. **useProsody** — runs every 500ms: computes pace/energy/fluency/density from the above, dispatches `UPDATE_PROSODY`
+2. **useMediaRecorder** — captures audio chunks into a Blob (mimeType probed: `webm;codecs=opus` → `webm` → `mp4` for Safari; 1s intervals)
+3. **useSpeechRecognition** — Web Speech API for real-time interim transcript display; `getFinalTranscript()` reads a ref to avoid stale closures
+4. **useProsody** — 500ms interval keyed on `isRecording`: computes pace/energy/fluency/density, dispatches `UPDATE_PROSODY`
 
-On stop: audio blob → `POST /api/transcribe` (OpenRouter Gemini Flash via `input_audio`) → on failure falls back to Web Speech API `finalTranscript`.
+On stop: the take is saved to IndexedDB (fire-and-forget) and the blob goes to `POST /api/transcribe`. On transcription failure the footer offers `retry upload` / `use live transcript` (Web Speech fallback) instead of silently substituting; a pending failed take's live transcript is auto-rescued if a new recording starts.
+
+### Editor features
+
+Refined-pane textarea locks (`readOnly`) while refinement streams; `refineSelection` verifies the captured selection still matches before splicing. `entry.draftHistory` (cap 10) backs toolbar undo across full-refine/selection/variant overwrites. `DiffView` renders raw-vs-refined via `diffWords` (from `diff`). `src/lib/export.ts` provides markdown download and clipboard copy. Shortcuts: Ctrl/Cmd+Shift+Space (record), Ctrl/Cmd+Enter (refine), Ctrl/Cmd+Shift+C (copy).
 
 ### Prompt composition system
 
@@ -85,7 +92,7 @@ Color tokens follow `--color-{name}` convention mapping to Tailwind utilities (`
 
 ## Testing
 
-Vitest with jsdom. Globals enabled (no imports needed for `describe`/`it`/`expect`). Tests live alongside source: `*.test.ts`. Testing library available (`@testing-library/react`, `@testing-library/jest-dom`).
+Vitest with jsdom. Globals enabled (no imports needed for `describe`/`it`/`expect`). Tests live alongside source: `*.test.ts`, in both `src/` and `server/` (vitest include covers both). Testing library available (`@testing-library/react`, `@testing-library/jest-dom`).
 
 ## TypeScript
 
