@@ -3,36 +3,48 @@ import type { Variant } from '../../types/llm';
 interface Props {
   variants: Variant[];
   onAccept: (variant: Variant) => void;
+  disabled?: boolean;
+  note?: string | null;
 }
 
 const LABEL_STYLES: Record<
-  string,
-  { border: string; text: string; bg: string }
+  Variant['label'],
+  { border: string; hoverBorder: string; text: string; bg: string }
 > = {
   cool: {
     border: 'border-cool/40',
+    hoverBorder: 'hover:border-cool',
     text: 'text-cool',
     bg: 'bg-cool/5',
   },
   warm: {
     border: 'border-warm/40',
+    hoverBorder: 'hover:border-warm',
     text: 'text-warm',
     bg: 'bg-warm/5',
   },
   hot: {
     border: 'border-hot/40',
+    hoverBorder: 'hover:border-hot',
     text: 'text-hot',
     bg: 'bg-hot/5',
   },
 };
 
-export function VariantCards({ variants, onAccept }: Props) {
+export function VariantCards({ variants, onAccept, disabled, note }: Props) {
   if (variants.length === 0) return null;
 
   return (
     <div className="border-t border-border bg-surface px-5 py-4">
-      <div className="mb-3 text-[10px] uppercase tracking-[0.28em] text-text-muted">
-        variant passes
+      <div className="mb-3 flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-[0.28em] text-text-muted">
+          variant passes
+        </div>
+        {note && (
+          <span className="text-[9px] uppercase tracking-[0.18em] tabular-nums text-text-muted">
+            {note}
+          </span>
+        )}
       </div>
       <div className="grid gap-3 xl:grid-cols-3">
         {variants.map((v) => {
@@ -41,7 +53,8 @@ export function VariantCards({ variants, onAccept }: Props) {
             <button
               key={v.label}
               onClick={() => onAccept(v)}
-              className={`border ${style.border} ${style.bg} p-4 text-left transition-all hover:-translate-y-px hover:border-opacity-100`}
+              disabled={disabled}
+              className={`border ${style.border} ${style.bg} p-4 text-left transition-all hover:-translate-y-px ${style.hoverBorder} disabled:cursor-not-allowed disabled:opacity-35`}
             >
               <div className="mb-3 flex items-center justify-between">
                 <span

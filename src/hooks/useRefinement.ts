@@ -1,16 +1,31 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { buildSystemPrompt, buildSelectionPrompt } from '../lib/prompts';
 import { streamRefinement, generateVariantsApi } from '../lib/claude';
-import type { Variant } from '../types/llm';
+import type { Variant, VariantError } from '../types/llm';
+import type { Entry } from '../types/editor';
 import { VARIANT_TEMPERATURES } from '../constants';
+
+const DRAFT_HISTORY_CAP = 10;
+
+function pushDraftHistory(entry: Entry, nextText: string): string[] | undefined {
+  const current = entry.refinedText;
+  if (!current.trim() || current === nextText) return undefined;
+  return [...(entry.draftHistory ?? []), current].slice(-DRAFT_HISTORY_CAP);
+}
 
 export function useRefinement() {
   const { state, dispatch } = useApp();
   const [isRefining, setIsRefining] = useState(false);
   const [variants, setVariants] = useState<Variant[]>([]);
+  const [variantErrors, setVariantErrors] = useState<VariantError[]>([]);
   const [isGeneratingVariants, setIsGeneratingVariants] = useState(false);
   const [refinementError, setRefinementError] = useState<string | null>(null);
+  const stateRef = useRef(state);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
@@ -18,6 +33,7 @@ export function useRefinement() {
 
   useEffect(() => {
     setVariants([]);
+    setVariantErrors([]);
     setRefinementError(null);
   }, [activeEntry?.id]);
 
@@ -37,6 +53,7 @@ export function useRefinement() {
     setIsRefining(true);
     setRefinementError(null);
     let result = '';
+    let history = pushDraftHistory(activeEntry, '');
 
     try {
       for await (const chunk of streamRefinement({
@@ -45,11 +62,20 @@ export function useRefinement() {
         temperature: state.refinementSettings.temperature,
       })) {
         result += chunk;
-        dispatch({
-          type: 'UPDATE_ENTRY',
-          id: activeEntry.id,
-          updates: { refinedText: result },
-        });
+        if (history) {
+          dispatch({
+            type: 'UPDATE_ENTRY',
+            id: activeEntry.id,
+            updates: { refinedText: result, draftHistory: history },
+          });
+          history = undefined;
+        } else {
+          dispatch({
+            type: 'UPDATE_ENTRY',
+            id: activeEntry.id,
+            updates: { refinedText: result },
+          });
+        }
       }
     } catch (err) {
       setRefinementError(
@@ -65,7 +91,7 @@ export function useRefinement() {
     async (selectionStart: number, selectionEnd: number) => {
       if (!activeEntry) return;
 
-      const text = activeEntry.refinedText || activeEntry.rawTranscript;
+      const text = activeEntry.refinedText;
       const selection = text.slice(selectionStart, selectionEnd);
       if (!selection.trim()) {
         setRefinementError('Select text in the draft pane before refining a fragment.');
@@ -102,13 +128,30 @@ export function useRefinement() {
           refined += chunk;
         }
 
-        // Splice refined text back in
+        // Guard against the draft mutating while the stream was in flight —
+        // the captured offsets would splice into the wrong place.
+        const currentEntry = stateRef.current.entries[activeEntry.id];
+        if (
+          !currentEntry ||
+          currentEntry.refinedText.slice(selectionStart, selectionEnd) !==
+            selection
+        ) {
+          setRefinementError('selection changed during refinement');
+          return;
+        }
+
+        const currentText = currentEntry.refinedText;
         const newText =
-          text.slice(0, selectionStart) + refined + text.slice(selectionEnd);
+          currentText.slice(0, selectionStart) +
+          refined +
+          currentText.slice(selectionEnd);
+        const history = pushDraftHistory(currentEntry, newText);
         dispatch({
           type: 'UPDATE_ENTRY',
           id: activeEntry.id,
-          updates: { refinedText: newText },
+          updates: history
+            ? { refinedText: newText, draftHistory: history }
+            : { refinedText: newText },
         });
       } catch (err) {
         setRefinementError(
@@ -137,10 +180,11 @@ export function useRefinement() {
 
     setIsGeneratingVariants(true);
     setVariants([]);
+    setVariantErrors([]);
     setRefinementError(null);
 
     try {
-      const results = await generateVariantsApi({
+      const { variants: results, errors } = await generateVariantsApi({
         systemPrompt,
         userMessage: activeEntry.rawTranscript,
         temperatures: VARIANT_TEMPERATURES.map(({ label, temperature }) => ({
@@ -148,7 +192,12 @@ export function useRefinement() {
           temperature,
         })),
       });
-      setVariants(results as Variant[]);
+      if (results.length === 0) {
+        setRefinementError(errors[0]?.error ?? 'Variant generation failed');
+        return;
+      }
+      setVariants(results);
+      setVariantErrors(errors);
     } catch (err) {
       setRefinementError(
         err instanceof Error ? err.message : 'Variant generation failed'
@@ -162,12 +211,16 @@ export function useRefinement() {
   const acceptVariant = useCallback(
     (variant: Variant) => {
       if (!activeEntry) return;
+      const history = pushDraftHistory(activeEntry, variant.text);
       dispatch({
         type: 'UPDATE_ENTRY',
         id: activeEntry.id,
-        updates: { refinedText: variant.text },
+        updates: history
+          ? { refinedText: variant.text, draftHistory: history }
+          : { refinedText: variant.text },
       });
       setVariants([]);
+      setVariantErrors([]);
     },
     [activeEntry, dispatch]
   );
@@ -178,6 +231,7 @@ export function useRefinement() {
     refine,
     refineSelection,
     variants,
+    variantErrors,
     isGeneratingVariants,
     generateVariants,
     acceptVariant,

@@ -7,6 +7,11 @@ interface Props {
   onRefineSelection: () => void;
   onGenerateVariants: () => void;
   onSeedDraft: () => void;
+  onUndo: () => void;
+  onCopy: () => void;
+  onExport: () => void;
+  canUndo: boolean;
+  copied: boolean;
   hasSelection: boolean;
   hasTranscript: boolean;
   hasRefinedText: boolean;
@@ -14,11 +19,19 @@ interface Props {
   isGeneratingVariants: boolean;
 }
 
+const SECONDARY_BUTTON =
+  'border border-border px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35';
+
 export function Toolbar({
   onRefine,
   onRefineSelection,
   onGenerateVariants,
   onSeedDraft,
+  onUndo,
+  onCopy,
+  onExport,
+  canUndo,
+  copied,
   hasSelection,
   hasTranscript,
   hasRefinedText,
@@ -30,6 +43,7 @@ export function Toolbar({
   const hasEntry = !!state.activeEntryId;
   const canRefine =
     hasEntry && hasTranscript && !isRefining && !isGeneratingVariants;
+  const hasContent = hasTranscript || hasRefinedText;
 
   return (
     <div className="flex flex-wrap items-center gap-3 border-b border-border bg-surface px-5 py-3">
@@ -99,9 +113,17 @@ export function Toolbar({
       <button
         onClick={onSeedDraft}
         disabled={!hasTranscript || isRefining || isGeneratingVariants}
-        className="border border-border px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35"
+        className={SECONDARY_BUTTON}
       >
         {hasRefinedText ? 'reset draft' : 'seed draft'}
+      </button>
+
+      <button
+        onClick={onUndo}
+        disabled={!canUndo || isRefining || isGeneratingVariants}
+        className={SECONDARY_BUTTON}
+      >
+        undo
       </button>
 
       <button
@@ -115,7 +137,7 @@ export function Toolbar({
       <button
         onClick={onRefineSelection}
         disabled={!canRefine || !hasSelection}
-        className="border border-border px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35"
+        className={SECONDARY_BUTTON}
       >
         selection
       </button>
@@ -123,9 +145,29 @@ export function Toolbar({
       <button
         onClick={onGenerateVariants}
         disabled={!canRefine}
-        className="border border-border px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35"
+        className={SECONDARY_BUTTON}
       >
         {isGeneratingVariants ? 'generating...' : 'variants'}
+      </button>
+
+      <button
+        onClick={onCopy}
+        disabled={!hasContent}
+        className={`border border-border px-3 py-2 text-[11px] uppercase tracking-[0.18em] transition-colors hover:border-border-strong disabled:cursor-not-allowed disabled:opacity-35 ${
+          copied
+            ? 'text-success'
+            : 'text-text-secondary hover:text-text-primary'
+        }`}
+      >
+        {copied ? 'copied' : 'copy'}
+      </button>
+
+      <button
+        onClick={onExport}
+        disabled={!hasContent}
+        className={SECONDARY_BUTTON}
+      >
+        export
       </button>
     </div>
   );

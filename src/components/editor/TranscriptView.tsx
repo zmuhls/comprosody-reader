@@ -1,18 +1,25 @@
+import { AudioTakes } from './AudioTakes';
+
 interface Props {
+  entryId: string;
   rawTranscript: string;
   interimTranscript?: string;
   isRecording: boolean;
+  audioTakes?: number;
   onChangeTranscript: (value: string) => void;
 }
 
 export function TranscriptView({
+  entryId,
   rawTranscript,
   interimTranscript,
   isRecording,
+  audioTakes,
   onChangeTranscript,
 }: Props) {
   const composedTranscript =
-    rawTranscript + (interimTranscript ? ` ${interimTranscript}` : '');
+    rawTranscript +
+    (isRecording && interimTranscript ? ` ${interimTranscript}` : '');
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-surface-writing">
@@ -31,6 +38,7 @@ export function TranscriptView({
           {isRecording ? 'live input' : 'editable'}
         </span>
       </div>
+      <AudioTakes entryId={entryId} audioTakes={audioTakes} />
       <div className="relative flex-1">
         <textarea
           readOnly={isRecording}
