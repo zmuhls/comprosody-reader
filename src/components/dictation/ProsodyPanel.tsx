@@ -1,25 +1,30 @@
 import type { ProsodyDiagnostics } from '../../types/audio';
+import { formatDuration } from '../../lib/time';
 
 interface Props {
   prosody: ProsodyDiagnostics;
   isRecording: boolean;
+  elapsedMs?: number | null;
+  wordCount?: number | null;
 }
 
 function Stat({
   label,
   value,
   unit,
+  valueClassName,
 }: {
   label: string;
   value: string;
   unit?: string;
+  valueClassName?: string;
 }) {
   return (
     <div className="flex items-center gap-2 border border-border-strong bg-surface-overlay/80 px-3 py-2">
       <span className="text-[9px] uppercase tracking-[0.22em] text-text-secondary">
         {label}
       </span>
-      <span className="text-[12px] tabular-nums text-text-primary">
+      <span className={`text-[12px] tabular-nums ${valueClassName ?? 'text-text-primary'}`}>
         {value}
       </span>
       {unit && (
@@ -31,15 +36,22 @@ function Stat({
   );
 }
 
-export function ProsodyPanel({ prosody, isRecording }: Props) {
+export function ProsodyPanel({ prosody, isRecording, elapsedMs, wordCount }: Props) {
   if (!isRecording && prosody.pace === 0) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-2 py-1">
+      {isRecording && elapsedMs != null && (
+        <Stat label="elapsed" value={formatDuration(elapsedMs)} />
+      )}
+      {isRecording && wordCount != null && (
+        <Stat label="words" value={String(wordCount)} />
+      )}
       <Stat label="pace" value={String(prosody.pace)} unit="wpm" />
       <Stat
         label="energy"
         value={`${(prosody.energy * 100).toFixed(0)}%`}
+        valueClassName="text-energy"
       />
       <Stat
         label="fluency"

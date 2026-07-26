@@ -52,10 +52,10 @@ export function useAudioAnalyser() {
   }, []);
 
   const drawWaveform = useCallback(
-    (canvas: HTMLCanvasElement, color: string = '#d98a54') => {
+    (canvas: HTMLCanvasElement, color: string = '#d98a54'): (() => void) => {
       const ctx = canvas.getContext('2d');
       if (!ctx || !analyserRef.current || !timeDomainDataRef.current || !frequencyDataRef.current) {
-        return;
+        return () => {};
       }
 
       if (animFrameRef.current) {
@@ -73,7 +73,10 @@ export function useAudioAnalyser() {
         analyser.getByteTimeDomainData(timeDomainData);
         analyser.getByteFrequencyData(frequencyData);
 
-        const { width, height } = canvas;
+        // CSS-pixel coordinates: the context is pre-scaled by devicePixelRatio
+        // in Waveform's resizeCanvas, so canvas.width/height (device px) would
+        // draw ratio-times too large on HiDPI displays.
+        const { width, height } = canvas.getBoundingClientRect();
         const midline = height / 2;
         const barCount = Math.min(96, frequencyData.length);
         const barWidth = width / barCount;
@@ -115,6 +118,13 @@ export function useAudioAnalyser() {
       };
 
       draw();
+
+      return () => {
+        if (animFrameRef.current) {
+          cancelAnimationFrame(animFrameRef.current);
+          animFrameRef.current = 0;
+        }
+      };
     },
     []
   );

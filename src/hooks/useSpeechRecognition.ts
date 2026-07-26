@@ -3,8 +3,10 @@ import { useRecording } from '../context/RecordingContext';
 
 /**
  * Web Speech API wrapper for interim transcript display during recording.
- * Final transcription is handled by Whisper (useTranscription) after recording stops.
- * This hook provides real-time interim text feedback while the user is speaking.
+ * Final transcription is handled by the server endpoint (useTranscription) after
+ * recording stops. This hook provides real-time interim text feedback while the
+ * user is speaking, and keeps the accumulated final text in a ref so callers can
+ * read it synchronously after stop() without stale-closure loss.
  */
 
 // Web Speech API type augmentation
@@ -40,6 +42,7 @@ export function useSpeechRecognition() {
   const { state, dispatch } = useRecording();
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const shouldRestartRef = useRef(false);
+  const finalTranscriptRef = useRef('');
   const isSupported =
     typeof window !== 'undefined' &&
     !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -53,6 +56,8 @@ export function useSpeechRecognition() {
       return;
     }
 
+    finalTranscriptRef.current = '';
+
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -64,13 +69,18 @@ export function useSpeechRecognition() {
         const result = event.results[i];
         const transcript = result[0].transcript;
         if (result.isFinal) {
-          // Append as interim display text — Whisper provides the real final transcript
-          dispatch({ type: 'APPEND_FINAL', text: transcript.trim() });
+          const text = transcript.trim();
+          // Mirror the APPEND_FINAL reducer join so the ref stays in sync even
+          // when results flush after stop() (the closure-free rescue path).
+          finalTranscriptRef.current = finalTranscriptRef.current
+            ? finalTranscriptRef.current + ' ' + text
+            : text;
+          dispatch({ type: 'APPEND_FINAL', text });
         } else {
           interim += transcript;
         }
       }
-      if (interim) {
+      if (interim && shouldRestartRef.current) {
         dispatch({ type: 'UPDATE_INTERIM', text: interim });
       }
     };
@@ -103,18 +113,23 @@ export function useSpeechRecognition() {
   const stop = useCallback(() => {
     shouldRestartRef.current = false;
     if (recognitionRef.current) {
+      // Keep onresult attached — the engine's trailing flush still delivers the
+      // last final phrase into finalTranscriptRef after stop.
       recognitionRef.current.onend = null;
       recognitionRef.current.stop();
       recognitionRef.current = null;
     }
-  }, []);
+    dispatch({ type: 'UPDATE_INTERIM', text: '' });
+  }, [dispatch]);
+
+  const getFinalTranscript = useCallback(() => finalTranscriptRef.current, []);
 
   return {
     isRecording: state.isRecording,
     isSupported,
     start,
     stop,
+    getFinalTranscript,
     interimTranscript: state.session?.interimTranscript ?? '',
-    finalTranscript: state.session?.finalTranscript ?? '',
   };
 }

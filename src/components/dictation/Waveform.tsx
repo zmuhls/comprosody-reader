@@ -1,7 +1,7 @@
 import { useRef, useEffect } from 'react';
 
 interface Props {
-  drawWaveform: (canvas: HTMLCanvasElement, color?: string) => void;
+  drawWaveform: (canvas: HTMLCanvasElement, color?: string) => () => void;
   isRecording: boolean;
   className?: string;
   color?: string;
@@ -67,13 +67,17 @@ export function Waveform({
     });
     observer.observe(canvas);
 
+    let cancelDraw: (() => void) | undefined;
     if (isRecording) {
-      drawWaveform(canvas, color);
+      cancelDraw = drawWaveform(canvas, color);
     } else {
       drawIdle(canvas);
     }
 
-    return () => observer.disconnect();
+    return () => {
+      cancelDraw?.();
+      observer.disconnect();
+    };
   }, [isRecording, drawWaveform, color]);
 
   return (

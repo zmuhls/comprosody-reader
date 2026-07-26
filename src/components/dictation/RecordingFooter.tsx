@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import type { ProsodyDiagnostics } from '../../types/audio';
 import { RecordButton } from './RecordButton';
 import { Waveform } from './Waveform';
@@ -11,11 +12,19 @@ interface Props {
   isSpeechSupported: boolean;
   recordingError: string | null;
   transcriptionError: string | null;
+  canRetryTranscription: boolean;
   prosody: ProsodyDiagnostics;
-  drawWaveform: (canvas: HTMLCanvasElement, color?: string) => void;
+  sessionStartedAt: number | null;
+  liveWordCount: number;
+  drawWaveform: (canvas: HTMLCanvasElement, color?: string) => () => void;
   onStart: () => void;
   onStop: () => void;
+  onRetryTranscription: () => void;
+  onUseLiveTranscript: () => void;
 }
+
+const retryButtonClass =
+  'border border-border px-3 py-2 text-[10px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35';
 
 export function RecordingFooter({
   activeEntryName,
@@ -24,11 +33,30 @@ export function RecordingFooter({
   isSpeechSupported,
   recordingError,
   transcriptionError,
+  canRetryTranscription,
   prosody,
+  sessionStartedAt,
+  liveWordCount,
   drawWaveform,
   onStart,
   onStop,
+  onRetryTranscription,
+  onUseLiveTranscript,
 }: Props) {
+  const [tickNow, setTickNow] = useState(0);
+
+  useEffect(() => {
+    if (!isRecording) return;
+    const intervalId = window.setInterval(() => setTickNow(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, [isRecording]);
+
+  // A stale tick from a previous take is clamped to 0:00 until the first tick.
+  const elapsedMs =
+    isRecording && sessionStartedAt != null
+      ? Math.max(0, tickNow - sessionStartedAt)
+      : null;
+
   const status = isRecording
     ? 'recording live'
     : isTranscribing
@@ -39,13 +67,15 @@ export function RecordingFooter({
 
   const detail = recordingError
     ? recordingError
-    : transcriptionError
-      ? transcriptionError
-      : isRecording
-        ? 'Pause, cadence, and energy are being read continuously while you speak.'
-        : isSpeechSupported
-          ? 'Live interim speech is available during capture, then the final take is uploaded for transcription.'
-          : 'Live interim speech is unavailable here, but the uploaded take will still be transcribed.';
+    : canRetryTranscription
+      ? 'The audio take is saved locally. Retry the upload or keep the live transcript.'
+      : transcriptionError
+        ? transcriptionError
+        : isRecording
+          ? 'Pause, cadence, and energy are being read continuously while you speak.'
+          : isSpeechSupported
+            ? 'Live interim speech is available during capture, then the final take is uploaded for transcription.'
+            : 'Live interim speech is unavailable here, but the uploaded take will still be transcribed.';
 
   return (
     <footer className="relative border-t border-border-strong bg-surface-raised/95 backdrop-blur-md">
@@ -65,6 +95,7 @@ export function RecordingFooter({
             isRecording={isRecording}
             onStart={onStart}
             onStop={onStop}
+            disabled={isTranscribing && !isRecording}
           />
 
           <div className="min-w-0">
@@ -87,8 +118,34 @@ export function RecordingFooter({
           <p className="text-sm leading-relaxed text-text-primary/92">
             {detail}
           </p>
+          {canRetryTranscription && (
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <p className="border-l-2 border-hot pl-3 text-xs text-hot">
+                {transcriptionError ?? 'transcription failed'}
+              </p>
+              <button
+                onClick={onRetryTranscription}
+                disabled={isTranscribing}
+                className={retryButtonClass}
+              >
+                retry upload
+              </button>
+              <button
+                onClick={onUseLiveTranscript}
+                disabled={isTranscribing}
+                className={retryButtonClass}
+              >
+                use live transcript
+              </button>
+            </div>
+          )}
           <div className="mt-3">
-            <ProsodyPanel prosody={prosody} isRecording={isRecording} />
+            <ProsodyPanel
+              prosody={prosody}
+              isRecording={isRecording}
+              elapsedMs={elapsedMs}
+              wordCount={liveWordCount}
+            />
           </div>
         </div>
 

@@ -6,9 +6,16 @@ import { useAudioAnalyser } from '../../hooks/useAudioAnalyser';
 import { useMediaRecorder } from '../../hooks/useMediaRecorder';
 import { useTranscription } from '../../hooks/useTranscription';
 import { useProsody } from '../../hooks/useProsody';
-import { deriveEntryName } from '../../lib/entries';
+import { deriveEntryName, countWords } from '../../lib/entries';
+import { saveRecording } from '../../lib/audioStore';
 import { RecordingFooter } from '../dictation/RecordingFooter';
 import { Editor } from '../editor/Editor';
+
+interface FailedTake {
+  blob: Blob;
+  entryId: string;
+  liveTranscript: string;
+}
 
 export function MainPanel() {
   const { state, dispatch } = useApp();
@@ -16,9 +23,11 @@ export function MainPanel() {
   const speech = useSpeechRecognition();
   const audio = useAudioAnalyser();
   const recorder = useMediaRecorder();
-  const { isTranscribing, transcriptionError, transcribe } = useTranscription();
+  const { isTranscribing, transcriptionError, clearTranscriptionError, transcribe } =
+    useTranscription();
   const prosody = useProsody(audio.getTimeDomainData);
   const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [failedTake, setFailedTake] = useState<FailedTake | null>(null);
 
   const streamRef = useRef<MediaStream | null>(null);
   const stateRef = useRef(state);
@@ -72,6 +81,16 @@ export function MainPanel() {
   const handleStart = useCallback(async () => {
     setRecordingError(null);
 
+    // Rescue a pending failed take before its live transcript is lost —
+    // the audio itself is already persisted in IndexedDB.
+    if (failedTake) {
+      if (failedTake.liveTranscript) {
+        appendTranscript(failedTake.entryId, failedTake.liveTranscript);
+      }
+      setFailedTake(null);
+      clearTranscriptionError();
+    }
+
     const entry = activeEntry ?? newEntry(null);
     if (!activeEntry) {
       dispatch({ type: 'CREATE_ENTRY', entry });
@@ -97,11 +116,22 @@ export function MainPanel() {
         err instanceof Error ? err.message : 'Unable to start recording.';
       setRecordingError(message);
     }
-  }, [activeEntry, audio, dispatch, recDispatch, recorder, speech]);
+  }, [
+    activeEntry,
+    appendTranscript,
+    audio,
+    clearTranscriptionError,
+    dispatch,
+    failedTake,
+    recDispatch,
+    recorder,
+    speech,
+  ]);
 
   const handleStop = useCallback(async () => {
     const entryId = recordingEntryIdRef.current ?? state.activeEntryId;
     const entry = entryId ? stateRef.current.entries[entryId] : null;
+    const session = recState.session;
 
     speech.stop();
     recDispatch({ type: 'FINALIZE_PROSODY', prosody: { ...prosody } });
@@ -114,32 +144,52 @@ export function MainPanel() {
       streamRef.current = null;
     }
 
-    // Save prosody + voice config
-    if (entry && recState.session) {
+    const durationMs = session ? Date.now() - session.startedAt : 0;
+
+    // Persist the take to IndexedDB — non-fatal on quota or availability errors.
+    if (entry && session && audioBlob.size > 0) {
+      void saveRecording(entry.id, audioBlob, {
+        recordedAt: session.startedAt,
+        durationMs,
+      }).catch((err) => {
+        console.error('Failed to persist recording:', err);
+      });
+    }
+
+    // Save prosody + voice config, and bump take stats when audio was captured
+    if (entry && session) {
       dispatch({
         type: 'UPDATE_ENTRY',
         id: entry.id,
         updates: {
           prosody: { ...prosody },
           voiceConfig: { ...recState.voiceConfig },
+          ...(audioBlob.size > 0
+            ? {
+                recordedDurationMs:
+                  (entry.recordedDurationMs ?? 0) + durationMs,
+                audioTakes: (entry.audioTakes ?? 0) + 1,
+              }
+            : {}),
         },
       });
     }
 
-    // Send to OpenRouter for transcription, fall back to Web Speech API
+    // Send to the server for transcription; on failure hold the take for a
+    // user-chosen retry instead of silently appending the live transcript.
     if (entry && audioBlob.size > 0) {
       try {
         const result = await transcribe(audioBlob);
         appendTranscript(entry.id, result.transcript);
       } catch {
-        // Fall back to Web Speech API transcript
-        const fallbackText = recState.session?.finalTranscript ?? '';
-        if (fallbackText) {
-          appendTranscript(entry.id, fallbackText);
-        }
+        setFailedTake({
+          blob: audioBlob,
+          entryId: entry.id,
+          liveTranscript: speech.getFinalTranscript(),
+        });
       }
     } else if (entry) {
-      const fallbackText = recState.session?.finalTranscript ?? '';
+      const fallbackText = speech.getFinalTranscript();
       if (fallbackText) {
         appendTranscript(entry.id, fallbackText);
       }
@@ -160,6 +210,51 @@ export function MainPanel() {
     transcribe,
   ]);
 
+  const handleRetryTranscription = useCallback(async () => {
+    const take = failedTake;
+    if (!take) return;
+
+    try {
+      const result = await transcribe(take.blob);
+      appendTranscript(take.entryId, result.transcript);
+      setFailedTake(null);
+    } catch {
+      // transcriptionError is re-set by transcribe(); the take stays armed
+    }
+  }, [appendTranscript, failedTake, transcribe]);
+
+  const handleUseLiveTranscript = useCallback(() => {
+    const take = failedTake;
+    if (!take) return;
+
+    if (take.liveTranscript) {
+      appendTranscript(take.entryId, take.liveTranscript);
+    }
+    setFailedTake(null);
+    clearTranscriptionError();
+  }, [appendTranscript, clearTranscriptionError, failedTake]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.code !== 'Space') return;
+      e.preventDefault();
+      if (recState.isRecording) {
+        void handleStop();
+      } else if (!isTranscribing) {
+        void handleStart();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleStart, handleStop, isTranscribing, recState.isRecording]);
+
+  const liveWordCount = recState.session
+    ? countWords(
+        `${recState.session.finalTranscript} ${recState.session.interimTranscript}`
+      )
+    : 0;
+
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <Editor
@@ -174,10 +269,15 @@ export function MainPanel() {
         isSpeechSupported={speech.isSupported}
         recordingError={recordingError}
         transcriptionError={transcriptionError}
+        canRetryTranscription={failedTake !== null}
         prosody={prosody}
+        sessionStartedAt={recState.session?.startedAt ?? null}
+        liveWordCount={liveWordCount}
         drawWaveform={audio.drawWaveform}
         onStart={handleStart}
         onStop={handleStop}
+        onRetryTranscription={handleRetryTranscription}
+        onUseLiveTranscript={handleUseLiveTranscript}
       />
     </div>
   );
