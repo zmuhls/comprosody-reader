@@ -27,3 +27,4 @@ dist-ssr
 # Claude Code — per-user overrides and runtime state
 .claude/settings.local.json
 .claude/state/
+*.tsbuildinfo
