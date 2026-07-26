@@ -10,6 +10,10 @@ export interface Entry {
   voiceConfig: VoiceConfig;
   createdAt: number;
   updatedAt: number;
+  wordCount?: number;
+  recordedDurationMs?: number;
+  audioTakes?: number;
+  draftHistory?: string[];
 }
 
 export interface Directory {
