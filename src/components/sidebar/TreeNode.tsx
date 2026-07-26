@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { TreeNode as TreeNodeType } from '../../hooks/useDirectoryTree';
 import { useStorage } from '../../hooks/useStorage';
+import { countWords } from '../../lib/entries';
 
 interface Props {
   node: TreeNodeType;
@@ -32,9 +33,19 @@ export function TreeNode({ node, depth }: Props) {
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
+    const message =
+      node.type === 'entry'
+        ? `delete "${node.name}"?`
+        : `delete "${node.name}" and everything in it?`;
+    if (!window.confirm(message)) return;
     if (node.type === 'entry') deleteEntry(node.id);
     else deleteDirectory(node.id);
   };
+
+  const wordCount =
+    node.type === 'entry' && node.entry
+      ? node.entry.wordCount ?? countWords(node.entry.rawTranscript)
+      : 0;
 
   return (
     <div>
@@ -95,13 +106,21 @@ export function TreeNode({ node, depth }: Props) {
             onClick={(e) => e.stopPropagation()}
           />
         ) : (
-          <span className="flex-1 truncate">{node.name}</span>
+          <>
+            <span className="flex-1 truncate">{node.name}</span>
+            {wordCount > 0 && (
+              <span className="shrink-0 text-[9px] tabular-nums text-text-muted">
+                {wordCount}w
+              </span>
+            )}
+          </>
         )}
 
         <button
-          className="px-0.5 text-xs text-text-muted opacity-0 transition-opacity hover:text-hot group-hover:opacity-100"
+          className="px-0.5 text-xs text-text-muted opacity-0 transition-opacity hover:text-hot focus-visible:opacity-100 group-hover:opacity-100"
           onClick={handleDelete}
           title="Delete"
+          aria-label={`delete ${node.name}`}
         >
           &times;
         </button>

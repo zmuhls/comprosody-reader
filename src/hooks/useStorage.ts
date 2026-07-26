@@ -1,5 +1,11 @@
 import { useCallback } from 'react';
-import { useApp, newEntry, newDirectory } from '../context/AppContext';
+import {
+  useApp,
+  newEntry,
+  newDirectory,
+  collectDirectoryCascade,
+} from '../context/AppContext';
+import { deleteRecordings, deleteRecordingsForEntries } from '../lib/audioStore';
 import type { Entry } from '../types/editor';
 
 export function useStorage() {
@@ -23,6 +29,7 @@ export function useStorage() {
 
   const deleteEntry = useCallback(
     (id: string) => {
+      void deleteRecordings(id).catch(console.error);
       dispatch({ type: 'DELETE_ENTRY', id });
     },
     [dispatch]
@@ -53,9 +60,15 @@ export function useStorage() {
 
   const deleteDirectory = useCallback(
     (id: string) => {
+      const { entryIds } = collectDirectoryCascade(
+        state.directories,
+        state.entries,
+        id
+      );
+      void deleteRecordingsForEntries(entryIds).catch(console.error);
       dispatch({ type: 'DELETE_DIRECTORY', id });
     },
-    [dispatch]
+    [dispatch, state.directories, state.entries]
   );
 
   return {

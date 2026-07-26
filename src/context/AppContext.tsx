@@ -3,6 +3,8 @@ import {
   useContext,
   useReducer,
   useEffect,
+  useMemo,
+  useRef,
   type ReactNode,
   type Dispatch,
 } from 'react';
@@ -10,6 +12,7 @@ import type { Entry, Directory } from '../types/editor';
 import type { RefinementSettings } from '../types/llm';
 import { defaultVoiceConfig, defaultProsody } from '../types/audio';
 import {
+  createDebouncedPersist,
   loadEntries,
   saveEntries,
   loadDirectories,
@@ -17,6 +20,7 @@ import {
   loadRefinementSettings,
   saveRefinementSettings,
 } from '../lib/storage';
+import { countWords } from '../lib/entries';
 
 const DEFAULT_REFINEMENT_SETTINGS: RefinementSettings = {
   genre: 'freewrite',
@@ -57,11 +61,15 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UPDATE_ENTRY': {
       const existing = state.entries[action.id];
       if (!existing) return state;
+      const merged = { ...existing, ...action.updates, updatedAt: Date.now() };
+      if (action.updates.rawTranscript !== undefined) {
+        merged.wordCount = countWords(action.updates.rawTranscript);
+      }
       return {
         ...state,
         entries: {
           ...state.entries,
-          [action.id]: { ...existing, ...action.updates, updatedAt: Date.now() },
+          [action.id]: merged,
         },
       };
     }
@@ -98,12 +106,20 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case 'DELETE_DIRECTORY': {
-      const nextDirectories = { ...state.directories };
-      delete nextDirectories[action.id];
-      // Also delete entries in this directory
+      const { directoryIds } = collectDirectoryCascade(
+        state.directories,
+        state.entries,
+        action.id
+      );
+      const nextDirectories: Record<string, Directory> = {};
+      for (const [id, dir] of Object.entries(state.directories)) {
+        if (!directoryIds.has(id)) nextDirectories[id] = dir;
+      }
       const restEntries: Record<string, Entry> = {};
       for (const [id, entry] of Object.entries(state.entries)) {
-        if (entry.parentId !== action.id) restEntries[id] = entry;
+        if (entry.parentId === null || !directoryIds.has(entry.parentId)) {
+          restEntries[id] = entry;
+        }
       }
       return {
         ...state,
@@ -139,6 +155,28 @@ export function appReducer(state: AppState, action: AppAction): AppState {
   }
 }
 
+export function collectDirectoryCascade(
+  directories: Record<string, Directory>,
+  entries: Record<string, Entry>,
+  rootId: string
+): { directoryIds: Set<string>; entryIds: string[] } {
+  const directoryIds = new Set<string>([rootId]);
+  const queue = [rootId];
+  while (queue.length > 0) {
+    const parentId = queue.shift()!;
+    for (const dir of Object.values(directories)) {
+      if (dir.parentId === parentId && !directoryIds.has(dir.id)) {
+        directoryIds.add(dir.id);
+        queue.push(dir.id);
+      }
+    }
+  }
+  const entryIds = Object.values(entries)
+    .filter((entry) => entry.parentId !== null && directoryIds.has(entry.parentId))
+    .map((entry) => entry.id);
+  return { directoryIds, entryIds };
+}
+
 function createInitialState(): AppState {
   const savedSettings = loadRefinementSettings();
   return {
@@ -156,20 +194,50 @@ const AppContext = createContext<{
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, null, createInitialState);
+  const entriesPersist = useMemo(() => createDebouncedPersist(saveEntries), []);
+  const dirsPersist = useMemo(() => createDebouncedPersist(saveDirectories), []);
+  const hasHydratedEntries = useRef(false);
+  const hasHydratedDirs = useRef(false);
 
-  // Persist entries to localStorage on change
+  // Persist entries to localStorage, debounced; skip the redundant mount write
   useEffect(() => {
-    saveEntries(state.entries);
-  }, [state.entries]);
+    if (!hasHydratedEntries.current) {
+      hasHydratedEntries.current = true;
+      return;
+    }
+    entriesPersist.schedule(state.entries);
+  }, [state.entries, entriesPersist]);
 
-  // Persist directories to localStorage on change
+  // Persist directories to localStorage, debounced; skip the redundant mount write
   useEffect(() => {
-    saveDirectories(state.directories);
-  }, [state.directories]);
+    if (!hasHydratedDirs.current) {
+      hasHydratedDirs.current = true;
+      return;
+    }
+    dirsPersist.schedule(state.directories);
+  }, [state.directories, dirsPersist]);
 
   useEffect(() => {
     saveRefinementSettings(state.refinementSettings);
   }, [state.refinementSettings]);
+
+  // Flush pending writes on tab close / backgrounding; setItem is synchronous, so this is reliable
+  useEffect(() => {
+    const flushAll = () => {
+      entriesPersist.flush();
+      dirsPersist.flush();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushAll();
+    };
+    window.addEventListener('pagehide', flushAll);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', flushAll);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      flushAll();
+    };
+  }, [entriesPersist, dirsPersist]);
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>
@@ -195,6 +263,10 @@ export function newEntry(parentId: string | null): Entry {
     voiceConfig: defaultVoiceConfig,
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    wordCount: 0,
+    recordedDurationMs: 0,
+    audioTakes: 0,
+    draftHistory: [],
   };
 }
 

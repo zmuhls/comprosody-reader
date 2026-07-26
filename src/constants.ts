@@ -28,4 +28,5 @@ export const STORAGE_KEYS = {
   entries: 'comprosody:entries',
   directories: 'comprosody:directories',
   settings: 'comprosody:settings',
+  schemaVersion: 'comprosody:schemaVersion',
 } as const;
