@@ -17,7 +17,7 @@ export interface RefinementSettings {
   mode?: RefinementMode;
   /** Applies the strictest voice- and claim-preservation rules. */
   highFidelity?: boolean;
-  /** Runs the faithful pass after each completed transcription segment. */
+  /** Generates a reviewable faithful proposal after completed transcription. */
   autoRefine?: boolean;
 }
 

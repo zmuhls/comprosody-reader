@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   useAudioAnalyser: vi.fn(),
   useMediaRecorder: vi.fn(),
   useProsody: vi.fn(),
+  useRealtimeTranscription: vi.fn(),
   useRecording: vi.fn(),
   useRefinement: vi.fn(),
   useTranscription: vi.fn(),
@@ -30,6 +31,9 @@ vi.mock('../../hooks/useMediaRecorder', () => ({
   useMediaRecorder: mocks.useMediaRecorder,
 }));
 vi.mock('../../hooks/useProsody', () => ({ useProsody: mocks.useProsody }));
+vi.mock('../../hooks/useRealtimeTranscription', () => ({
+  useRealtimeTranscription: mocks.useRealtimeTranscription,
+}));
 vi.mock('../../hooks/useRefinement', () => ({
   useRefinement: mocks.useRefinement,
 }));
@@ -69,6 +73,7 @@ vi.mock('../editor/Editor', () => ({
 
 import { MainPanel } from './MainPanel';
 import { buildVoiceProfile } from '../../lib/voiceProfile';
+import { SESSION_LOGOUT_INTENT_EVENT } from '../../lib/session';
 
 function makeEntry(id: string, refinedText: string): Entry {
   return {
@@ -183,6 +188,7 @@ describe('MainPanel recording integrity', () => {
     const audioStart = vi.fn().mockResolvedValue(undefined);
     const audioStop = vi.fn();
     const recorderStart = vi.fn();
+    const recorderCancel = vi.fn();
     const recorderStop = vi
       .fn()
       .mockResolvedValue(new Blob(['audio'], { type: 'audio/webm' }));
@@ -193,8 +199,22 @@ describe('MainPanel recording integrity', () => {
       drawWaveform: vi.fn(),
     });
     mocks.useMediaRecorder.mockReturnValue({
+      cancel: recorderCancel,
       start: recorderStart,
       stop: recorderStop,
+    });
+    const realtimeCancel = vi.fn().mockResolvedValue(undefined);
+    mocks.useRealtimeTranscription.mockReturnValue({
+      cancel: realtimeCancel,
+      liveError: null,
+      liveTranscript: '',
+      start: vi.fn().mockResolvedValue(true),
+      status: 'idle',
+      stop: vi.fn().mockResolvedValue({
+        shouldFallback: true,
+        transcript: '',
+      }),
+      surfaceError: vi.fn(),
     });
     const audioDerivedProsody = {
       pace: 0,
@@ -230,12 +250,15 @@ describe('MainPanel recording integrity', () => {
         });
       },
     );
+    const cancelTranscription = vi.fn();
     mocks.useTranscription.mockReturnValue({
+      cancel: cancelTranscription,
       isTranscribing: false,
       transcribe,
     });
 
-    const refine = vi.fn().mockResolvedValue(null);
+    const refine = vi.fn().mockReturnValue(new Promise(() => undefined));
+    const refinementCancel = vi.fn();
     mocks.useRefinement.mockReturnValue({
       isRefining: false,
       refine,
@@ -245,7 +268,7 @@ describe('MainPanel recording integrity', () => {
       generateVariants: vi.fn(),
       acceptVariant: vi.fn(),
       streamingText: '',
-      cancel: vi.fn(),
+      cancel: refinementCancel,
     });
 
     const view = render(<MainPanel onOpenSidebar={vi.fn()} />);
@@ -326,6 +349,208 @@ describe('MainPanel recording integrity', () => {
       type: 'FINALIZE_PROSODY',
       prosody: appState.entries.origin.prosody,
     });
+    expect(stopTrack).toHaveBeenCalledTimes(1);
+
+    view.rerender(<MainPanel onOpenSidebar={vi.fn()} />);
+    fireEvent.click(view.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(2));
+    view.rerender(<MainPanel onOpenSidebar={vi.fn()} />);
+    fireEvent.click(view.getByRole('button', { name: 'stop' }));
+    await waitFor(() => expect(transcribe).toHaveBeenCalledTimes(2));
+    const bodyBeforeLogout = appState.entries.origin.refinedText;
+
+    act(() => {
+      window.dispatchEvent(new Event(SESSION_LOGOUT_INTENT_EVENT));
+    });
+    expect(recorderCancel).toHaveBeenCalledTimes(1);
+    expect(cancelTranscription).toHaveBeenCalledTimes(1);
+    expect(realtimeCancel).toHaveBeenCalledTimes(1);
+    expect(refinementCancel).toHaveBeenCalledTimes(1);
+    expect(stopTrack).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveTranscription({
+        transcript: 'This must not be appended after logout.',
+        words: [],
+        language: 'en',
+        duration: 2,
+      });
+    });
+    expect(appState.entries.origin.refinedText).toBe(bodyBeforeLogout);
+    expect(refine).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      label: 'uses committed realtime text without a batch request',
+      realtimeResult: {
+        shouldFallback: false,
+        transcript: 'Realtime committed thought.',
+      },
+      batchCalls: 0,
+      expectedTranscript: 'Realtime committed thought.',
+    },
+    {
+      label: 'runs one batch request when the realtime session degrades',
+      realtimeResult: {
+        shouldFallback: true,
+        transcript: 'Incomplete live segment.',
+      },
+      batchCalls: 1,
+      expectedTranscript: 'Recovered complete thought.',
+    },
+  ])('$label', async ({
+    realtimeResult,
+    batchCalls,
+    expectedTranscript,
+  }) => {
+    localStorage.setItem('cadence:transcription-provider', 'elevenlabs');
+    let appState: AppState = {
+      entries: { origin: makeEntry('origin', 'Opening thought.') },
+      directories: {},
+      activeEntryId: 'origin',
+      refinementSettings: {
+        autoRefine: false,
+        genre: 'academic',
+        highFidelity: true,
+        mode: 'faithful',
+        scale: 'sentence',
+        temperature: 0.2,
+      },
+      errors: [],
+      history: [],
+      historyIndex: -1,
+    };
+    let recordingState: RecordingState = {
+      isRecording: false,
+      session: null,
+      prosody: { ...defaultProsody },
+      voiceConfig: { ...defaultVoiceConfig },
+    };
+    const appDispatch = vi.fn((action: AppAction) => {
+      if (action.type !== 'UPDATE_ENTRY') return;
+      appState = {
+        ...appState,
+        entries: {
+          ...appState.entries,
+          [action.id]: {
+            ...appState.entries[action.id],
+            ...action.updates,
+          },
+        },
+      };
+    });
+    const recordingDispatch = vi.fn((action: RecordingAction) => {
+      if (action.type === 'START_RECORDING') {
+        recordingState = {
+          ...recordingState,
+          isRecording: true,
+          session: {
+            finalTranscript: '',
+            interimTranscript: '',
+            pauses: [],
+            startedAt: action.startedAt,
+            volumeSamples: [],
+            wordTimestamps: [],
+          },
+        };
+      } else if (action.type === 'STOP_RECORDING') {
+        recordingState = { ...recordingState, isRecording: false };
+      }
+    });
+    mocks.useApp.mockImplementation(() => ({
+      dispatch: appDispatch,
+      state: appState,
+      storageReady: true,
+      voiceProfile: { learnedHints: [] },
+    }));
+    mocks.useRecording.mockImplementation(() => ({
+      dispatch: recordingDispatch,
+      state: recordingState,
+    }));
+    mocks.selectTranscriptionHints.mockReturnValue({
+      phrases: [],
+      terms: [],
+    });
+
+    const stopTrack = vi.fn();
+    const stream = {
+      getTracks: () => [{ stop: stopTrack }],
+    } as unknown as MediaStream;
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+    });
+    mocks.useAudioAnalyser.mockReturnValue({
+      drawWaveform: vi.fn(),
+      getTimeDomainData: vi.fn(),
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn(),
+    });
+    mocks.useMediaRecorder.mockReturnValue({
+      cancel: vi.fn(),
+      start: vi.fn(),
+      stop: vi
+        .fn()
+        .mockResolvedValue(new Blob(['audio'], { type: 'audio/webm' })),
+    });
+    mocks.useProsody.mockReturnValue({ ...defaultProsody });
+
+    const transcribe = vi.fn().mockResolvedValue({
+      duration: 2,
+      language: 'en',
+      transcript: 'Recovered complete thought.',
+      words: [],
+    });
+    mocks.useTranscription.mockReturnValue({
+      cancel: vi.fn(),
+      isTranscribing: false,
+      transcribe,
+    });
+    const realtimeStart = vi.fn().mockResolvedValue(true);
+    const realtimeStop = vi.fn().mockResolvedValue(realtimeResult);
+    mocks.useRealtimeTranscription.mockReturnValue({
+      cancel: vi.fn().mockResolvedValue(undefined),
+      liveError: null,
+      liveTranscript: 'Live partial',
+      start: realtimeStart,
+      status: 'streaming',
+      stop: realtimeStop,
+      surfaceError: vi.fn(),
+    });
+    mocks.useRefinement.mockReturnValue({
+      acceptProposal: vi.fn(),
+      acceptVariant: vi.fn(),
+      attempts: [],
+      cancel: vi.fn(),
+      dismissProposal: vi.fn(),
+      generateVariants: vi.fn(),
+      isGeneratingVariants: false,
+      isRefining: false,
+      proposal: null,
+      refine: vi.fn(),
+      refineSelection: vi.fn(),
+      rejectProposal: vi.fn(),
+      retryProposal: vi.fn(),
+      streamingText: '',
+      variants: [],
+    });
+
+    const view = render(<MainPanel onOpenSidebar={vi.fn()} />);
+    fireEvent.click(view.getByRole('button', { name: 'start' }));
+    await waitFor(() =>
+      expect(realtimeStart).toHaveBeenCalledWith(stream, []),
+    );
+    view.rerender(<MainPanel onOpenSidebar={vi.fn()} />);
+    fireEvent.click(view.getByRole('button', { name: 'stop' }));
+
+    await waitFor(() => expect(realtimeStop).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(appState.entries.origin.rawTranscript).toContain(
+        expectedTranscript,
+      ),
+    );
+    expect(transcribe).toHaveBeenCalledTimes(batchCalls);
     expect(stopTrack).toHaveBeenCalledTimes(1);
   });
 });

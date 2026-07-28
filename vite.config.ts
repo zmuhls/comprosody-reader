@@ -39,6 +39,7 @@ export default defineConfig({
       '/api/quotes': readingsOrigin,
       '/api/improvement-events': readingsOrigin,
       '/api/improvement-metrics': readingsOrigin,
+      '/api/logout': readingsOrigin,
       '/books': readingsOrigin,
       '/covers': readingsOrigin,
       '/api': cadenceApiOrigin,

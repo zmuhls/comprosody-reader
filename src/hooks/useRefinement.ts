@@ -36,6 +36,7 @@ interface ActiveEntryActivation {
 
 interface RefinementRequest extends EntryActivation {
   controller: AbortController;
+  proposalId: string;
 }
 
 interface VariantRequest extends EntryActivation {
@@ -44,11 +45,52 @@ interface VariantRequest extends EntryActivation {
 
 interface VariantSet extends EntryActivation {
   variants: Variant[];
+  sourceText: string;
+  startedRevision: EntryRevisionSnapshot;
 }
 
-interface EntryRevisionSnapshot {
+export interface EntryRevisionSnapshot {
   rawTranscript: string;
   refinedText: string;
+}
+
+export type RefinementProposalStatus =
+  | 'streaming'
+  | 'ready'
+  | 'rejected'
+  | 'stale'
+  | 'failed';
+
+export interface RefinementSelectionTarget {
+  contextAfter: string;
+  contextBefore: string;
+  documentText: string;
+  from: number;
+  selection: string;
+  to: number;
+}
+
+export interface RefinementProposal extends EntryActivation {
+  autoTriggered: boolean;
+  error?: string;
+  id: string;
+  instruction?: string;
+  mode: RefinementMode | 'selection' | 'variants';
+  selectionTarget?: RefinementSelectionTarget;
+  sourceText: string;
+  startedAt: number;
+  startedRevision: EntryRevisionSnapshot;
+  status: RefinementProposalStatus;
+  text: string;
+}
+
+export interface RefinementAttempt extends EntryActivation {
+  autoTriggered: boolean;
+  id: string;
+  instruction?: string;
+  mode: RefinementProposal['mode'];
+  status: Exclude<RefinementProposalStatus, 'streaming'> | 'accepted';
+  text: string;
 }
 
 function normalizeVocabularyText(value: string): string {
@@ -172,7 +214,19 @@ export interface RefineSelectionOptions {
   contextBefore: string;
   contextAfter: string;
   instruction?: string;
+  documentText?: string;
+  from?: number;
+  to?: number;
 }
+
+export interface RefinementRetryContext {
+  documentText: string;
+  selection?: RefineSelectionOptions;
+}
+
+const MAX_ATTEMPTS = 6;
+const MAX_RETRY_GUIDANCE = 800;
+const MAX_REJECTED_CANDIDATE_CONTEXT = 6_000;
 
 export function useRefinement() {
   const { state, dispatch, voiceProfile } = useApp();
@@ -181,11 +235,11 @@ export function useRefinement() {
   const [variantSet, setVariantSet] = useState<VariantSet | null>(null);
   const [variantRequest, setVariantRequest] =
     useState<VariantRequest | null>(null);
-  const [streamingResult, setStreamingResult] = useState<
-    (EntryActivation & { text: string }) | null
-  >(null);
+  const [proposal, setProposal] = useState<RefinementProposal | null>(null);
+  const [attempts, setAttempts] = useState<RefinementAttempt[]>([]);
   const refinementRequestRef = useRef<RefinementRequest | null>(null);
   const variantRequestRef = useRef<VariantRequest | null>(null);
+  const proposalRef = useRef<RefinementProposal | null>(null);
   const entriesRef = useRef(state.entries);
   const activeEntryIdRef = useRef(state.activeEntryId);
   const activeEntryActivationRef = useRef(0);
@@ -234,38 +288,80 @@ export function useRefinement() {
     [dispatch],
   );
 
-  const beginRequest = useCallback((entryId: string) => {
-    refinementRequestRef.current?.controller.abort();
-    const interruptedVariantRequest = variantRequestRef.current;
-    interruptedVariantRequest?.controller.abort();
-    if (interruptedVariantRequest) {
-      variantRequestRef.current = null;
-      setVariantRequest(null);
-    }
-    const controller = new AbortController();
-    const request: RefinementRequest = {
-      controller,
-      entryId,
-      activation:
+  const publishProposal = useCallback(
+    (next: RefinementProposal | null) => {
+      proposalRef.current = next;
+      setProposal(next);
+    },
+    [],
+  );
+
+  const archiveProposal = useCallback((current: RefinementProposal | null) => {
+    if (!current || current.status === 'streaming') return;
+    const archived: RefinementAttempt = {
+      activation: current.activation,
+      autoTriggered: current.autoTriggered,
+      entryId: current.entryId,
+      id: current.id,
+      instruction: current.instruction,
+      mode: current.mode,
+      status: current.status,
+      text: current.text,
+    };
+    setAttempts((previous) => [
+      ...previous.filter((attempt) => attempt.id !== current.id),
+      archived,
+    ].slice(-MAX_ATTEMPTS));
+  }, []);
+
+  const beginRequest = useCallback(
+    (
+      entryId: string,
+      details: Omit<
+        RefinementProposal,
+        'activation' | 'entryId' | 'id' | 'status' | 'text'
+      >,
+    ) => {
+      refinementRequestRef.current?.controller.abort();
+      const interruptedVariantRequest = variantRequestRef.current;
+      interruptedVariantRequest?.controller.abort();
+      if (interruptedVariantRequest) {
+        variantRequestRef.current = null;
+        setVariantRequest(null);
+      }
+      archiveProposal(proposalRef.current);
+      const controller = new AbortController();
+      const activation =
         activeEntryIdRef.current === entryId
           ? activeEntryActivationRef.current
-          : -1,
-    };
-    refinementRequestRef.current = request;
-    setRefinementRequest(request);
-    setStreamingResult({
-      entryId: request.entryId,
-      activation: request.activation,
-      text: '',
-    });
-    return request;
-  }, []);
+          : -1;
+      const proposalId = crypto.randomUUID();
+      const request: RefinementRequest = {
+        controller,
+        entryId,
+        activation,
+        proposalId,
+      };
+      const nextProposal: RefinementProposal = {
+        ...details,
+        activation,
+        entryId,
+        id: proposalId,
+        status: 'streaming',
+        text: '',
+      };
+      refinementRequestRef.current = request;
+      setRefinementRequest(request);
+      publishProposal(nextProposal);
+      return request;
+    },
+    [archiveProposal, publishProposal],
+  );
 
   const finishRequest = useCallback((request: RefinementRequest) => {
     if (refinementRequestRef.current === request) {
       refinementRequestRef.current = null;
       setRefinementRequest(null);
-      setStreamingResult(null);
     }
   }, []);
 
@@ -312,7 +408,14 @@ export function useRefinement() {
         },
       );
 
-      const request = beginRequest(entry.id);
+      const request = beginRequest(entry.id, {
+        autoTriggered,
+        instruction: options.instruction?.trim() || undefined,
+        mode,
+        sourceText,
+        startedAt: metricStartedAt,
+        startedRevision,
+      });
       let result = '';
 
       try {
@@ -326,51 +429,65 @@ export function useRefinement() {
           signal: request.controller.signal,
         })) {
           result += chunk;
-          if (refinementRequestRef.current === request) {
-            setStreamingResult({
-              entryId: request.entryId,
-              activation: request.activation,
-              text: result,
-            });
+          const currentProposal = proposalRef.current;
+          if (
+            refinementRequestRef.current === request &&
+            currentProposal?.id === request.proposalId
+          ) {
+            publishProposal({ ...currentProposal, text: result });
           }
         }
 
+        const output = result.trim();
+        const currentProposal = proposalRef.current;
         if (
-          result.trim() &&
-          refinementRequestRef.current === request &&
+          refinementRequestRef.current !== request ||
+          currentProposal?.id !== request.proposalId
+        ) {
+          return null;
+        }
+        if (!output) {
+          publishProposal({
+            ...currentProposal,
+            error: 'The model returned no proposed text.',
+            status: 'failed',
+            text: '',
+          });
+          recordRefinementMetric({
+            startedAt: metricStartedAt,
+            outcome: 'failed',
+            mode,
+            autoTriggered,
+            sourceText,
+          });
+          return null;
+        }
+
+        const isCurrent =
+          request.entryId === activeEntryIdRef.current &&
+          request.activation === activeEntryActivationRef.current &&
           isDocumentRevisionCurrent(
             startedRevision,
             entriesRef.current[entry.id],
             sourceText,
-          )
-        ) {
-          dispatch({
-            type: 'UPDATE_ENTRY',
-            id: entry.id,
-            updates: { refinedText: result.trim() },
-            recordHistory: true,
-          });
-          recordRefinementMetric({
-            startedAt: metricStartedAt,
-            outcome: 'succeeded',
-            mode,
-            autoTriggered,
-            sourceText,
-            outputText: result,
-          });
-          return result.trim();
-        }
-        recordRefinementMetric({
-          startedAt: metricStartedAt,
-          outcome: result.trim() ? 'discarded' : 'failed',
-          mode,
-          autoTriggered,
-          sourceText,
-          outputText: result.trim() || undefined,
+          );
+        publishProposal({
+          ...currentProposal,
+          status: isCurrent ? 'ready' : 'stale',
+          text: output,
         });
-        return null;
+        return isCurrent ? output : null;
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {
+          const currentProposal = proposalRef.current;
+          if (currentProposal?.id === request.proposalId) {
+            publishProposal({
+              ...currentProposal,
+              error: 'Generation stopped. Your note was not changed.',
+              status: 'failed',
+              text: result.trim(),
+            });
+          }
           recordRefinementMetric({
             startedAt: metricStartedAt,
             outcome: 'cancelled',
@@ -388,6 +505,15 @@ export function useRefinement() {
           sourceText,
         });
         console.error('Refinement failed:', error);
+        const currentProposal = proposalRef.current;
+        if (currentProposal?.id === request.proposalId) {
+          publishProposal({
+            ...currentProposal,
+            error: formatError(error),
+            status: 'failed',
+            text: result.trim(),
+          });
+        }
         setError(formatError(error));
         return null;
       } finally {
@@ -397,9 +523,9 @@ export function useRefinement() {
     [
       activeEntry,
       beginRequest,
-      dispatch,
       finishRequest,
       learnedVocabulary,
+      publishProposal,
       setError,
       state.entries,
       state.refinementSettings,
@@ -432,7 +558,28 @@ export function useRefinement() {
         },
       );
 
-      const request = beginRequest(originEntryId);
+      const request = beginRequest(originEntryId, {
+        autoTriggered: false,
+        instruction: options.instruction?.trim() || undefined,
+        mode: 'selection',
+        selectionTarget: {
+          contextAfter: options.contextAfter,
+          contextBefore: options.contextBefore,
+          documentText:
+            options.documentText ??
+            activeEntry.refinedText ??
+            activeEntry.rawTranscript,
+          from: options.from ?? -1,
+          selection: options.selection,
+          to: options.to ?? -1,
+        },
+        sourceText: options.selection,
+        startedAt: metricStartedAt,
+        startedRevision: {
+          rawTranscript: activeEntry.rawTranscript,
+          refinedText: activeEntry.refinedText,
+        },
+      });
       let result = '';
 
       try {
@@ -443,42 +590,67 @@ export function useRefinement() {
           signal: request.controller.signal,
         })) {
           result += chunk;
-          if (refinementRequestRef.current === request) {
-            setStreamingResult({
-              entryId: request.entryId,
-              activation: request.activation,
-              text: result,
-            });
+          const currentProposal = proposalRef.current;
+          if (
+            refinementRequestRef.current === request &&
+            currentProposal?.id === request.proposalId
+          ) {
+            publishProposal({ ...currentProposal, text: result });
           }
         }
 
+        const output = result.trim();
+        const currentProposal = proposalRef.current;
         if (
           refinementRequestRef.current !== request ||
-          activeEntryIdRef.current !== originEntryId ||
-          activeEntryActivationRef.current !== originActivation
+          currentProposal?.id !== request.proposalId
         ) {
+          return null;
+        }
+        if (!output) {
+          publishProposal({
+            ...currentProposal,
+            error: 'The model returned no proposed text.',
+            status: 'failed',
+            text: '',
+          });
           recordRefinementMetric({
             startedAt: metricStartedAt,
-            outcome: 'discarded',
+            outcome: 'failed',
             mode: 'selection',
             autoTriggered: false,
             sourceText: options.selection,
-            outputText: result.trim() || undefined,
           });
           return null;
         }
-        const output = result.trim();
-        recordRefinementMetric({
-          startedAt: metricStartedAt,
-          outcome: output ? 'succeeded' : 'failed',
-          mode: 'selection',
-          autoTriggered: false,
-          sourceText: options.selection,
-          outputText: output || undefined,
+        const currentEntry = entriesRef.current[originEntryId];
+        const currentDocument = currentEntry
+          ? currentEntry.refinedText || currentEntry.rawTranscript
+          : '';
+        const isCurrent =
+          activeEntryIdRef.current === originEntryId &&
+          activeEntryActivationRef.current === originActivation &&
+          normalizeWorkingText(currentDocument) ===
+            normalizeWorkingText(
+              currentProposal.selectionTarget?.documentText ?? '',
+            );
+        publishProposal({
+          ...currentProposal,
+          status: isCurrent ? 'ready' : 'stale',
+          text: output,
         });
-        return output || null;
+        return isCurrent ? output : null;
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {
+          const currentProposal = proposalRef.current;
+          if (currentProposal?.id === request.proposalId) {
+            publishProposal({
+              ...currentProposal,
+              error: 'Generation stopped. Your note was not changed.',
+              status: 'failed',
+              text: result.trim(),
+            });
+          }
           recordRefinementMetric({
             startedAt: metricStartedAt,
             outcome: 'cancelled',
@@ -496,6 +668,15 @@ export function useRefinement() {
           sourceText: options.selection,
         });
         console.error('Selection refinement failed:', error);
+        const currentProposal = proposalRef.current;
+        if (currentProposal?.id === request.proposalId) {
+          publishProposal({
+            ...currentProposal,
+            error: formatError(error),
+            status: 'failed',
+            text: result.trim(),
+          });
+        }
         setError(formatError(error));
         return null;
       } finally {
@@ -507,6 +688,7 @@ export function useRefinement() {
       beginRequest,
       finishRequest,
       learnedVocabulary,
+      publishProposal,
       setError,
       state.refinementSettings,
     ],
@@ -565,6 +747,11 @@ export function useRefinement() {
         setVariantSet({
           entryId: originEntryId,
           activation: originActivation,
+          sourceText,
+          startedRevision: {
+            rawTranscript: activeEntry.rawTranscript,
+            refinedText: activeEntry.refinedText,
+          },
           variants: results as Variant[],
         });
         recordRefinementMetric({
@@ -627,15 +814,216 @@ export function useRefinement() {
       ) {
         return;
       }
-      dispatch({
-        type: 'UPDATE_ENTRY',
-        id: variantSet.entryId,
-        updates: { refinedText: variant.text },
+      archiveProposal(proposalRef.current);
+      publishProposal({
+        activation: variantSet.activation,
+        autoTriggered: false,
+        entryId: variantSet.entryId,
+        id: crypto.randomUUID(),
+        instruction: `Generated ${variant.label} variant`,
+        mode: 'variants',
+        sourceText: variantSet.sourceText,
+        startedAt: performance.now(),
+        startedRevision: variantSet.startedRevision,
+        status: isDocumentRevisionCurrent(
+          variantSet.startedRevision,
+          entriesRef.current[variantSet.entryId],
+          variantSet.sourceText,
+        )
+          ? 'ready'
+          : 'stale',
+        text: variant.text,
       });
       setVariantSet(null);
     },
-    [dispatch, variantSet],
+    [archiveProposal, publishProposal, variantSet],
   );
+
+  const acceptProposal = useCallback(
+    (
+      applyCandidate?: (candidate: RefinementProposal) => boolean,
+    ): boolean => {
+      const current = proposalRef.current;
+      if (!current || current.status !== 'ready') return false;
+
+      const isCurrentActivation =
+        current.entryId === activeEntryIdRef.current &&
+        current.activation === activeEntryActivationRef.current;
+      let applied = false;
+
+      if (isCurrentActivation && applyCandidate) {
+        applied = applyCandidate(current) === true;
+      } else if (
+        isCurrentActivation &&
+        !current.selectionTarget &&
+        isDocumentRevisionCurrent(
+          current.startedRevision,
+          entriesRef.current[current.entryId],
+          current.sourceText,
+        )
+      ) {
+        dispatch({
+          type: 'UPDATE_ENTRY',
+          id: current.entryId,
+          updates: { refinedText: current.text },
+          recordHistory: true,
+        });
+        applied = true;
+      }
+
+      if (!applied) {
+        publishProposal({
+          ...current,
+          error:
+            'This note changed after the proposal began. Retry against the current text.',
+          status: 'stale',
+        });
+        return false;
+      }
+
+      recordRefinementMetric({
+        startedAt: current.startedAt,
+        outcome: 'succeeded',
+        mode: current.mode,
+        autoTriggered: current.autoTriggered,
+        sourceText: current.sourceText,
+        outputText: current.text,
+      });
+      const acceptedAttempt: RefinementAttempt = {
+        activation: current.activation,
+        autoTriggered: current.autoTriggered,
+        entryId: current.entryId,
+        id: current.id,
+        instruction: current.instruction,
+        mode: current.mode,
+        status: 'accepted',
+        text: current.text,
+      };
+      setAttempts((previous) => [
+        ...previous.filter((attempt) => attempt.id !== current.id),
+        acceptedAttempt,
+      ].slice(-MAX_ATTEMPTS));
+      publishProposal(null);
+      return true;
+    },
+    [dispatch, publishProposal],
+  );
+
+  const rejectProposal = useCallback((): boolean => {
+    const current = proposalRef.current;
+    if (
+      !current ||
+      current.status === 'streaming' ||
+      current.status === 'rejected'
+    ) {
+      return false;
+    }
+    recordRefinementMetric({
+      startedAt: current.startedAt,
+      outcome: 'discarded',
+      mode: current.mode,
+      autoTriggered: current.autoTriggered,
+      sourceText: current.sourceText,
+      outputText: current.text || undefined,
+    });
+    publishProposal({
+      ...current,
+      error: undefined,
+      status: 'rejected',
+    });
+    return true;
+  }, [publishProposal]);
+
+  const retryProposal = useCallback(
+    async (
+      guidance: string,
+      context?: RefinementRetryContext,
+    ): Promise<string | null> => {
+      const current = proposalRef.current;
+      const writerGuidance = guidance.trim().slice(0, MAX_RETRY_GUIDANCE);
+      if (
+        !current ||
+        current.status === 'streaming' ||
+        !writerGuidance ||
+        current.entryId !== activeEntryIdRef.current ||
+        current.activation !== activeEntryActivationRef.current
+      ) {
+        return null;
+      }
+
+      if (
+        current.status !== 'rejected' &&
+        current.status !== 'failed'
+      ) {
+        recordRefinementMetric({
+          startedAt: current.startedAt,
+          outcome: 'discarded',
+          mode: current.mode,
+          autoTriggered: current.autoTriggered,
+          sourceText: current.sourceText,
+          outputText: current.text || undefined,
+        });
+        publishProposal({ ...current, status: 'rejected' });
+      }
+
+      const originalInstruction = current.instruction
+        ?.trim()
+        .slice(0, MAX_RETRY_GUIDANCE);
+      const retryInstruction = [
+        originalInstruction
+          ? `Original writer instruction: ${originalInstruction}`
+          : '',
+        current.text.trim()
+          ? `The writer rejected this previous proposal:\n${current.text
+              .trim()
+              .slice(0, MAX_REJECTED_CANDIDATE_CONTEXT)}`
+          : '',
+        `Writer guidance for the next proposal: ${writerGuidance}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      const currentEntry = entriesRef.current[current.entryId];
+      const currentDocumentText = (
+        context?.documentText ??
+        currentEntry?.refinedText ??
+        currentEntry?.rawTranscript ??
+        ''
+      ).trim();
+      if (!currentDocumentText) return null;
+
+      if (current.selectionTarget) {
+        const selection =
+          context?.selection ??
+          (current.selectionTarget.documentText.trim() === currentDocumentText
+            ? current.selectionTarget
+            : undefined);
+        if (
+          !selection ||
+          selection.documentText?.trim() !== currentDocumentText
+        ) {
+          return null;
+        }
+        return refineSelection({
+          ...selection,
+          instruction: retryInstruction,
+        });
+      }
+      return refine({
+        entryId: current.entryId,
+        instruction: retryInstruction,
+        mode: current.mode === 'overhaul' ? 'overhaul' : 'faithful',
+        sourceText: currentDocumentText,
+      });
+    },
+    [publishProposal, refine, refineSelection],
+  );
+
+  const dismissProposal = useCallback(() => {
+    const current = proposalRef.current;
+    archiveProposal(current);
+    publishProposal(null);
+  }, [archiveProposal, publishProposal]);
 
   const cancel = useCallback(() => {
     refinementRequestRef.current?.controller.abort();
@@ -655,9 +1043,10 @@ export function useRefinement() {
   const variants = isCurrentActivation(variantSet) ? variantSet!.variants : [];
   const isRefining = isCurrentActivation(refinementRequest);
   const isGeneratingVariants = isCurrentActivation(variantRequest);
-  const streamingText = isCurrentActivation(streamingResult)
-    ? streamingResult!.text
-    : '';
+  const currentProposal =
+    isCurrentActivation(proposal) ? proposal : null;
+  const currentAttempts = attempts.filter(isCurrentActivation);
+  const streamingText = currentProposal?.text ?? '';
 
   return {
     isRefining,
@@ -667,6 +1056,12 @@ export function useRefinement() {
     isGeneratingVariants,
     generateVariants,
     acceptVariant,
+    acceptProposal,
+    attempts: currentAttempts,
+    dismissProposal,
+    proposal: currentProposal,
+    rejectProposal,
+    retryProposal,
     streamingText,
     cancel,
   };

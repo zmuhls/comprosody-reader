@@ -37,6 +37,7 @@ describe('mobile touch target stylesheet contract', () => {
       '.entry-folder-action',
       '.tree-delete',
       '.editor-topbar .icon-button',
+      '.refinement-sidecar-header .icon-button',
     );
   });
 
@@ -44,10 +45,19 @@ describe('mobile touch target stylesheet contract', () => {
     expectFortyFourPixelTarget('.refinement-send');
     expectFortyFourPixelTarget('.mini-switch');
     expectFortyFourPixelTarget('.record-button');
+    expectFortyFourPixelTarget('.refinement-guidance button');
 
     expect(declarationsFor('.refinement-input-shell', '.text-action')).toContain(
       'min-height: 44px',
     );
+    expect(
+      declarationsFor(
+        '.refinement-preset',
+        '.refinement-accept',
+        '.refinement-reject',
+        '.refinement-stop',
+      ),
+    ).toContain('min-height: 44px');
     expect(declarationsFor('.provider-trigger')).toContain('min-height: 44px');
   });
 

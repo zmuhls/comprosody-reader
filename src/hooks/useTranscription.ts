@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRecording } from '../context/RecordingContext';
 import { useApp } from '../context/AppContext';
 import {
@@ -83,6 +83,14 @@ export function useTranscription({
   const { dispatch: recordingDispatch } = useRecording();
   const { dispatch: appDispatch } = useApp();
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const requestControllerRef = useRef<AbortController | null>(null);
+
+  const cancel = useCallback(() => {
+    requestControllerRef.current?.abort();
+    setIsTranscribing(false);
+  }, []);
+
+  useEffect(() => cancel, [cancel]);
 
   const setError = useCallback(
     (message: string) => {
@@ -99,6 +107,9 @@ export function useTranscription({
       audioBlob: Blob,
       overrides: TranscriptionRequestOverrides = {},
     ) => {
+      requestControllerRef.current?.abort();
+      const controller = new AbortController();
+      requestControllerRef.current = controller;
       setIsTranscribing(true);
       const startedAt = performance.now();
       const requestProvider = overrides.provider ?? provider;
@@ -117,6 +128,7 @@ export function useTranscription({
             'X-Cadence-Keyterms': request.keytermsHeader,
           },
           body: audioBlob,
+          signal: controller.signal,
         });
 
         if (!response.ok) {
@@ -153,9 +165,10 @@ export function useTranscription({
         });
         return data;
       } catch (err) {
+        const cancelled = controller.signal.aborted;
         void recordImprovementEvent({
           eventType: 'transcription',
-          outcome: 'failed',
+          outcome: cancelled ? 'cancelled' : 'failed',
           provider: requestProvider,
           durationMs: performance.now() - startedAt,
           keytermCount: Math.min(
@@ -163,15 +176,20 @@ export function useTranscription({
             requestKeyterms.length,
           ),
         });
-        console.error('Transcription failed:', err);
-        setError(formatError(err));
+        if (!cancelled) {
+          console.error('Transcription failed:', err);
+          setError(formatError(err));
+        }
         throw err;
       } finally {
-        setIsTranscribing(false);
+        if (requestControllerRef.current === controller) {
+          requestControllerRef.current = null;
+          setIsTranscribing(false);
+        }
       }
     },
     [recordingDispatch, keyterms, provider, setError]
   );
 
-  return { isTranscribing, transcribe };
+  return { cancel, isTranscribing, transcribe };
 }

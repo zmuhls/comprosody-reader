@@ -10,6 +10,7 @@ import { useApp } from '../../context/AppContext';
 import { useRecording } from '../../context/RecordingContext';
 import { useAudioAnalyser } from '../../hooks/useAudioAnalyser';
 import { useMediaRecorder } from '../../hooks/useMediaRecorder';
+import { useRealtimeTranscription } from '../../hooks/useRealtimeTranscription';
 import { useTranscription } from '../../hooks/useTranscription';
 import { useProsody } from '../../hooks/useProsody';
 import { useRefinement } from '../../hooks/useRefinement';
@@ -19,17 +20,19 @@ import {
 } from '../../lib/recordingDocument';
 import { completeTranscriptProsody } from '../../lib/comprosody';
 import { selectTranscriptionHints } from '../../lib/voiceProfile';
+import { SESSION_LOGOUT_INTENT_EVENT } from '../../lib/session';
 import type { TranscriptionProviderId } from '../../types/transcription';
 import { Editor } from '../editor/Editor';
 
 interface MainPanelProps {
-  onOpenSidebar: () => void;
+  onOpenSidebar: (returnFocusTarget?: HTMLElement) => void;
 }
 
 const PROVIDER_STORAGE_KEY = 'cadence:transcription-provider';
 
 interface RecordingTarget {
   entryId: string;
+  epoch: number;
   provider: TranscriptionProviderId;
   keyterms: readonly string[];
 }
@@ -50,6 +53,10 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
   const [provider, setProvider] = useState<TranscriptionProviderId>(initialProvider);
   const audio = useAudioAnalyser();
   const recorder = useMediaRecorder();
+  const realtime = useRealtimeTranscription();
+  const realtimeError = realtime.liveError;
+  const realtimeStatus = realtime.status;
+  const surfaceRealtimeError = realtime.surfaceError;
   const prosody = useProsody(audio.getTimeDomainData);
   const refinement = useRefinement();
 
@@ -63,13 +70,18 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     return [...hints.terms, ...hints.phrases];
   }, [voiceProfile]);
 
-  const { isTranscribing, transcribe } = useTranscription({
+  const {
+    cancel: cancelTranscription,
+    isTranscribing,
+    transcribe,
+  } = useTranscription({
     provider,
     keyterms,
   });
 
   const streamRef = useRef<MediaStream | null>(null);
   const recordingTargetRef = useRef<RecordingTarget | null>(null);
+  const privateWorkEpochRef = useRef(0);
   const stateRef = useRef(state);
 
   const activeEntry = state.activeEntryId
@@ -94,6 +106,41 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
       recordingTargetRef.current = null;
     }
   }, [state.entries]);
+
+  useEffect(() => {
+    if (realtimeStatus === 'degraded' && realtimeError) {
+      surfaceRealtimeError();
+    }
+  }, [realtimeError, realtimeStatus, surfaceRealtimeError]);
+
+  useEffect(() => {
+    const stopPrivateWork = () => {
+      privateWorkEpochRef.current += 1;
+      recordingTargetRef.current = null;
+      recordingDispatch({ type: 'STOP_RECORDING' });
+      cancelTranscription();
+      recorder.cancel();
+      refinement.cancel();
+      void realtime.cancel();
+      audio.stop();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    };
+
+    window.addEventListener(SESSION_LOGOUT_INTENT_EVENT, stopPrivateWork);
+    return () =>
+      window.removeEventListener(
+        SESSION_LOGOUT_INTENT_EVENT,
+        stopPrivateWork,
+      );
+  }, [
+    audio,
+    cancelTranscription,
+    recorder,
+    recordingDispatch,
+    realtime,
+    refinement,
+  ]);
 
   const setRecordingError = useCallback(
     (error: unknown) => {
@@ -124,6 +171,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
 
     const target: RecordingTarget = {
       entryId: activeEntry.id,
+      epoch: privateWorkEpochRef.current,
       provider,
       keyterms: [...keyterms],
     };
@@ -144,6 +192,9 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
       recordingDispatch({ type: 'START_RECORDING', startedAt: Date.now() });
       await audio.start(stream);
       recorder.start(stream);
+      if (target.provider === 'elevenlabs') {
+        void realtime.start(stream, target.keyterms);
+      }
     } catch (error) {
       audio.stop();
       streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -160,6 +211,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     isTranscribing,
     keyterms,
     provider,
+    realtime,
     recorder,
     recordingDispatch,
     recordingState.isRecording,
@@ -178,10 +230,32 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     const capturedVoiceConfig = { ...recordingState.voiceConfig };
     recordingDispatch({ type: 'STOP_RECORDING' });
     let audioBlob: Blob;
+    let realtimeTranscript = '';
+    let shouldUseBatch = target?.provider !== 'elevenlabs';
 
     try {
       audioBlob = await recorder.stop();
+      if (!target || target.epoch !== privateWorkEpochRef.current) {
+        if (target?.provider === 'elevenlabs') {
+          await realtime.cancel();
+        }
+        return;
+      }
+      if (target?.provider === 'elevenlabs') {
+        try {
+          const realtimeResult = await realtime.stop();
+          if (target.epoch !== privateWorkEpochRef.current) return;
+          realtimeTranscript = realtimeResult.transcript;
+          shouldUseBatch = realtimeResult.shouldFallback;
+        } catch {
+          shouldUseBatch = true;
+        }
+      }
     } catch (error) {
+      if (target && target.epoch !== privateWorkEpochRef.current) return;
+      if (target?.provider === 'elevenlabs') {
+        await realtime.cancel();
+      }
       setRecordingError(error);
       if (recordingTargetRef.current === target) {
         recordingTargetRef.current = null;
@@ -193,7 +267,11 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
       streamRef.current = null;
     }
 
-    if (!target || !stateRef.current.entries[target.entryId]) {
+    if (
+      !target ||
+      target.epoch !== privateWorkEpochRef.current ||
+      !stateRef.current.entries[target.entryId]
+    ) {
       if (recordingTargetRef.current === target) {
         recordingTargetRef.current = null;
       }
@@ -229,10 +307,21 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
         return;
       }
 
-      const result = await transcribe(audioBlob, {
-        provider: target.provider,
-        keyterms: target.keyterms,
-      });
+      const result =
+        target.provider === 'elevenlabs' &&
+        !shouldUseBatch &&
+        realtimeTranscript
+          ? {
+              duration: recordingDurationMs / 1_000,
+              language: 'en',
+              transcript: realtimeTranscript,
+              words: [],
+            }
+          : await transcribe(audioBlob, {
+              provider: target.provider,
+              keyterms: target.keyterms,
+            });
+      if (target.epoch !== privateWorkEpochRef.current) return;
       const transcript = result.transcript.trim();
       if (!transcript) {
         saveSnapshot(capturedProsody);
@@ -269,8 +358,11 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
       });
       snapshotSaved = true;
 
+      if (recordingTargetRef.current === target) {
+        recordingTargetRef.current = null;
+      }
       if (stateRef.current.refinementSettings.autoRefine !== false) {
-        await refinement.refine({
+        void refinement.refine({
           entryId: target.entryId,
           mode: 'faithful',
           sourceText: appended.documentText,
@@ -278,6 +370,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
         });
       }
     } catch {
+      if (target.epoch !== privateWorkEpochRef.current) return;
       // useTranscription reports the request error. The unverified speech is
       // deliberately not inserted or reconstructed through a cloud fallback.
       if (!snapshotSaved) saveSnapshot(capturedProsody);
@@ -290,6 +383,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     audio,
     dispatch,
     prosody,
+    realtime,
     recorder,
     recordingDispatch,
     recordingState,
@@ -303,9 +397,11 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
       <Editor
         key={state.activeEntryId ?? 'no-active-entry'}
         drawWaveform={audio.drawWaveform}
-        interimTranscript=""
+        interimTranscript={realtime.liveTranscript}
         isRecording={recordingState.isRecording}
-        isTranscribing={isTranscribing}
+        isTranscribing={
+          isTranscribing || realtime.status === 'finalizing'
+        }
         onOpenSidebar={onOpenSidebar}
         onProviderChange={setProvider}
         onStart={handleStart}

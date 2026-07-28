@@ -33,7 +33,7 @@ afterEach(() => {
 describe('streamRefinement', () => {
   it('accepts a stream only after the explicit completion sentinel', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(responseStream([
-      'data: {"text":"Revised "}\n',
+      'data: {"text":"Revised "}\n\n',
       'data: {"text":"draft."}\n\n',
       'data: [DONE]\n\n',
     ])));
@@ -48,6 +48,40 @@ describe('streamRefinement', () => {
 
     await expect(collectStream()).rejects.toThrow(
       'Refinement stream ended before completion.',
+    );
+  });
+
+  it('fails closed when malformed JSON is followed by a completion sentinel', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(responseStream([
+      'data: {"text":}\n\n',
+      'data: [DONE]\n\n',
+    ])));
+
+    await expect(collectStream()).rejects.toThrow(
+      'Malformed refinement stream payload.',
+    );
+    expect(consoleError).not.toHaveBeenCalled();
+  });
+
+  it('rejects a structurally invalid payload instead of skipping to completion', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(responseStream([
+      'data: {"text":42}\n\n',
+      'data: [DONE]\n\n',
+    ])));
+
+    await expect(collectStream()).rejects.toThrow(
+      'Malformed refinement stream payload.',
+    );
+  });
+
+  it('rejects an incomplete event even when its JSON is otherwise valid', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(responseStream([
+      'data: {"text":"Uncommitted prose."}\n',
+    ])));
+
+    await expect(collectStream()).rejects.toThrow(
+      'Refinement stream ended with an incomplete event.',
     );
   });
 });

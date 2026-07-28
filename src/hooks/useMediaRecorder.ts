@@ -40,5 +40,20 @@ export function useMediaRecorder() {
     });
   }, []);
 
-  return { start, stop };
+  const cancel = useCallback(() => {
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    chunksRef.current = [];
+    if (!recorder || recorder.state === 'inactive') return;
+
+    recorder.ondataavailable = null;
+    recorder.onstop = null;
+    try {
+      recorder.stop();
+    } catch {
+      // The MediaStream tracks are stopped by the caller as a second boundary.
+    }
+  }, []);
+
+  return { cancel, start, stop };
 }

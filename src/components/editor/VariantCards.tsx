@@ -29,7 +29,7 @@ export function VariantCards({ variants, onAccept }: Props) {
   return (
     <div className="border-t border-border p-3 bg-surface-raised">
       <div className="text-[10px] text-text-muted mb-2 uppercase tracking-wider">
-        variants — click to accept
+        variants — choose one to review
       </div>
       <div className="grid grid-cols-3 gap-2">
         {variants.map((v) => {

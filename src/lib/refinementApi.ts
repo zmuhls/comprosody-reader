@@ -11,6 +11,58 @@ export interface VariantParams extends RefineParams {
   label: string;
 }
 
+type RefinementStreamEvent =
+  | { kind: 'done' }
+  | { kind: 'ignore' }
+  | { kind: 'text'; text: string };
+
+function parseRefinementStreamEvent(event: string): RefinementStreamEvent {
+  const dataLines: string[] = [];
+
+  for (const line of event.split(/\r?\n/u)) {
+    if (line.startsWith(':')) continue;
+    if (line === 'data:') {
+      dataLines.push('');
+      continue;
+    }
+    if (line.startsWith('data: ')) {
+      dataLines.push(line.slice(6));
+      continue;
+    }
+
+    throw new Error('Malformed refinement stream event.');
+  }
+
+  if (dataLines.length === 0) return { kind: 'ignore' };
+
+  const payload = dataLines.join('\n');
+  if (payload === '[DONE]') return { kind: 'done' };
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(payload);
+  } catch {
+    throw new Error('Malformed refinement stream payload.');
+  }
+
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Malformed refinement stream payload.');
+  }
+
+  const record = parsed as Record<string, unknown>;
+  if ('error' in record) {
+    if (typeof record.error !== 'string' || record.error.trim().length === 0) {
+      throw new Error('Malformed refinement stream payload.');
+    }
+    throw new Error(record.error);
+  }
+  if (typeof record.text !== 'string') {
+    throw new Error('Malformed refinement stream payload.');
+  }
+
+  return { kind: 'text', text: record.text };
+}
+
 export async function* streamRefinement(params: RefineParams): AsyncGenerator<string, void, undefined> {
   const response = await fetch(cadenceApiUrl('/refine'), {
     method: 'POST',
@@ -37,31 +89,27 @@ export async function* streamRefinement(params: RefineParams): AsyncGenerator<st
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split(/\r?\n/u);
-      buffer = lines.pop() ?? '';
+      let boundary = buffer.match(/\r?\n\r?\n/u);
+      while (boundary?.index !== undefined) {
+        const event = buffer.slice(0, boundary.index);
+        buffer = buffer.slice(boundary.index + boundary[0].length);
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const payload = line.slice(6);
-        if (payload === '[DONE]') return;
+        const parsed = parseRefinementStreamEvent(event);
+        if (parsed.kind === 'done') return;
+        if (parsed.kind === 'text') yield parsed.text;
 
-        try {
-          const parsed = JSON.parse(payload);
-          if (parsed.error) throw new Error(parsed.error);
-          if (parsed.text) yield parsed.text;
-        } catch (err) {
-          if (err instanceof SyntaxError) {
-            console.error('Malformed SSE payload:', payload);
-            continue;
-          }
-          throw err;
-        }
+        boundary = buffer.match(/\r?\n\r?\n/u);
       }
     }
+
+    buffer += decoder.decode();
   } finally {
     reader.releaseLock();
   }
 
+  if (buffer.trim().length > 0) {
+    throw new Error('Refinement stream ended with an incomplete event.');
+  }
   throw new Error('Refinement stream ended before completion.');
 }
 

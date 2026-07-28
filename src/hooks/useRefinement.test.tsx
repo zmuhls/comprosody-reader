@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { AppState } from '../context/AppContext';
 import { defaultProsody, defaultVoiceConfig } from '../types/audio';
 import type { Entry } from '../types/editor';
@@ -193,6 +193,7 @@ describe('useRefinement async note integrity', () => {
     });
 
     expect(selectionResult).toBeNull();
+    expect(result.current.proposal).toBeNull();
   });
 
   it('hides variants on switch and refuses a stale accept callback', async () => {
@@ -291,7 +292,100 @@ describe('useRefinement async note integrity', () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it('commits an explicit appended source when that exact revision becomes current', async () => {
+  it('retries a stale document proposal against the current note text', async () => {
+    const firstStream = installDeferredStream();
+    const { result, rerender } = renderHook(() => useRefinement());
+    let firstRequest!: Promise<string | null>;
+
+    act(() => {
+      firstRequest = result.current.refine();
+    });
+    context = {
+      ...context,
+      state: {
+        ...context.state,
+        entries: {
+          ...context.state.entries,
+          a: {
+            ...context.state.entries.a,
+            refinedText: 'Current writer revision',
+          },
+        },
+      },
+    };
+    rerender();
+    await act(async () => {
+      firstStream.resolve('Stale model proposal');
+      await firstRequest;
+    });
+    expect(result.current.proposal?.status).toBe('stale');
+
+    services.streamRefinement.mockImplementationOnce(async function* () {
+      yield 'Current-source proposal';
+    });
+    await act(async () => {
+      await result.current.retryProposal('Repair only the transition.', {
+        documentText: 'Current writer revision',
+      });
+    });
+
+    expect(services.streamRefinement).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        userMessage: 'Current writer revision',
+      }),
+    );
+    expect(result.current.proposal).toMatchObject({
+      sourceText: 'Current writer revision',
+      status: 'ready',
+      text: 'Current-source proposal',
+    });
+  });
+
+  it('requires a fresh selection target before retrying a stale selection', async () => {
+    const firstStream = installDeferredStream();
+    const { result, rerender } = renderHook(() => useRefinement());
+    let firstRequest!: Promise<string | null>;
+
+    act(() => {
+      firstRequest = result.current.refineSelection({
+        contextAfter: ' source',
+        contextBefore: '',
+        documentText: 'Alpha source',
+        from: 1,
+        selection: 'Alpha',
+        to: 6,
+      });
+    });
+    context = {
+      ...context,
+      state: {
+        ...context.state,
+        entries: {
+          ...context.state.entries,
+          a: {
+            ...context.state.entries.a,
+            refinedText: 'Rewritten Alpha source',
+          },
+        },
+      },
+    };
+    rerender();
+    await act(async () => {
+      firstStream.resolve('Refined alpha');
+      await firstRequest;
+    });
+
+    await act(async () => {
+      expect(
+        await result.current.retryProposal('Try the selected phrase again.', {
+          documentText: 'Rewritten Alpha source',
+        }),
+      ).toBeNull();
+    });
+    expect(services.streamRefinement).toHaveBeenCalledTimes(1);
+  });
+
+  it('proposes an appended-source edit and commits it only after acceptance', async () => {
     state = makeState({
       a: {
         ...makeEntry('a', 'Existing refinement'),
@@ -334,11 +428,92 @@ describe('useRefinement async note integrity', () => {
       await refinePromise;
     });
 
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(result.current.proposal).toMatchObject({
+      status: 'ready',
+      text: 'Refined appended thought',
+    });
+    act(() => {
+      expect(result.current.acceptProposal()).toBe(true);
+    });
     expect(dispatch).toHaveBeenCalledWith({
       type: 'UPDATE_ENTRY',
       id: 'a',
       updates: { refinedText: 'Refined appended thought' },
       recordHistory: true,
     });
+  });
+
+  it('publishes incremental proposal text without mutating the note', async () => {
+    const remainder = deferred<string>();
+    services.streamRefinement.mockImplementationOnce(async function* () {
+      yield 'A connected';
+      yield await remainder.promise;
+    });
+    const { result } = renderHook(() => useRefinement());
+    let refinePromise!: Promise<string | null>;
+
+    act(() => {
+      refinePromise = result.current.refine();
+    });
+
+    await waitFor(() =>
+      expect(result.current.proposal).toMatchObject({
+        status: 'streaming',
+        text: 'A connected',
+      }),
+    );
+    expect(dispatch).not.toHaveBeenCalled();
+
+    await act(async () => {
+      remainder.resolve(' argument.');
+      await refinePromise;
+    });
+
+    expect(result.current.proposal).toMatchObject({
+      status: 'ready',
+      text: 'A connected argument.',
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('rejects without mutation and retries from the trusted source with guidance', async () => {
+    services.streamRefinement
+      .mockImplementationOnce(async function* () {
+        yield 'Overwritten voice';
+      })
+      .mockImplementationOnce(async function* () {
+        yield 'Voice-preserving revision';
+      });
+    const { result } = renderHook(() => useRefinement());
+
+    await act(async () => {
+      await result.current.refine({ instruction: 'Tighten this.' });
+    });
+    act(() => {
+      expect(result.current.rejectProposal()).toBe(true);
+    });
+    expect(result.current.proposal?.status).toBe('rejected');
+    expect(dispatch).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.retryProposal(
+        'Keep the opening and revise only the transition.',
+      );
+    });
+
+    expect(result.current.proposal).toMatchObject({
+      status: 'ready',
+      text: 'Voice-preserving revision',
+    });
+    expect(services.streamRefinement).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        userMessage: 'Alpha source',
+        systemPrompt: expect.stringContaining(
+          'Keep the opening and revise only the transition.',
+        ),
+      }),
+    );
+    expect(dispatch).not.toHaveBeenCalled();
   });
 });

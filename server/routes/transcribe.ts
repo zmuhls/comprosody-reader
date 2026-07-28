@@ -7,6 +7,11 @@ import {
   resolveTranscriptionProvider,
   transcribe,
 } from '../lib/transcribe.js';
+import {
+  REALTIME_SCRIBE_TOKEN_TTL_SECONDS,
+  elevenLabsRealtimeTokenClient,
+  type RealtimeScribeTokenRequestOptions,
+} from '../lib/transcription/elevenLabsScribeProvider.js';
 
 export const transcribeRouter = Router();
 
@@ -100,6 +105,64 @@ function transcriptionErrorStatus(error: unknown): number {
   return 500;
 }
 
+function realtimeTokenErrorStatus(error: unknown): number {
+  if (error instanceof TranscriptionConfigurationError) return 503;
+  if (error instanceof TranscriptionUpstreamError) {
+    return error.status === 504 ? 504 : 502;
+  }
+  return 500;
+}
+
+export type CreateRealtimeScribeToken = (
+  options?: RealtimeScribeTokenRequestOptions
+) => Promise<string>;
+
+export function createRealtimeTranscriptionTokenHandler(
+  createToken: CreateRealtimeScribeToken = (options) =>
+    elevenLabsRealtimeTokenClient.createToken(options)
+) {
+  return async function handleRealtimeTranscriptionToken(
+    req: Request,
+    res: Response
+  ): Promise<void> {
+    res.set('Cache-Control', 'private, no-store');
+    res.set('Pragma', 'no-cache');
+
+    const controller = new AbortController();
+    const abortRequest = () => controller.abort();
+    const abortIfResponseClosed = () => {
+      if (!res.writableEnded) controller.abort();
+    };
+    req.once('aborted', abortRequest);
+    res.once('close', abortIfResponseClosed);
+
+    try {
+      const token = await createToken({ signal: controller.signal });
+      if (controller.signal.aborted || res.destroyed) return;
+
+      res.json({
+        token,
+        expiresInSeconds: REALTIME_SCRIBE_TOKEN_TTL_SECONDS,
+      });
+    } catch (error) {
+      if (controller.signal.aborted || res.destroyed) return;
+
+      const message =
+        error instanceof TranscriptionConfigurationError ||
+        error instanceof TranscriptionUpstreamError
+          ? error.message
+          : 'Realtime transcription is unavailable';
+      res.status(realtimeTokenErrorStatus(error)).json({ error: message });
+    } finally {
+      req.removeListener('aborted', abortRequest);
+      res.removeListener('close', abortIfResponseClosed);
+    }
+  };
+}
+
+export const handleRealtimeTranscriptionToken =
+  createRealtimeTranscriptionTokenHandler();
+
 export async function handleTranscription(
   req: Request,
   res: Response
@@ -145,4 +208,8 @@ export async function handleTranscription(
   }
 }
 
+transcribeRouter.post(
+  '/transcribe/realtime-token',
+  handleRealtimeTranscriptionToken
+);
 transcribeRouter.post('/transcribe', handleTranscription);

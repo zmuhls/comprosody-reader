@@ -9,16 +9,20 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import { Markdown } from '@tiptap/markdown';
-import { DropdownMenu, Tooltip } from 'radix-ui';
+import { Dialog, DropdownMenu, Tooltip } from 'radix-ui';
 import { useApp } from '../../context/AppContext';
 import { useStorage } from '../../hooks/useStorage';
 import type { ProsodyDiagnostics } from '../../types/audio';
 import type { TranscriptionProviderId } from '../../types/transcription';
-import type { RefinementController } from '../../hooks/useRefinement';
+import {
+  isDocumentRevisionCurrent,
+  type RefinementController,
+} from '../../hooks/useRefinement';
 import { Icon } from '../ui/Icon';
 import { RecordingDock } from '../dictation/RecordingDock';
 import { RefinementComposer } from './Toolbar';
 import { VariantCards } from './VariantCards';
+import { RefinementSidecar } from './RefinementSidecar';
 import type { Entry } from '../../types/editor';
 import { LinkedPassages } from '../library/LinkedPassages';
 import { SpeechControl } from '../speech/SpeechControl';
@@ -28,7 +32,7 @@ interface Props {
   interimTranscript: string;
   isRecording: boolean;
   isTranscribing: boolean;
-  onOpenSidebar: () => void;
+  onOpenSidebar: (returnFocusTarget?: HTMLElement) => void;
   onProviderChange: (provider: TranscriptionProviderId) => void;
   onStart: () => void;
   onStop: () => void;
@@ -154,6 +158,10 @@ export const Editor = memo(function Editor({
   const { state, dispatch, storageReady } = useApp();
   const { createEntry } = useStorage();
   const [isSourceOpen, setIsSourceOpen] = useState(false);
+  const [isRefinementOpen, setIsRefinementOpen] = useState(false);
+  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
+    window.matchMedia('(max-width: 820px)').matches,
+  );
   const [hasSelection, setHasSelection] = useState(false);
   const [hasPendingUpdate, setHasPendingUpdate] = useState(false);
   const activeEntryIdRef = useRef<string | null>(state.activeEntryId);
@@ -169,6 +177,14 @@ export const Editor = memo(function Editor({
   useEffect(() => {
     activeEntryIdRef.current = state.activeEntryId;
   }, [state.activeEntryId]);
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 820px)');
+    const update = () => setIsNarrowViewport(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
 
   const flushPendingUpdate = useCallback((updateStatus = true) => {
     if (updateTimerRef.current) {
@@ -243,10 +259,6 @@ export const Editor = memo(function Editor({
     }
   }, [activeEntry, editor]);
 
-  useEffect(() => {
-    editor?.setEditable(!refinement.isRefining);
-  }, [editor, refinement.isRefining]);
-
   const exportMarkdown = useCallback(() => {
     if (!activeEntry || !editor) return;
     const body = editor.getMarkdown().trim();
@@ -264,9 +276,12 @@ export const Editor = memo(function Editor({
   const applyInstruction = useCallback(
     async (instruction: string): Promise<boolean> => {
       if (!editor || !activeEntry) return false;
+      setIsRefinementOpen(true);
+      flushPendingUpdate();
       const { from, to, empty } = editor.state.selection;
 
       if (!empty) {
+        const documentText = editor.getMarkdown();
         const selection = editor.state.doc.textBetween(from, to, '\n');
         const contextBefore = editor.state.doc.textBetween(
           Math.max(0, from - 320),
@@ -278,26 +293,16 @@ export const Editor = memo(function Editor({
           Math.min(editor.state.doc.content.size, to + 320),
           '\n',
         );
-        const originEntryId = activeEntry.id;
         const result = await refinement.refineSelection({
           selection,
           contextBefore,
           contextAfter,
+          documentText,
+          from,
           instruction,
+          to,
         });
-        if (
-          !result ||
-          activeEntryIdRef.current !== originEntryId ||
-          editor.isDestroyed
-        ) {
-          return false;
-        }
-        editor
-          .chain()
-          .focus()
-          .insertContentAt({ from, to }, result, { contentType: 'markdown' })
-          .run();
-        return true;
+        return Boolean(result);
       }
 
       const result = await refinement.refine({
@@ -307,13 +312,134 @@ export const Editor = memo(function Editor({
       });
       return Boolean(result);
     },
-    [activeEntry, editor, refinement],
+    [activeEntry, editor, flushPendingUpdate, refinement],
+  );
+
+  const acceptRefinement = useCallback((): boolean => {
+    flushPendingUpdate();
+    return refinement.acceptProposal((candidate) => {
+      if (
+        !editor ||
+        editor.isDestroyed ||
+        !activeEntry ||
+        activeEntryIdRef.current !== candidate.entryId
+      ) {
+        return false;
+      }
+
+      const persistAcceptedMarkdown = (markdown: string) => {
+        if (updateTimerRef.current) {
+          clearTimeout(updateTimerRef.current);
+          updateTimerRef.current = null;
+        }
+        pendingUpdateRef.current = null;
+        lastLocalMarkdownRef.current = markdown;
+        setHasPendingUpdate(false);
+        dispatch({
+          type: 'UPDATE_ENTRY',
+          id: candidate.entryId,
+          updates: { refinedText: markdown },
+          recordHistory: true,
+        });
+      };
+
+      const target = candidate.selectionTarget;
+      if (target) {
+        if (
+          editor.getMarkdown() !== target.documentText ||
+          target.from < 0 ||
+          target.to <= target.from
+        ) {
+          return false;
+        }
+        const applied = editor
+          .chain()
+          .focus()
+          .insertContentAt(
+            { from: target.from, to: target.to },
+            candidate.text,
+            { contentType: 'markdown' },
+          )
+          .run();
+        if (applied) persistAcceptedMarkdown(editor.getMarkdown());
+        return applied;
+      }
+
+      const currentMarkdown = editor.getMarkdown();
+      if (
+        !isDocumentRevisionCurrent(
+          candidate.startedRevision,
+          {
+            rawTranscript: activeEntry.rawTranscript,
+            refinedText: currentMarkdown,
+          },
+          candidate.sourceText,
+        )
+      ) {
+        return false;
+      }
+
+      const applied = editor.commands.setContent(candidate.text, {
+        contentType: 'markdown',
+        emitUpdate: false,
+      });
+      if (applied) persistAcceptedMarkdown(candidate.text);
+      return applied;
+    });
+  }, [
+    activeEntry,
+    dispatch,
+    editor,
+    flushPendingUpdate,
+    refinement,
+  ]);
+
+  const retryRefinement = useCallback(
+    async (guidance: string): Promise<boolean> => {
+      const proposal = refinement.proposal;
+      if (!editor || editor.isDestroyed || !activeEntry || !proposal) {
+        return false;
+      }
+
+      const documentText = editor.getMarkdown();
+      flushPendingUpdate();
+      const { from, to, empty } = editor.state.selection;
+      const selection = proposal.selectionTarget && !empty
+        ? {
+            selection: editor.state.doc.textBetween(from, to, '\n'),
+            contextBefore: editor.state.doc.textBetween(
+              Math.max(0, from - 320),
+              from,
+              '\n',
+            ),
+            contextAfter: editor.state.doc.textBetween(
+              to,
+              Math.min(editor.state.doc.content.size, to + 320),
+              '\n',
+            ),
+            documentText,
+            from,
+            to,
+          }
+        : undefined;
+
+      const result = await refinement.retryProposal(guidance, {
+        documentText,
+        selection,
+      });
+      return Boolean(result);
+    },
+    [activeEntry, editor, flushPendingUpdate, refinement],
   );
 
   if (!activeEntry) {
     return (
       <div className="editor-empty-state">
-        <button className="mobile-menu-button" onClick={onOpenSidebar} type="button">
+        <button
+          className="mobile-menu-button"
+          onClick={(event) => onOpenSidebar(event.currentTarget)}
+          type="button"
+        >
           <Icon name="menu" size={17} />
           <span>Notes</span>
         </button>
@@ -333,18 +459,27 @@ export const Editor = memo(function Editor({
     : 'Notes';
 
   return (
-    <div className="editor-shell">
+    <Dialog.Root
+      modal={isNarrowViewport}
+      onOpenChange={setIsRefinementOpen}
+      open={isRefinementOpen}
+    >
+      <div className="editor-shell">
       <header className="editor-topbar">
         <button
           aria-label="Open note directory"
           className="icon-button mobile-directory-trigger"
-          onClick={onOpenSidebar}
+          onClick={(event) => onOpenSidebar(event.currentTarget)}
           type="button"
         >
           <Icon name="menu" size={17} />
         </button>
 
-        <button className="breadcrumb" onClick={onOpenSidebar} type="button">
+        <button
+          className="breadcrumb"
+          onClick={(event) => onOpenSidebar(event.currentTarget)}
+          type="button"
+        >
           <span>{parentName}</span>
           <Icon name="chevron-right" size={12} />
           <strong>{activeEntry.name}</strong>
@@ -364,6 +499,33 @@ export const Editor = memo(function Editor({
         </span>
 
         <div className="topbar-actions">
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <Dialog.Trigger asChild>
+                <button
+                  aria-label={
+                    isRefinementOpen
+                      ? 'Close refinement'
+                      : refinement.proposal
+                        ? 'Review refinement proposal'
+                        : 'Open refinement'
+                  }
+                  aria-pressed={isRefinementOpen}
+                  className="icon-button refinement-open-button"
+                  data-has-proposal={Boolean(refinement.proposal)}
+                  type="button"
+                >
+                  <Icon name="sparkles" size={16} />
+                </button>
+              </Dialog.Trigger>
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content className="ui-tooltip" sideOffset={7}>
+                Refinement
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+
           <SpeechControl
             getText={() => editor?.getText().trim() ?? ''}
             label="Listen to note"
@@ -477,8 +639,8 @@ export const Editor = memo(function Editor({
           <EditorContent editor={editor} />
 
           {isRecording && interimTranscript ? (
-            <div className="live-transcript" aria-live="polite">
-              <span>Listening</span>
+            <div className="live-transcript">
+              <span aria-live="polite" role="status">Listening</span>
               {interimTranscript}
             </div>
           ) : null}
@@ -490,11 +652,39 @@ export const Editor = memo(function Editor({
           onClose={() => setIsSourceOpen(false)}
           rawTranscript={activeEntry.rawTranscript}
         />
+
+        <RefinementSidecar
+          hasSelection={hasSelection}
+          isOpen={isRefinementOpen}
+          onAccept={acceptRefinement}
+          onFaithfulEdit={() => {
+            setIsRefinementOpen(true);
+            flushPendingUpdate();
+            void refinement.refine({
+              mode: 'faithful',
+              sourceText: editor?.getMarkdown(),
+            });
+          }}
+          onFullOverhaul={() => {
+            setIsRefinementOpen(true);
+            flushPendingUpdate();
+            void refinement.refine({
+              mode: 'overhaul',
+              sourceText: editor?.getMarkdown(),
+            });
+          }}
+          onInstruction={applyInstruction}
+          onRetry={retryRefinement}
+          refinement={refinement}
+        />
       </main>
 
       <VariantCards
         variants={refinement.variants}
-        onAccept={refinement.acceptVariant}
+        onAccept={(variant) => {
+          refinement.acceptVariant(variant);
+          setIsRefinementOpen(true);
+        }}
       />
 
       <div
@@ -506,18 +696,22 @@ export const Editor = memo(function Editor({
           hasSelection={hasSelection}
           isRefining={refinement.isRefining}
           onCancel={refinement.cancel}
-          onFaithfulEdit={() =>
+          onFaithfulEdit={() => {
+            setIsRefinementOpen(true);
+            flushPendingUpdate();
             void refinement.refine({
               mode: 'faithful',
               sourceText: editor?.getMarkdown(),
-            })
-          }
-          onFullOverhaul={() =>
+            });
+          }}
+          onFullOverhaul={() => {
+            setIsRefinementOpen(true);
+            flushPendingUpdate();
             void refinement.refine({
               mode: 'overhaul',
               sourceText: editor?.getMarkdown(),
-            })
-          }
+            });
+          }}
           onInstruction={applyInstruction}
         />
         <RecordingDock
@@ -532,6 +726,7 @@ export const Editor = memo(function Editor({
           startedAt={startedAt}
         />
       </div>
-    </div>
+      </div>
+    </Dialog.Root>
   );
 });

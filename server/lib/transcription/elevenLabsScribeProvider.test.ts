@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TranscriptionConfigurationError } from './types.js';
-import { createElevenLabsScribeProvider } from './elevenLabsScribeProvider.js';
+import {
+  createElevenLabsRealtimeTokenClient,
+  createElevenLabsScribeProvider,
+} from './elevenLabsScribeProvider.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -152,5 +155,152 @@ describe('ElevenLabs Scribe provider', () => {
       status: 502,
       message: 'ElevenLabs returned an invalid transcription response',
     });
+  });
+});
+
+describe('ElevenLabs realtime Scribe token client', () => {
+  it('mints a single-use realtime_scribe token without exposing the API key', async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse({ token: 'test-realtime-single-use-token' })
+    );
+    const client = createElevenLabsRealtimeTokenClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => 'server-only-api-key',
+    });
+
+    await expect(client.createToken()).resolves.toBe(
+      'test-realtime-single-use-token'
+    );
+
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe(
+      'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe'
+    );
+    expect(init).toMatchObject({ method: 'POST' });
+    expect(init.body).toBeUndefined();
+    const headers = new Headers(init.headers);
+    expect(headers.get('accept')).toBe('application/json');
+    expect(headers.get('xi-api-key')).toBe('server-only-api-key');
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('fails before making a request when realtime transcription is unconfigured', async () => {
+    const fetchMock = vi.fn();
+    const client = createElevenLabsRealtimeTokenClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => undefined,
+    });
+
+    await expect(client.createToken()).rejects.toMatchObject({
+      name: 'TranscriptionConfigurationError',
+      message: 'ELEVENLABS_API_KEY is required for realtime transcription',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    undefined,
+    {},
+    { token: '' },
+    { token: 'short' },
+    { token: `token with whitespace ${'x'.repeat(20)}` },
+    { token: 'x'.repeat(8_193) },
+  ])('rejects an invalid successful token response', async (body) => {
+    const fetchMock = vi.fn(async () => jsonResponse(body));
+    const client = createElevenLabsRealtimeTokenClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => 'server-only-api-key',
+    });
+
+    await expect(client.createToken()).rejects.toMatchObject({
+      status: 502,
+      message: 'ElevenLabs returned an invalid realtime transcription token',
+    });
+  });
+
+  it('does not reflect upstream response details or transport errors', async () => {
+    const upstreamDetail = 'secret-upstream-diagnostic';
+    const responseClient = createElevenLabsRealtimeTokenClient({
+      fetchImpl: vi.fn(async () =>
+        jsonResponse({ detail: upstreamDetail }, 401)
+      ) as unknown as typeof fetch,
+      getApiKey: () => 'server-only-api-key',
+    });
+    await expect(responseClient.createToken()).rejects.toMatchObject({
+      status: 401,
+      message: 'ElevenLabs realtime transcription token request failed (401)',
+    });
+
+    const transportClient = createElevenLabsRealtimeTokenClient({
+      fetchImpl: vi.fn(async () => {
+        throw new Error(upstreamDetail);
+      }) as unknown as typeof fetch,
+      getApiKey: () => 'server-only-api-key',
+    });
+    await expect(transportClient.createToken()).rejects.toMatchObject({
+      status: 502,
+      message:
+        'Could not reach ElevenLabs realtime transcription token service',
+    });
+  });
+
+  it('aborts a token request at the configured deadline', async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        requestSignal = init?.signal ?? undefined;
+        return await new Promise<Response>((_resolve, reject) => {
+          requestSignal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true }
+          );
+        });
+      }
+    );
+    const client = createElevenLabsRealtimeTokenClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => 'server-only-api-key',
+      timeoutMs: 5,
+    });
+
+    await expect(client.createToken()).rejects.toMatchObject({
+      status: 504,
+      message:
+        'ElevenLabs realtime transcription token service timed out',
+    });
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it('links caller cancellation to the upstream request', async () => {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn(
+      async (_url: string | URL | Request, init?: RequestInit) => {
+        requestSignal = init?.signal ?? undefined;
+        return await new Promise<Response>((_resolve, reject) => {
+          requestSignal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true }
+          );
+        });
+      }
+    );
+    const client = createElevenLabsRealtimeTokenClient({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => 'server-only-api-key',
+    });
+    const controller = new AbortController();
+    const request = client.createToken({ signal: controller.signal });
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({
+      status: 499,
+      message: 'Realtime transcription token request was cancelled',
+    });
+    expect(requestSignal?.aborted).toBe(true);
   });
 });

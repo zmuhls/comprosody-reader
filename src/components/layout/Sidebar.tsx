@@ -1,22 +1,37 @@
-import { memo, useEffect, useState } from 'react';
+import {
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import { DirectoryTree } from '../sidebar/DirectoryTree';
 import { EntryActions } from '../sidebar/EntryActions';
 import { Icon } from '../ui/Icon';
 import { useApp } from '../../context/AppContext';
 import { LibrarySection } from '../library/LibrarySection';
 import { cadenceApiUrl } from '../../lib/urls';
+import { LogoutControl } from './LogoutControl';
 
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
+  returnFocusTarget: HTMLElement | null;
 }
 
-export const Sidebar = memo(function Sidebar({ isOpen, onClose }: SidebarProps) {
+export const Sidebar = memo(function Sidebar({
+  isOpen,
+  onClose,
+  returnFocusTarget,
+}: SidebarProps) {
   const [serverOk, setServerOk] = useState<boolean | null>(null);
   const [openPanel, setOpenPanel] = useState<'voice' | 'settings' | null>(null);
   const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
     window.matchMedia('(max-width: 820px)').matches,
   );
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const { voiceProfile, storageReady } = useApp();
 
   useEffect(() => {
@@ -26,6 +41,20 @@ export const Sidebar = memo(function Sidebar({ isOpen, onClose }: SidebarProps) 
     query.addEventListener('change', update);
     return () => query.removeEventListener('change', update);
   }, []);
+
+  useEffect(() => {
+    if (!isNarrowViewport) return;
+    if (isOpen) {
+      returnFocusRef.current = returnFocusTarget;
+      const frame = window.requestAnimationFrame(() =>
+        closeButtonRef.current?.focus(),
+      );
+      return () => window.cancelAnimationFrame(frame);
+    }
+    const returnTarget = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (returnTarget?.isConnected) returnTarget.focus();
+  }, [isNarrowViewport, isOpen, returnFocusTarget]);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +82,35 @@ export const Sidebar = memo(function Sidebar({ isOpen, onClose }: SidebarProps) 
     .slice(0, 3)
     .map((term) => term.preferred);
 
+  const handleSidebarKeyDown = (
+    event: KeyboardEvent<HTMLElement>,
+  ) => {
+    if (!isNarrowViewport || !isOpen) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(
+      sidebarRef.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), '
+          + 'select:not([disabled]), textarea:not([disabled]), '
+          + '[tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => !element.hasAttribute('inert'));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
     <>
       <button
@@ -64,9 +122,14 @@ export const Sidebar = memo(function Sidebar({ isOpen, onClose }: SidebarProps) 
         type="button"
       />
       <aside
+        aria-label={isNarrowViewport ? 'Note directory' : undefined}
         aria-hidden={isNarrowViewport && !isOpen}
+        aria-modal={isNarrowViewport && isOpen ? true : undefined}
         className={`sidebar ${isOpen ? 'is-open' : ''}`}
         inert={isNarrowViewport && !isOpen ? true : undefined}
+        onKeyDown={handleSidebarKeyDown}
+        ref={sidebarRef}
+        role={isNarrowViewport ? 'dialog' : undefined}
       >
         <header className="sidebar-header">
           <div>
@@ -77,6 +140,7 @@ export const Sidebar = memo(function Sidebar({ isOpen, onClose }: SidebarProps) 
             aria-label="Close note directory"
             className="icon-button sidebar-close"
             onClick={onClose}
+            ref={closeButtonRef}
             type="button"
           >
             <Icon name="x" size={17} />
@@ -215,6 +279,7 @@ export const Sidebar = memo(function Sidebar({ isOpen, onClose }: SidebarProps) 
               </small>
             </span>
           </button>
+          <LogoutControl />
         </div>
       </aside>
     </>

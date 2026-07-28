@@ -35,7 +35,20 @@ vi.mock('./context/SpeechContext', () => ({
 }));
 
 vi.mock('./components/layout/Sidebar', () => ({
-  Sidebar: () => <aside>Directory</aside>,
+  Sidebar: ({
+    isOpen,
+    onClose,
+  }: {
+    isOpen: boolean;
+    onClose: () => void;
+  }) => (
+    <aside data-open={String(isOpen)}>
+      Directory
+      <button onClick={onClose} type="button">
+        Close directory
+      </button>
+    </aside>
+  ),
 }));
 
 vi.mock('./components/layout/MainPanel', () => ({
@@ -116,5 +129,19 @@ describe('mobile reading workspace', () => {
         ),
       ).toBe('true');
     });
+  });
+
+  it('opens the note directory from the mobile reading switch', () => {
+    mocks.activePublication = { id: 'book-1', title: 'Book one' };
+    render(<App />);
+
+    const directory = screen.getByText('Directory').closest('aside');
+    expect(directory?.getAttribute('data-open')).toBe('false');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Open note directory' }),
+    );
+
+    expect(directory?.getAttribute('data-open')).toBe('true');
   });
 });

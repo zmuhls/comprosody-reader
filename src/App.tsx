@@ -10,6 +10,7 @@ import { Tooltip } from 'radix-ui';
 import { LibraryProvider, useLibrary } from './context/LibraryContext';
 import { ReadingPane } from './components/library/ReadingPane';
 import { SpeechProvider } from './context/SpeechContext';
+import { Icon } from './components/ui/Icon';
 
 type MobileWorkspaceView = 'reader' | 'note';
 
@@ -20,6 +21,8 @@ interface MobileWorkspaceSelection {
 
 function AppInner() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [sidebarReturnFocusTarget, setSidebarReturnFocusTarget] =
+    useState<HTMLElement | null>(null);
   const [mobileWorkspaceSelection, setMobileWorkspaceSelection] =
     useState<MobileWorkspaceSelection>({
       publicationId: null,
@@ -38,6 +41,15 @@ function AppInner() {
       view,
     });
   };
+  const openSidebar = (returnFocusTarget?: HTMLElement) => {
+    setSidebarReturnFocusTarget(
+      returnFocusTarget ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null),
+    );
+    setIsSidebarOpen(true);
+  };
 
   return (
     <RecordingProvider>
@@ -46,6 +58,7 @@ function AppInner() {
           <Sidebar
             isOpen={isSidebarOpen}
             onClose={() => setIsSidebarOpen(false)}
+            returnFocusTarget={sidebarReturnFocusTarget}
           />
           <div
             className={`workspace-stage ${
@@ -59,6 +72,14 @@ function AppInner() {
                 aria-label="Reading workspace view"
                 className="mobile-workspace-switch"
               >
+                <button
+                  aria-label="Open note directory"
+                  className="mobile-workspace-menu"
+                  onClick={(event) => openSidebar(event.currentTarget)}
+                  type="button"
+                >
+                  <Icon name="menu" size={18} />
+                </button>
                 <button
                   aria-pressed={mobileWorkspaceView === 'reader'}
                   data-active={mobileWorkspaceView === 'reader'}
@@ -80,7 +101,7 @@ function AppInner() {
             {activePublication ? <ReadingPane key="reading-pane" /> : null}
             <div className="app-main" key="note-pane">
               <ErrorBanner />
-              <MainPanel onOpenSidebar={() => setIsSidebarOpen(true)} />
+              <MainPanel onOpenSidebar={openSidebar} />
             </div>
           </div>
           <ScholarRail />

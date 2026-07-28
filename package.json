@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run && vitest run --config server/vitest.config.ts",
+    "test:e2e": "playwright test --config=playwright.config.mjs",
     "test:server": "vitest run --config server/vitest.config.ts",
     "test:watch": "vitest",
     "diagnostic": "npx tsx scripts/prosody-pipeline-diagnostic.ts",
@@ -16,6 +17,7 @@
     "server:prod": "NODE_ENV=production npx tsx server/index.ts"
   },
   "dependencies": {
+    "@elevenlabs/client": "^1.16.0",
     "@tailwindcss/vite": "^4.2.1",
     "@tiptap/extension-placeholder": "^3.28.0",
     "@tiptap/markdown": "^3.28.0",
@@ -36,6 +38,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.62.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@types/cors": "^2.8.19",

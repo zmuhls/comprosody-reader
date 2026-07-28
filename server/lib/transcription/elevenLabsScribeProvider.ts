@@ -8,7 +8,12 @@ import {
 
 const ELEVENLABS_SPEECH_TO_TEXT_URL =
   'https://api.elevenlabs.io/v1/speech-to-text';
+const ELEVENLABS_REALTIME_SCRIBE_TOKEN_URL =
+  'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe';
 const DEFAULT_ELEVENLABS_SCRIBE_MODEL = 'scribe_v2';
+const DEFAULT_REALTIME_TOKEN_TIMEOUT_MS = 10_000;
+const MAX_REALTIME_TOKEN_CHARACTERS = 8_192;
+export const REALTIME_SCRIBE_TOKEN_TTL_SECONDS = 15 * 60;
 
 type FetchImplementation = typeof globalThis.fetch;
 
@@ -16,6 +21,20 @@ interface ElevenLabsScribeProviderOptions {
   fetchImpl?: FetchImplementation;
   getApiKey?: () => string | undefined;
   getDefaultModel?: () => string | undefined;
+}
+
+interface ElevenLabsRealtimeTokenClientOptions {
+  fetchImpl?: FetchImplementation;
+  getApiKey?: () => string | undefined;
+  timeoutMs?: number;
+}
+
+export interface RealtimeScribeTokenRequestOptions {
+  signal?: AbortSignal;
+}
+
+export interface ElevenLabsRealtimeTokenClient {
+  createToken(options?: RealtimeScribeTokenRequestOptions): Promise<string>;
 }
 
 interface ElevenLabsWord {
@@ -126,6 +145,116 @@ function normalizeResponse(body: unknown): TranscriptionResult {
   };
 }
 
+function normalizeRealtimeScribeToken(body: unknown): string {
+  if (!isRecord(body) || typeof body.token !== 'string') {
+    throw new TranscriptionUpstreamError(
+      502,
+      'ElevenLabs returned an invalid realtime transcription token'
+    );
+  }
+
+  const token = body.token;
+  const isPrintableWithoutWhitespace = /^[\x21-\x7e]+$/u.test(token);
+  if (
+    token.length < 16 ||
+    token.length > MAX_REALTIME_TOKEN_CHARACTERS ||
+    !isPrintableWithoutWhitespace
+  ) {
+    throw new TranscriptionUpstreamError(
+      502,
+      'ElevenLabs returned an invalid realtime transcription token'
+    );
+  }
+
+  return token;
+}
+
+function boundedTimeout(value: number | undefined): number {
+  if (!Number.isFinite(value)) return DEFAULT_REALTIME_TOKEN_TIMEOUT_MS;
+  return Math.max(1, Math.min(Math.floor(value as number), 30_000));
+}
+
+export function createElevenLabsRealtimeTokenClient(
+  options: ElevenLabsRealtimeTokenClientOptions = {}
+): ElevenLabsRealtimeTokenClient {
+  const fetchImpl =
+    options.fetchImpl ??
+    ((input: Parameters<FetchImplementation>[0], init?: Parameters<FetchImplementation>[1]) =>
+      globalThis.fetch(input, init));
+  const getApiKey = options.getApiKey ?? (() => process.env.ELEVENLABS_API_KEY);
+  const timeoutMs = boundedTimeout(options.timeoutMs);
+
+  return {
+    async createToken(
+      requestOptions: RealtimeScribeTokenRequestOptions = {}
+    ): Promise<string> {
+      const apiKey = getApiKey()?.trim();
+      if (!apiKey) {
+        throw new TranscriptionConfigurationError(
+          'ELEVENLABS_API_KEY is required for realtime transcription'
+        );
+      }
+
+      const controller = new AbortController();
+      let timedOut = false;
+      const cancelFromCaller = () => controller.abort(requestOptions.signal?.reason);
+      if (requestOptions.signal?.aborted) {
+        cancelFromCaller();
+      } else {
+        requestOptions.signal?.addEventListener('abort', cancelFromCaller, {
+          once: true,
+        });
+      }
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs);
+
+      try {
+        const response = await fetchImpl(ELEVENLABS_REALTIME_SCRIBE_TOKEN_URL, {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'xi-api-key': apiKey,
+          },
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new TranscriptionUpstreamError(
+            response.status,
+            `ElevenLabs realtime transcription token request failed (${response.status})`
+          );
+        }
+
+        const body = await response.json().catch(() => undefined);
+        return normalizeRealtimeScribeToken(body);
+      } catch (error) {
+        if (error instanceof TranscriptionUpstreamError) throw error;
+        if (timedOut) {
+          throw new TranscriptionUpstreamError(
+            504,
+            'ElevenLabs realtime transcription token service timed out'
+          );
+        }
+        if (requestOptions.signal?.aborted) {
+          throw new TranscriptionUpstreamError(
+            499,
+            'Realtime transcription token request was cancelled'
+          );
+        }
+        throw new TranscriptionUpstreamError(
+          502,
+          'Could not reach ElevenLabs realtime transcription token service'
+        );
+      } finally {
+        clearTimeout(timeout);
+        requestOptions.signal?.removeEventListener('abort', cancelFromCaller);
+      }
+    },
+  };
+}
+
 export function createElevenLabsScribeProvider(
   options: ElevenLabsScribeProviderOptions = {}
 ): TranscriptionProvider {
@@ -199,3 +328,5 @@ export function createElevenLabsScribeProvider(
 }
 
 export const elevenLabsScribeProvider = createElevenLabsScribeProvider();
+export const elevenLabsRealtimeTokenClient =
+  createElevenLabsRealtimeTokenClient();
