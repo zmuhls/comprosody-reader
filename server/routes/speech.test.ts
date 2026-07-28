@@ -1,10 +1,16 @@
 import { EventEmitter } from 'node:events';
 import type { Request, Response as ExpressResponse } from 'express';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  MAX_SPEECH_AUDIO_BYTES,
   MAX_SPEECH_TEXT_CHARACTERS,
   createSpeechHandlers,
 } from './speech.js';
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 class MockResponse extends EventEmitter {
   statusCode = 200;
@@ -160,6 +166,91 @@ describe('GET /api/speech/voices', () => {
       nextPageToken: null,
     });
   });
+
+  it('maps a stalled voice provider to 504 at the shared deadline', async () => {
+    vi.useFakeTimers();
+    let providerSignal: AbortSignal | undefined;
+    let rejectProvider: ((reason?: unknown) => void) | undefined;
+    const fetchMock = vi.fn(
+      async (
+        _input: Parameters<typeof fetch>[0],
+        init?: RequestInit,
+      ) => {
+        providerSignal = init?.signal ?? undefined;
+        return await new Promise<Response>((_resolve, reject) => {
+          rejectProvider = reject;
+          providerSignal?.addEventListener(
+            'abort',
+            () => reject(providerSignal?.reason),
+            { once: true },
+          );
+        });
+      },
+    );
+    const handlers = createSpeechHandlers({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => 'server-only-key',
+      providerTimeoutMs: 25,
+    });
+    const res = response();
+
+    const pending = handlers.listVoices(request(), res.express);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(25);
+    const observedDeadline = providerSignal?.aborted === true;
+    if (!observedDeadline) {
+      rejectProvider?.(new Error('test cleanup: voice provider was not aborted'));
+    }
+    await pending;
+
+    expect(observedDeadline).toBe(true);
+    expect(res.mock.statusCode).toBe(504);
+    expect(res.mock.body).toEqual({
+      error: 'ElevenLabs voice service timed out',
+    });
+  });
+
+  it('aborts a stalled voice provider when the client disconnects', async () => {
+    vi.useFakeTimers();
+    let providerSignal: AbortSignal | undefined;
+    let rejectProvider: ((reason?: unknown) => void) | undefined;
+    const fetchMock = vi.fn(
+      async (
+        _input: Parameters<typeof fetch>[0],
+        init?: RequestInit,
+      ) => {
+        providerSignal = init?.signal ?? undefined;
+        return await new Promise<Response>((_resolve, reject) => {
+          rejectProvider = reject;
+          providerSignal?.addEventListener(
+            'abort',
+            () => reject(providerSignal?.reason),
+            { once: true },
+          );
+        });
+      },
+    );
+    const handlers = createSpeechHandlers({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => 'server-only-key',
+      providerTimeoutMs: 60_000,
+    });
+    const req = request();
+    const res = response();
+
+    const pending = handlers.listVoices(req, res.express);
+    await Promise.resolve();
+    (req as unknown as EventEmitter).emit('aborted');
+    const observedClientAbort = providerSignal?.aborted === true;
+    if (!observedClientAbort) {
+      rejectProvider?.(new Error('test cleanup: voice provider was not aborted'));
+    }
+    await pending;
+
+    expect(observedClientAbort).toBe(true);
+    expect(res.mock.headersSent).toBe(false);
+    expect(res.mock.writableEnded).toBe(false);
+  });
 });
 
 describe('POST /api/speech/synthesize', () => {
@@ -204,6 +295,77 @@ describe('POST /api/speech/synthesize', () => {
     expect(res.mock.headers.get('content-type')).toBe('audio/mpeg');
     expect(res.mock.headers.get('cache-control')).toBe('no-store');
     expect(Buffer.concat(res.mock.chunks)).toEqual(Buffer.from(audio));
+  });
+
+  it('rejects an oversized declared audio length before sending audio headers or bytes', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(new Uint8Array([0x49, 0x44, 0x33]), {
+        headers: {
+          'content-length': String(MAX_SPEECH_AUDIO_BYTES + 1),
+        },
+      }),
+    );
+    const handlers = createSpeechHandlers({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => 'server-only-key',
+    });
+    const res = response();
+
+    await handlers.synthesize(
+      request({
+        body: {
+          voiceId: 'voice_1',
+          text: 'Reject oversized declared audio.',
+          speed: 1,
+        },
+      }),
+      res.express,
+    );
+
+    expect(res.mock.statusCode).toBe(502);
+    expect(res.mock.headers.has('content-type')).toBe(false);
+    expect(res.mock.headers.has('content-length')).toBe(false);
+    expect(res.mock.chunks).toHaveLength(0);
+    expect(res.mock.destroyedWith).toBeUndefined();
+    expect(res.mock.body).toEqual({
+      error: expect.stringMatching(/audio/iu),
+    });
+  });
+
+  it('terminates chunked audio before writing beyond the 25 MiB ceiling', async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(MAX_SPEECH_AUDIO_BYTES));
+        controller.enqueue(new Uint8Array([0x00]));
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn(async () => new Response(stream));
+    const handlers = createSpeechHandlers({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => 'server-only-key',
+    });
+    const res = response();
+
+    await handlers.synthesize(
+      request({
+        body: {
+          voiceId: 'voice_1',
+          text: 'Bound the chunked audio stream.',
+          speed: 1,
+        },
+      }),
+      res.express,
+    );
+
+    const writtenBytes = res.mock.chunks.reduce(
+      (total, chunk) => total + chunk.byteLength,
+      0,
+    );
+    expect(res.mock.headers.has('content-length')).toBe(false);
+    expect(writtenBytes).toBeLessThanOrEqual(MAX_SPEECH_AUDIO_BYTES);
+    expect(res.mock.destroyedWith).toBeInstanceOf(Error);
+    expect(res.mock.destroyedWith?.message).toMatch(/audio/iu);
   });
 });
 
@@ -417,6 +579,228 @@ describe('POST /api/speech/synthesize-with-timestamps', () => {
     expect(res.mock.body).toEqual({
       error: 'ElevenLabs timed text-to-speech failed (429)',
     });
+  });
+
+  it('maps a timed provider deadline to 504 without logging private input', async () => {
+    vi.useFakeTimers();
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    let providerSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn(
+      async (
+        _input: Parameters<typeof fetch>[0],
+        init?: RequestInit,
+      ) => {
+        providerSignal = init?.signal ?? undefined;
+        return await new Promise<Response>((_resolve, reject) => {
+          providerSignal?.addEventListener(
+            'abort',
+            () => reject(providerSignal?.reason),
+            { once: true },
+          );
+        });
+      },
+    );
+    const handlers = createSpeechHandlers({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => 'private-elevenlabs-key',
+      providerTimeoutMs: 25,
+    });
+    const res = response();
+
+    const pending = handlers.synthesizeWithTimestamps(
+      request({
+        body: {
+          voiceId: 'private-voice-id',
+          text: 'Private note text must never reach a diagnostic log.',
+          speed: 1,
+        },
+      }),
+      res.express,
+    );
+    await vi.advanceTimersByTimeAsync(25);
+    await pending;
+
+    expect(providerSignal?.aborted).toBe(true);
+    expect(res.mock.statusCode).toBe(504);
+    expect(res.mock.body).toEqual({
+      error: 'ElevenLabs timed text-to-speech service timed out',
+    });
+    expect(errorLog).not.toHaveBeenCalled();
+    expect(JSON.stringify(res.mock.body)).not.toMatch(
+      /private note|private-voice-id|private-elevenlabs-key/iu,
+    );
+  });
+
+  it('keeps the shared deadline active while a timed response body stalls', async () => {
+    vi.useFakeTimers();
+    let providerSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn(
+      async (
+        _input: Parameters<typeof fetch>[0],
+        init?: RequestInit,
+      ) => {
+        providerSignal = init?.signal ?? undefined;
+        return {
+          ok: true,
+          status: 200,
+          json: () =>
+            new Promise<unknown>((_resolve, reject) => {
+              providerSignal?.addEventListener(
+                'abort',
+                () => reject(providerSignal?.reason),
+                { once: true },
+              );
+            }),
+        } as Response;
+      },
+    );
+    const handlers = createSpeechHandlers({
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      getApiKey: () => 'server-only-key',
+      providerTimeoutMs: 25,
+    });
+    const res = response();
+
+    const pending = handlers.synthesizeWithTimestamps(
+      request({
+        body: {
+          voiceId: 'voice_1',
+          text: 'Provider headers arrived, but the response body stalled.',
+          speed: 1,
+        },
+      }),
+      res.express,
+    );
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(25);
+    await pending;
+
+    expect(providerSignal?.aborted).toBe(true);
+    expect(res.mock.statusCode).toBe(504);
+    expect(res.mock.body).toEqual({
+      error: 'ElevenLabs timed text-to-speech service timed out',
+    });
+  });
+
+  it('logs only bounded metadata for an unexpected timed-response error', async () => {
+    const privateText = 'Private note text must never enter diagnostics.';
+    const privateVoiceId = 'private-voice-id';
+    const privateApiKey = 'private-elevenlabs-key';
+    const privateProviderBody = '{"audio_base64":"private-provider-body"}';
+    const unexpected = Object.assign(
+      new Error(`Parse failed for ${privateText}`),
+      {
+        name: 'ProviderParserError',
+        code: 'E_PROVIDER_PARSE',
+        cause: Object.assign(new Error(privateProviderBody), {
+          name: 'ProviderSyntaxError',
+          code: 'E_PROVIDER_SHAPE',
+        }),
+        providerBody: privateProviderBody,
+      },
+    );
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const handlers = createSpeechHandlers({
+      fetchImpl: vi.fn(async () => ({
+        ok: true,
+        json: () => {
+          throw unexpected;
+        },
+      }) as unknown as Response),
+      getApiKey: () => privateApiKey,
+    });
+    const res = response();
+
+    await handlers.synthesizeWithTimestamps(
+      request({
+        body: {
+          voiceId: privateVoiceId,
+          text: privateText,
+          speed: 1,
+        },
+      }),
+      res.express,
+    );
+
+    expect(res.mock.statusCode).toBe(500);
+    expect(res.mock.body).toEqual({
+      error: 'ElevenLabs read-aloud request failed',
+    });
+    expect(errorLog).toHaveBeenCalledTimes(1);
+    expect(errorLog.mock.calls[0]?.[0]).toBe('[speech-route-error]');
+    const serializedMetadata = errorLog.mock.calls[0]?.[1];
+    expect(typeof serializedMetadata).toBe('string');
+    const metadata = JSON.parse(String(serializedMetadata)) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(metadata).sort()).toEqual([
+      'causeClass',
+      'causeCode',
+      'durationMs',
+      'errorClass',
+      'errorCode',
+      'event',
+      'inputCharacters',
+      'operation',
+      'phase',
+    ]);
+    expect(metadata).toMatchObject({
+      event: 'speech_route_error',
+      operation: 'synthesize_with_timestamps',
+      phase: 'provider_parse',
+      inputCharacters: Array.from(privateText).length,
+      errorClass: 'ProviderParserError',
+      errorCode: 'E_PROVIDER_PARSE',
+      causeClass: 'ProviderSyntaxError',
+      causeCode: 'E_PROVIDER_SHAPE',
+    });
+    expect(metadata.durationMs).toEqual(expect.any(Number));
+
+    const diagnosticOutput = errorLog.mock.calls.flat().join(' ');
+    const publicResponse = JSON.stringify(res.mock.body);
+    for (const privateValue of [
+      privateText,
+      privateVoiceId,
+      privateApiKey,
+      privateProviderBody,
+      unexpected.message,
+      unexpected.stack ?? '',
+    ]) {
+      if (!privateValue) continue;
+      expect(diagnosticOutput).not.toContain(privateValue);
+      expect(publicResponse).not.toContain(privateValue);
+    }
+  });
+
+  it('enforces the 25 MiB timed-audio ceiling before decoding provider audio', async () => {
+    expect(MAX_SPEECH_AUDIO_BYTES).toBe(25 * 1024 * 1024);
+    const maximumBase64Length =
+      Math.ceil(MAX_SPEECH_AUDIO_BYTES / 3) * 4;
+    const oversizedAudioBase64 = 'A'.repeat(maximumBase64Length + 4);
+    const text = 'Bounded audio.';
+    const upstream = timedUpstream(text);
+    upstream.audio_base64 = oversizedAudioBase64;
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const handlers = createSpeechHandlers({
+      fetchImpl: vi.fn(async () => ({
+        ok: true,
+        json: async () => upstream,
+      }) as unknown as Response),
+      getApiKey: () => 'server-only-key',
+    });
+    const res = response();
+
+    await handlers.synthesizeWithTimestamps(
+      request({ body: { voiceId: 'voice_1', text, speed: 1 } }),
+      res.express,
+    );
+
+    expect(res.mock.statusCode).toBe(502);
+    expect(res.mock.body).toEqual({
+      error: 'ElevenLabs returned an invalid timed speech response',
+    });
+    expect(errorLog).not.toHaveBeenCalled();
   });
 
   it('aborts the provider request when the browser disconnects', async () => {

@@ -10,7 +10,8 @@ const TIMED_SPEECH_INVALID_RESPONSE =
 export const DEFAULT_VOICE_PAGE_SIZE = 100;
 export const MAX_VOICE_PAGE_SIZE = 100;
 export const MAX_SPEECH_TEXT_CHARACTERS = 10_000;
-export const MAX_SPEECH_AUDIO_BYTES = 32 * 1024 * 1024;
+export const MAX_SPEECH_AUDIO_BYTES = 25 * 1024 * 1024;
+export const DEFAULT_SPEECH_PROVIDER_TIMEOUT_MS = 45_000;
 export const MIN_SPEECH_SPEED = 0.7;
 export const MAX_SPEECH_SPEED = 1.2;
 
@@ -19,6 +20,7 @@ type FetchImplementation = typeof globalThis.fetch;
 interface SpeechHandlerOptions {
   fetchImpl?: FetchImplementation;
   getApiKey?: () => string | undefined;
+  providerTimeoutMs?: number;
 }
 
 interface NormalizedVoice {
@@ -58,6 +60,13 @@ class SpeechHttpError extends Error {
     this.name = 'SpeechHttpError';
     this.status = status;
   }
+}
+
+interface SpeechErrorContext {
+  inputCharacters?: number;
+  operation: 'synthesize' | 'synthesize_with_timestamps' | 'voices';
+  phase: string;
+  startedAt: number;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -297,13 +306,56 @@ function normalizeTimedSpeechResponse(
   };
 }
 
-function respondWithError(res: Response, error: unknown): void {
+function diagnosticCode(value: unknown): string | null {
+  return typeof value === 'string' && /^[A-Za-z0-9_.-]{1,64}$/u.test(value)
+    ? value
+    : null;
+}
+
+function logUnexpectedSpeechError(
+  error: unknown,
+  context: SpeechErrorContext,
+): void {
+  if (error instanceof SpeechHttpError) return;
+  const candidate = error as {
+    cause?: { code?: unknown; name?: unknown };
+    code?: unknown;
+    name?: unknown;
+  };
+  console.error('[speech-route-error]', JSON.stringify({
+    event: 'speech_route_error',
+    operation: context.operation,
+    phase: context.phase,
+    durationMs: Math.max(0, Date.now() - context.startedAt),
+    inputCharacters: context.inputCharacters,
+    errorClass: diagnosticCode(candidate?.name) || typeof error,
+    errorCode: diagnosticCode(candidate?.code),
+    causeClass: diagnosticCode(candidate?.cause?.name),
+    causeCode: diagnosticCode(candidate?.cause?.code),
+  }));
+}
+
+function respondWithError(
+  res: Response,
+  error: unknown,
+  context: SpeechErrorContext,
+): void {
+  logUnexpectedSpeechError(error, context);
   const status = error instanceof SpeechHttpError ? error.status : 500;
   const message =
     error instanceof SpeechHttpError
       ? error.message
       : 'ElevenLabs read-aloud request failed';
   res.status(status).json({ error: message });
+}
+
+function providerAbortReason(
+  error: unknown,
+  signal: AbortSignal | undefined,
+): unknown {
+  return signal?.aborted && signal.reason instanceof SpeechHttpError
+    ? signal.reason
+    : error;
 }
 
 function synthesisRequest(
@@ -336,11 +388,27 @@ function synthesisUrl(voiceId: string, suffix = ''): URL {
   return url;
 }
 
-function requestAbortController(req: Request, res: Response): AbortController {
+function requestAbortController(
+  req: Request,
+  res: Response,
+  timeoutMs: number,
+  serviceName: string,
+): AbortController {
   const controller = new AbortController();
-  const abort = () => controller.abort();
+  const timer = setTimeout(() => {
+    controller.abort(
+      new SpeechHttpError(504, `ElevenLabs ${serviceName} timed out`),
+    );
+  }, timeoutMs);
+  timer.unref?.();
+  const cleanup = () => clearTimeout(timer);
+  const abort = () => {
+    cleanup();
+    controller.abort();
+  };
   req.once('aborted', abort);
   res.once('close', abort);
+  res.once('finish', cleanup);
   return controller;
 }
 
@@ -354,7 +422,10 @@ async function fetchSpeech(
   try {
     return await fetchImpl(url, init);
   } catch {
-    if (signal.aborted) return undefined;
+    if (signal.aborted) {
+      if (signal.reason instanceof SpeechHttpError) throw signal.reason;
+      return undefined;
+    }
     throw new SpeechHttpError(502, `Could not reach ElevenLabs ${serviceName}`);
   }
 }
@@ -367,20 +438,37 @@ async function writeAudioResponse(
     throw new SpeechHttpError(502, 'ElevenLabs returned an empty audio stream');
   }
 
+  const contentLength = upstream.headers.get('content-length');
+  if (contentLength && /^\d+$/u.test(contentLength)) {
+    if (BigInt(contentLength) > BigInt(MAX_SPEECH_AUDIO_BYTES)) {
+      throw new SpeechHttpError(
+        502,
+        'ElevenLabs returned an oversized audio stream',
+      );
+    }
+  }
+
   res.status(200);
   res.setHeader('Content-Type', 'audio/mpeg');
   res.setHeader('Cache-Control', 'no-store');
-
-  const contentLength = upstream.headers.get('content-length');
   if (contentLength && /^\d+$/u.test(contentLength)) {
     res.setHeader('Content-Length', contentLength);
   }
 
   const reader = upstream.body.getReader();
+  let receivedBytes = 0;
   try {
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      receivedBytes += value.byteLength;
+      if (receivedBytes > MAX_SPEECH_AUDIO_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new SpeechHttpError(
+          502,
+          'ElevenLabs returned an oversized audio stream',
+        );
+      }
       if (!res.write(Buffer.from(value))) {
         await once(res, 'drain');
       }
@@ -404,9 +492,19 @@ export function createSpeechHandlers(options: SpeechHandlerOptions = {}): {
     ) => globalThis.fetch(input, init));
   const getApiKey =
     options.getApiKey ?? (() => process.env.ELEVENLABS_API_KEY);
+  const providerTimeoutMs = Number.isFinite(options.providerTimeoutMs)
+    && Number(options.providerTimeoutMs) > 0
+    ? Number(options.providerTimeoutMs)
+    : DEFAULT_SPEECH_PROVIDER_TIMEOUT_MS;
 
   return {
     async listVoices(req: Request, res: Response): Promise<void> {
+      const context: SpeechErrorContext = {
+        operation: 'voices',
+        phase: 'input',
+        startedAt: Date.now(),
+      };
+      let controller: AbortController | undefined;
       try {
         const apiKey = requireApiKey(getApiKey);
         const pageSize = parsePageSize(
@@ -424,11 +522,21 @@ export function createSpeechHandlers(options: SpeechHandlerOptions = {}): {
           url.searchParams.set('next_page_token', nextPageToken);
         }
 
+        context.phase = 'provider_fetch';
+        controller = requestAbortController(
+          req,
+          res,
+          providerTimeoutMs,
+          'voice service',
+        );
         const upstream = await fetchSpeech(
           fetchImpl,
           url,
-          { headers: { 'xi-api-key': apiKey } },
-          new AbortController().signal,
+          {
+            headers: { 'xi-api-key': apiKey },
+            signal: controller.signal,
+          },
+          controller.signal,
           'voice service',
         );
         if (!upstream) return;
@@ -439,18 +547,37 @@ export function createSpeechHandlers(options: SpeechHandlerOptions = {}): {
           );
         }
 
+        context.phase = 'provider_parse';
         const body: unknown = await upstream.json().catch(() => undefined);
+        context.phase = 'response_send';
         res.json(normalizeVoiceList(body));
       } catch (error) {
-        respondWithError(res, error);
+        respondWithError(
+          res,
+          providerAbortReason(error, controller?.signal),
+          context,
+        );
       }
     },
 
     async synthesize(req: Request, res: Response): Promise<void> {
+      const context: SpeechErrorContext = {
+        operation: 'synthesize',
+        phase: 'input',
+        startedAt: Date.now(),
+      };
+      let controller: AbortController | undefined;
       try {
         const apiKey = requireApiKey(getApiKey);
         const { voiceId, text, speed } = parseSynthesisBody(req.body);
-        const controller = requestAbortController(req, res);
+        context.inputCharacters = Array.from(text).length;
+        controller = requestAbortController(
+          req,
+          res,
+          providerTimeoutMs,
+          'text-to-speech service',
+        );
+        context.phase = 'provider_fetch';
         const upstream = await fetchSpeech(
           fetchImpl,
           synthesisUrl(voiceId),
@@ -465,10 +592,15 @@ export function createSpeechHandlers(options: SpeechHandlerOptions = {}): {
             `ElevenLabs text-to-speech failed (${upstream.status})`,
           );
         }
+        context.phase = 'response_stream';
         await writeAudioResponse(upstream, res);
       } catch (error) {
         if (!res.headersSent) {
-          respondWithError(res, error);
+          respondWithError(
+            res,
+            providerAbortReason(error, controller?.signal),
+            context,
+          );
         } else if (!res.writableEnded) {
           res.destroy(
             error instanceof Error ? error : new Error('Audio stream failed'),
@@ -481,10 +613,23 @@ export function createSpeechHandlers(options: SpeechHandlerOptions = {}): {
       req: Request,
       res: Response,
     ): Promise<void> {
+      const context: SpeechErrorContext = {
+        operation: 'synthesize_with_timestamps',
+        phase: 'input',
+        startedAt: Date.now(),
+      };
+      let controller: AbortController | undefined;
       try {
         const apiKey = requireApiKey(getApiKey);
         const { voiceId, text, speed } = parseSynthesisBody(req.body);
-        const controller = requestAbortController(req, res);
+        context.inputCharacters = Array.from(text).length;
+        controller = requestAbortController(
+          req,
+          res,
+          providerTimeoutMs,
+          'timed text-to-speech service',
+        );
+        context.phase = 'provider_fetch';
         const upstream = await fetchSpeech(
           fetchImpl,
           synthesisUrl(voiceId, '/with-timestamps'),
@@ -500,13 +645,22 @@ export function createSpeechHandlers(options: SpeechHandlerOptions = {}): {
           );
         }
 
+        context.phase = 'provider_parse';
         const body: unknown = await upstream.json().catch(() => undefined);
+        context.phase = 'response_validate';
         const response = normalizeTimedSpeechResponse(body, text);
+        context.phase = 'response_send';
         res.status(200);
         res.setHeader('Cache-Control', 'no-store');
         res.json(response);
       } catch (error) {
-        if (!res.headersSent) respondWithError(res, error);
+        if (!res.headersSent) {
+          respondWithError(
+            res,
+            providerAbortReason(error, controller?.signal),
+            context,
+          );
+        }
       }
     },
   };
