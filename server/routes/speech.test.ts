@@ -413,13 +413,13 @@ describe('POST /api/speech/synthesize-with-timestamps', () => {
       audioBase64: Buffer.from([0x49, 0x44, 0x33, 0x04]).toString('base64'),
       alignment: {
         characters: Array.from(text),
-        startTimesSeconds: Array.from(text).map((_, index) => index / 10),
-        endTimesSeconds: Array.from(text).map((_, index) => (index + 1) / 10),
+        characterStartTimesSeconds: Array.from(text).map((_, index) => index / 10),
+        characterEndTimesSeconds: Array.from(text).map((_, index) => (index + 1) / 10),
       },
       normalizedAlignment: {
         characters: Array.from(text.toLocaleUpperCase()),
-        startTimesSeconds: Array.from(text).map((_, index) => index / 10),
-        endTimesSeconds: Array.from(text).map((_, index) => (index + 1) / 10),
+        characterStartTimesSeconds: Array.from(text).map((_, index) => index / 10),
+        characterEndTimesSeconds: Array.from(text).map((_, index) => (index + 1) / 10),
       },
     });
     expect(JSON.stringify(res.mock.body)).not.toMatch(

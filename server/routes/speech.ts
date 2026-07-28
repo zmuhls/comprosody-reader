@@ -40,8 +40,8 @@ interface VoiceListResponse {
 
 interface TimedSpeechAlignment {
   characters: string[];
-  startTimesSeconds: number[];
-  endTimesSeconds: number[];
+  characterStartTimesSeconds: number[];
+  characterEndTimesSeconds: number[];
 }
 
 interface TimedSpeechResponse {
@@ -258,8 +258,8 @@ function normalizeAlignment(
 
   return {
     characters: [...characters] as string[],
-    startTimesSeconds: [...startTimesSeconds] as number[],
-    endTimesSeconds: [...endTimesSeconds] as number[],
+    characterStartTimesSeconds: [...startTimesSeconds] as number[],
+    characterEndTimesSeconds: [...endTimesSeconds] as number[],
   };
 }
 
