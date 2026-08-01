@@ -41,20 +41,15 @@ export function TranscriptView({
 
   return (
     <div className="flex min-w-0 flex-1 flex-col bg-surface-writing">
-      <div className="flex items-center justify-between border-b border-border px-5 py-3">
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.28em] text-text-muted">
-            transcript
-          </div>
-          <div className="mt-1 text-[11px] text-text-secondary">
-            {isRecording
-              ? 'Speech appears here while the recorder is live.'
-              : 'You can edit the transcript before refinement.'}
-          </div>
+      <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
+        <div className="min-w-0 truncate text-[10px] uppercase tracking-[0.28em] text-text-muted">
+          transcript
         </div>
-        <span className="text-[10px] uppercase tracking-[0.22em] text-text-muted">
-          {isRecording ? 'live input' : 'editable'}
-        </span>
+        {isRecording && (
+          <span className="shrink-0 text-[10px] uppercase tracking-[0.22em] text-recording">
+            live
+          </span>
+        )}
       </div>
       <CorrectionChips
         candidates={candidates}
@@ -67,11 +62,7 @@ export function TranscriptView({
           readOnly={isRecording}
           value={composedTranscript}
           onChange={(event) => onChangeTranscript(event.target.value)}
-          placeholder={
-            isRecording
-              ? 'Listening...'
-              : 'Record or paste speech here to build the transcript.'
-          }
+          placeholder={isRecording ? 'listening…' : 'record or paste text'}
           className="h-full w-full resize-none bg-transparent px-5 py-5 text-[1rem] leading-relaxed text-text-primary outline-none placeholder:text-text-muted/50 font-writing"
         />
         {interimTranscript && isRecording && (

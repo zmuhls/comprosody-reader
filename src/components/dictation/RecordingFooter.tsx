@@ -18,6 +18,7 @@ interface Props {
   liveWordCount: number;
   drawWaveform: (canvas: HTMLCanvasElement, color?: string) => () => void;
   onStart: () => void;
+  onStartNote: () => void;
   onStop: () => void;
   onRetryTranscription: () => void;
   onUseLiveTranscript: () => void;
@@ -39,6 +40,7 @@ export function RecordingFooter({
   liveWordCount,
   drawWaveform,
   onStart,
+  onStartNote,
   onStop,
   onRetryTranscription,
   onUseLiveTranscript,
@@ -58,12 +60,10 @@ export function RecordingFooter({
       : null;
 
   const status = isRecording
-    ? 'recording live'
+    ? 'recording'
     : isTranscribing
-      ? 'transcribing take'
-      : activeEntryName
-        ? 'recorder ready'
-        : 'new entry on next take';
+      ? 'transcribing…'
+      : 'ready';
 
   const statusDetail = isRecording
     ? null
@@ -104,9 +104,18 @@ export function RecordingFooter({
             {status}
           </div>
           <div className="mt-0.5 max-w-48 truncate text-[10px] uppercase tracking-[0.14em] text-text-muted">
-            {statusDetail ?? activeEntryName ?? 'no active entry'}
+            {statusDetail ?? activeEntryName ?? 'new entry'}
           </div>
         </div>
+
+        <button
+          onClick={onStartNote}
+          disabled={isRecording || isTranscribing}
+          className="px-2 py-1.5 text-[10px] uppercase tracking-[0.18em] text-text-muted transition-colors hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35"
+          title="record a vocal note"
+        >
+          + note
+        </button>
 
         <div className="min-w-4 flex-1" />
 
