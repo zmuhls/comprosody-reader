@@ -219,6 +219,43 @@ byte-identical to today — pinned by existing prompt tests. The
 - Existing 184 tests stay green; `npm run diagnostic` unaffected (no prosody
   math changes).
 
+## 8 · Mobile responsiveness and swipe paging
+
+- Every surface works down to 375px: the sidebar becomes a slide-over drawer
+  (hamburger in the editor header), the settings rail wraps to two delimited
+  lines, the footer console keeps the seal + breath line and collapses stats
+  behind a tap, the margin-notes column becomes a bottom sheet.
+- **Swipe paging**: on touch viewports, horizontal swipe in the editor pages
+  between siblings — chapters in `order` within a book, alphabetical siblings
+  in a folder. A subtle page indicator (`ch 2 / 5`) doubles as the affordance.
+  Implemented with pointer events (threshold + velocity), no dependency;
+  disabled while text is selected or a textarea scrolls horizontally.
+- Non-touch fallback: `[` / `]` keys page the same sequence.
+
+## 9 · Audio takes: lazy hydration with measured progress
+
+Recorded takes only — no TTS anywhere. IndexedDB holds the blobs; the cost is
+many takes, not one file.
+
+- `AudioTakes` becomes an infinite-scroll list: metadata rows (recordedAt,
+  duration, byte size — all stored at save time) load in pages of 10 via
+  IntersectionObserver sentinel.
+- A take's blob hydrates only when it nears the viewport or is played.
+  `blob.size` is known, so the read streams with a **determinate** per-take
+  progress bar; each scroll page gets a batch bar.
+- A small log strip reports the process (`take 3/12 · 2.1 MB · hydrated 84ms`),
+  ring-buffered to the last ~20 lines.
+- Object URLs are revoked when takes leave the viewport; memory stays flat.
+
+## 10 · Delivery gates (user-mandated)
+
+1. **Phase 1 — full workup** (§1–8): implement → unit tests green → e2e pass
+   (Playwright: library CRUD/DnD, settings rail, passes diff, footer, mobile
+   viewport + swipe) → push to production.
+2. **Phase 2 — audio loading** (§9): implement → e2e on audio (seeded
+   IndexedDB takes, scroll hydration, progress/log assertions) → push.
+3. Everything on production by session end.
+
 ## Out of scope
 
 - Command palette (declined during brainstorming).
