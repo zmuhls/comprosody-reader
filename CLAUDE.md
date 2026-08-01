@@ -12,6 +12,9 @@ npm run lint         # eslint
 npm test             # vitest run
 npm run test:watch   # vitest in watch mode
 npm run diagnostic   # npx tsx scripts/prosody-pipeline-diagnostic.ts
+
+npx vitest run src/lib/lexicon.test.ts   # single test file
+npx vitest run -t "cycle guard"          # tests matching a name
 ```
 
 Both `dev` and `server` must run simultaneously. Vite proxies `/api` to `localhost:3001`.
@@ -24,6 +27,7 @@ All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs)
 - `OPENROUTER_MODEL` — refinement LLM (default: `moonshotai/kimi-k2-0905`)
 - `OPENROUTER_TRANSCRIBE_MODEL` — audio transcription (default: `google/gemini-2.5-flash`)
 - `CORS_ORIGIN` — comma-separated CORS allowlist (default: `http://localhost:5173`)
+- `PORT` — backend port (default: `3001`; the Vite proxy targets 3001, so change both together)
 
 ## Architecture
 
@@ -87,7 +91,7 @@ Settings render as a delimited rail (`SettingsRail`: register · scale · reach)
 
 ### Prompt composition system
 
-`src/lib/prompts.ts` builds the refinement system prompt from four dimensions:
+`src/lib/prompts.ts` builds the refinement system prompt from four dimensions plus an optional context block:
 
 - **Genre** (5 registers: academic/narrative/analytical/field-journal/freewrite) → defines editorial voice in a preamble paragraph
 - **Scale** (word/phrase/clause/sentence/paragraph) → constrains scope of edits
@@ -111,11 +115,11 @@ Tailwind v4 `@theme` in `src/index.css`. Warm amber-on-charcoal palette. Three f
 - `--font-writing` (Crimson Pro) — text areas, also set as default `textarea` font
 - `--font-ui` (JetBrains Mono) — UI labels, body default
 
-Color tokens follow `--color-{name}` convention mapping to Tailwind utilities (`bg-surface`, `text-accent`, `border-border`, etc.). Recording state uses `.recording-active` CSS class for ambient glow animation.
+Color tokens follow `--color-{name}` convention mapping to Tailwind utilities (`bg-surface`, `text-accent`, `border-border`, etc.). Recording ambience is canvas-drawn: the footer waveform is the "breath line" (idle ember pulse in `Waveform.tsx`, live mirrored stroke in `useAudioAnalyser.drawWaveform`), and the seal `RecordButton` glows with live `prosody.energy`. Idle pulse and ping respect `prefers-reduced-motion`; canvas drawing uses CSS-pixel coordinates (context pre-scaled by devicePixelRatio — keep it that way or HiDPI doubles the scale).
 
 ## Testing
 
-Vitest with jsdom. Globals enabled (no imports needed for `describe`/`it`/`expect`). Tests live alongside source: `*.test.ts`, in both `src/` and `server/` (vitest include covers both). Testing library available (`@testing-library/react`, `@testing-library/jest-dom`).
+Vitest with jsdom. Globals enabled (no imports needed for `describe`/`it`/`expect`). Tests live alongside source: `*.test.ts(x)`, in both `src/` and `server/` (vitest include covers both). `vitest.setup.ts` registers `@testing-library/jest-dom` matchers (`toHaveClass` etc.); the matcher types come from the `"@testing-library/jest-dom"` entry in `tsconfig.app.json` `types`. jsdom gaps to know: no `DataTransfer` constructor (stub `getData`), no `Blob.stream` (code paths must feature-detect — see `readBlobWithProgress`), no real `IntersectionObserver` behavior (cover via e2e, not unit tests).
 
 ## TypeScript
 
