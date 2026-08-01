@@ -12,6 +12,8 @@ function makeEntry(id: string, parentId: string | null, overrides: Partial<Entry
     id,
     name: id,
     parentId,
+    kind: 'writing',
+    order: 0,
     rawTranscript: '',
     refinedText: '',
     prosody: { ...defaultProsody },
@@ -26,8 +28,12 @@ function makeEntry(id: string, parentId: string | null, overrides: Partial<Entry
   };
 }
 
-function makeDirectory(id: string, parentId: string | null): Directory {
-  return { id, name: id, parentId };
+function makeDirectory(
+  id: string,
+  parentId: string | null,
+  kind: Directory['kind'] = 'folder'
+): Directory {
+  return { id, name: id, parentId, kind };
 }
 
 // dir-a > dir-b > dir-c nested chain, dir-d unrelated at root;
@@ -153,6 +159,17 @@ describe('newEntry', () => {
     expect(entry.recordedDurationMs).toBe(0);
     expect(entry.audioTakes).toBe(0);
     expect(entry.draftHistory).toEqual([]);
+  });
+
+  it('defaults to a writing entry with order 0', () => {
+    const entry = newEntry(null);
+    expect(entry.kind).toBe('writing');
+    expect(entry.order).toBe(0);
+  });
+
+  it('creates notes when asked', () => {
+    const entry = newEntry(null, 'note');
+    expect(entry.kind).toBe('note');
   });
 });
 

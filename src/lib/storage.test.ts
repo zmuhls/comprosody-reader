@@ -2,6 +2,7 @@ import {
   createDebouncedPersist,
   loadEntries,
   saveEntries,
+  loadDirectories,
   normalizeEntry,
 } from './storage';
 import { STORAGE_KEYS } from '../constants';
@@ -149,7 +150,7 @@ describe('saveEntries', () => {
 
   it('writes the schema version alongside entries', () => {
     saveEntries({});
-    expect(localStorage.getItem(STORAGE_KEYS.schemaVersion)).toBe('2');
+    expect(localStorage.getItem(STORAGE_KEYS.schemaVersion)).toBe('3');
     expect(localStorage.getItem(STORAGE_KEYS.entries)).toBe('{}');
   });
 
@@ -171,5 +172,86 @@ describe('normalizeEntry', () => {
   it('computes wordCount from rawTranscript when missing', () => {
     const entry = normalizeEntry({ id: 'e1', rawTranscript: 'a b c d' });
     expect(entry.wordCount).toBe(4);
+  });
+});
+
+describe('schema v3 migration', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it('migrates v2 entries to v3 with kind and name-ordered order', () => {
+    localStorage.setItem(
+      STORAGE_KEYS.entries,
+      JSON.stringify({
+        b: makeLegacyEntry({ id: 'b', name: 'Beta', parentId: 'd1' }),
+        a: makeLegacyEntry({ id: 'a', name: 'Alpha', parentId: 'd1' }),
+        r: makeLegacyEntry({ id: 'r', name: 'Rootling', parentId: null }),
+      })
+    );
+
+    const entries = loadEntries();
+    expect(entries.a).toMatchObject({ kind: 'writing', order: 0 });
+    expect(entries.b).toMatchObject({ kind: 'writing', order: 1 });
+    expect(entries.r).toMatchObject({ kind: 'writing', order: 0 });
+  });
+
+  it('normalizes unknown kind values to defaults', () => {
+    localStorage.setItem(
+      STORAGE_KEYS.entries,
+      JSON.stringify({ e1: { ...makeLegacyEntry(), kind: 'zebra' } })
+    );
+    expect(loadEntries().e1.kind).toBe('writing');
+  });
+
+  it('preserves already-present kind, order, and attachment fields', () => {
+    localStorage.setItem(
+      STORAGE_KEYS.entries,
+      JSON.stringify({
+        n1: {
+          ...makeLegacyEntry({ id: 'n1' }),
+          kind: 'note',
+          order: 7,
+          attachedToId: 'e9',
+          includeInRefinement: false,
+        },
+      })
+    );
+
+    const entries = loadEntries();
+    expect(entries.n1.kind).toBe('note');
+    expect(entries.n1.order).toBe(7);
+    expect(entries.n1.attachedToId).toBe('e9');
+    expect(entries.n1.includeInRefinement).toBe(false);
+  });
+
+  it('assigns missing order after existing orders within the same parent', () => {
+    localStorage.setItem(
+      STORAGE_KEYS.entries,
+      JSON.stringify({
+        kept: { ...makeLegacyEntry({ id: 'kept', name: 'Zulu', parentId: 'd1' }), order: 3 },
+        added: makeLegacyEntry({ id: 'added', name: 'Alpha', parentId: 'd1' }),
+      })
+    );
+
+    const entries = loadEntries();
+    expect(entries.kept.order).toBe(3);
+    expect(entries.added.order).toBe(4);
+  });
+
+  it('backfills directory kind to folder and preserves book', () => {
+    localStorage.setItem(
+      STORAGE_KEYS.directories,
+      JSON.stringify({
+        d1: { id: 'd1', name: 'old folder', parentId: null },
+        d2: { id: 'd2', name: 'a book', parentId: null, kind: 'book' },
+        d3: { id: 'd3', name: 'weird', parentId: null, kind: 'zebra' },
+      })
+    );
+
+    const dirs = loadDirectories();
+    expect(dirs.d1.kind).toBe('folder');
+    expect(dirs.d2.kind).toBe('book');
+    expect(dirs.d3.kind).toBe('folder');
   });
 });

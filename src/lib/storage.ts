@@ -5,7 +5,10 @@ import type { RefinementSettings } from '../types/llm';
 import { defaultProsody, defaultVoiceConfig } from '../types/audio';
 import { countWords } from './entries';
 
-const SCHEMA_VERSION = '2';
+const SCHEMA_VERSION = '3';
+
+/** Sentinel: order not yet assigned; replaced by a per-parent pass in loadEntries. */
+const ORDER_UNSET = -1;
 
 export function normalizeEntry(raw: Partial<Entry> & { id: string }): Entry {
   const rawTranscript = raw.rawTranscript ?? '';
@@ -13,6 +16,15 @@ export function normalizeEntry(raw: Partial<Entry> & { id: string }): Entry {
     id: raw.id,
     name: raw.name ?? '',
     parentId: raw.parentId ?? null,
+    kind: raw.kind === 'note' ? 'note' : 'writing',
+    order:
+      typeof raw.order === 'number' && Number.isFinite(raw.order) && raw.order >= 0
+        ? raw.order
+        : ORDER_UNSET,
+    ...(typeof raw.attachedToId === 'string' ? { attachedToId: raw.attachedToId } : {}),
+    ...(typeof raw.includeInRefinement === 'boolean'
+      ? { includeInRefinement: raw.includeInRefinement }
+      : {}),
     rawTranscript,
     refinedText: raw.refinedText ?? '',
     prosody: raw.prosody ?? defaultProsody,
@@ -23,6 +35,15 @@ export function normalizeEntry(raw: Partial<Entry> & { id: string }): Entry {
     recordedDurationMs: raw.recordedDurationMs ?? 0,
     audioTakes: raw.audioTakes ?? 0,
     draftHistory: raw.draftHistory ?? [],
+  };
+}
+
+function normalizeDirectory(raw: Partial<Directory> & { id: string }): Directory {
+  return {
+    id: raw.id,
+    name: raw.name ?? '',
+    parentId: raw.parentId ?? null,
+    kind: raw.kind === 'book' ? 'book' : 'folder',
   };
 }
 
@@ -70,9 +91,30 @@ export function loadEntries(): Record<string, Entry> {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.entries);
     const parsed: Record<string, Partial<Entry>> = raw ? JSON.parse(raw) : {};
-    return Object.fromEntries(
+    const entries = Object.fromEntries(
       Object.entries(parsed).map(([id, entry]) => [id, normalizeEntry({ ...entry, id })])
     );
+
+    // v2 → v3: entries carried no order. Assign missing orders per parent,
+    // after any existing orders, ranked by name so the migrated tree renders
+    // in the same sequence the alphabetical sort produced before.
+    const byParent = new Map<string | null, Entry[]>();
+    for (const entry of Object.values(entries)) {
+      const siblings = byParent.get(entry.parentId) ?? [];
+      siblings.push(entry);
+      byParent.set(entry.parentId, siblings);
+    }
+    for (const siblings of byParent.values()) {
+      const missing = siblings
+        .filter((e) => e.order < 0)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      let next = siblings.reduce((max, e) => Math.max(max, e.order), -1) + 1;
+      for (const entry of missing) {
+        entry.order = next++;
+      }
+    }
+
+    return entries;
   } catch {
     return {};
   }
@@ -90,7 +132,10 @@ export function saveEntries(entries: Record<string, Entry>): void {
 export function loadDirectories(): Record<string, Directory> {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.directories);
-    return raw ? JSON.parse(raw) : {};
+    const parsed: Record<string, Partial<Directory>> = raw ? JSON.parse(raw) : {};
+    return Object.fromEntries(
+      Object.entries(parsed).map(([id, dir]) => [id, normalizeDirectory({ ...dir, id })])
+    );
   } catch {
     return {};
   }

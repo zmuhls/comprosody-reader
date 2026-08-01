@@ -8,7 +8,7 @@ import {
   type ReactNode,
   type Dispatch,
 } from 'react';
-import type { Entry, Directory } from '../types/editor';
+import type { Entry, Directory, EntryKind, DirectoryKind } from '../types/editor';
 import type { LexiconTerm, CorrectionCandidate } from '../types/lexicon';
 import type { RefinementSettings } from '../types/llm';
 import { defaultVoiceConfig, defaultProsody } from '../types/audio';
@@ -298,11 +298,13 @@ export function useApp() {
   return ctx;
 }
 
-export function newEntry(parentId: string | null): Entry {
+export function newEntry(parentId: string | null, kind: EntryKind = 'writing'): Entry {
   return {
     id: crypto.randomUUID(),
     name: 'Untitled',
     parentId,
+    kind,
+    order: 0,
     rawTranscript: '',
     refinedText: '',
     prosody: defaultProsody,
@@ -316,10 +318,15 @@ export function newEntry(parentId: string | null): Entry {
   };
 }
 
-export function newDirectory(parentId: string | null, name: string): Directory {
+export function newDirectory(
+  parentId: string | null,
+  name: string,
+  kind: DirectoryKind = 'folder'
+): Directory {
   return {
     id: crypto.randomUUID(),
     name,
     parentId,
+    kind,
   };
 }

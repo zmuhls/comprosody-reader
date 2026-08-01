@@ -7,6 +7,8 @@ function makeEntry(overrides: Partial<Entry> = {}): Entry {
     id: 'entry-1',
     name: 'Morning pages',
     parentId: null,
+    kind: 'writing',
+    order: 0,
     rawTranscript: 'one two three four',
     refinedText: 'One, two, three, four.',
     prosody: { ...defaultProsody },
