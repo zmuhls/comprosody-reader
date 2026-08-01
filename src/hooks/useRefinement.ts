@@ -49,7 +49,7 @@ export function useRefinement() {
       state.refinementSettings,
       activeEntry.prosody,
       activeEntry.voiceConfig,
-      buildRefineContext(activeEntry.id, state.entries, state.directories)
+      buildRefineContext(activeEntry.id, stateRef.current.entries, stateRef.current.directories)
     );
 
     setIsRefining(true);
@@ -115,7 +115,7 @@ export function useRefinement() {
         contextBefore,
         selection,
         contextAfter,
-        buildRefineContext(activeEntry.id, state.entries, state.directories)
+        buildRefineContext(activeEntry.id, stateRef.current.entries, stateRef.current.directories)
       );
 
       setIsRefining(true);
@@ -179,7 +179,7 @@ export function useRefinement() {
       state.refinementSettings,
       activeEntry.prosody,
       activeEntry.voiceConfig,
-      buildRefineContext(activeEntry.id, state.entries, state.directories)
+      buildRefineContext(activeEntry.id, stateRef.current.entries, stateRef.current.directories)
     );
 
     setIsGeneratingVariants(true);
@@ -240,7 +240,7 @@ export function useRefinement() {
         state.refinementSettings,
         activeEntry.prosody,
         activeEntry.voiceConfig,
-        buildRefineContext(activeEntry.id, state.entries, state.directories)
+        buildRefineContext(activeEntry.id, stateRef.current.entries, stateRef.current.directories)
       );
 
       const chipOrder = (l: Variant['label']) =>
