@@ -1,17 +1,35 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { useApp } from '../../context/AppContext';
+import { useApp, newEntry } from '../../context/AppContext';
 import { useRefinement } from '../../hooks/useRefinement';
-import { countParagraphs, countWords } from '../../lib/entries';
+import { countParagraphs, countWords, deriveEntryName } from '../../lib/entries';
 import { formatDuration, formatUpdatedAt } from '../../lib/time';
 import { copyEntryToClipboard, downloadEntry } from '../../lib/export';
+import type { Directory } from '../../types/editor';
+import type { Variant } from '../../types/llm';
 import { TranscriptView } from './TranscriptView';
 import { Toolbar } from './Toolbar';
-import { VariantCards } from './VariantCards';
+import { PassesBar } from './PassesBar';
+import { VariantDiffView } from './VariantDiffView';
 import { DiffView } from './DiffView';
 
 interface Props {
   interimTranscript: string;
   isRecording: boolean;
+}
+
+/** Nearest enclosing book, walking up from a containing directory id. */
+function findBookAncestor(
+  directories: Record<string, Directory>,
+  startId: string | null
+): string | null {
+  let cursor = startId;
+  while (cursor !== null) {
+    const dir = directories[cursor];
+    if (!dir) return null;
+    if (dir.kind === 'book') return dir.id;
+    cursor = dir.parentId;
+  }
+  return null;
 }
 
 export function Editor({ interimTranscript, isRecording }: Props) {
@@ -26,12 +44,18 @@ export function Editor({ interimTranscript, isRecording }: Props) {
     isGeneratingVariants,
     generateVariants,
     acceptVariant,
+    retryVariant,
+    dismissVariants,
   } = useRefinement();
   const refinedRef = useRef<HTMLTextAreaElement>(null);
   const [hasSelection, setHasSelection] = useState(false);
-  // Keyed by entry id so switching entries implicitly resets both flags.
+  // Keyed by entry id so switching entries implicitly resets these flags.
   const [diffEntryId, setDiffEntryId] = useState<string | null>(null);
   const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null);
+  const [highlightedPass, setHighlightedPass] = useState<{
+    entryId: string;
+    label: Variant['label'];
+  } | null>(null);
   const copiedTimerRef = useRef<number | null>(null);
 
   const activeEntry = state.activeEntryId
@@ -168,10 +192,54 @@ export function Editor({ interimTranscript, isRecording }: Props) {
   const toneSummary = `${state.refinementSettings.genre} / ${state.refinementSettings.scale}`;
   const recordedDurationMs = activeEntry.recordedDurationMs ?? 0;
   const canDiff = hasTranscript && hasRefinedText;
-  const variantsNote =
-    variants.length > 0 && variantErrors.length > 0
-      ? `${variants.length} of ${variants.length + variantErrors.length} variants returned`
+
+  const highlightedVariant =
+    highlightedPass && highlightedPass.entryId === activeEntry.id
+      ? (variants.find((v) => v.label === highlightedPass.label) ?? null)
       : null;
+  const bookAncestorId = findBookAncestor(state.directories, activeEntry.parentId);
+
+  const handleHighlightPass = (label: Variant['label'] | null) => {
+    setHighlightedPass(label ? { entryId: activeEntry.id, label } : null);
+  };
+
+  const handleAcceptPass = () => {
+    if (!highlightedVariant) return;
+    acceptVariant(highlightedVariant);
+    setHighlightedPass(null);
+  };
+
+  const handlePassToNote = () => {
+    if (!highlightedVariant) return;
+    const note = {
+      ...newEntry(activeEntry.parentId, 'note'),
+      name: `${highlightedVariant.label} pass — ${activeEntry.name}`.slice(0, 60),
+      refinedText: highlightedVariant.text,
+      attachedToId: activeEntry.id,
+    };
+    dispatch({ type: 'CREATE_ENTRY', entry: note });
+    // Routing sends text away; the writer stays where they were.
+    dispatch({ type: 'SET_ACTIVE_ENTRY', id: activeEntry.id });
+  };
+
+  const handlePassToChapter = () => {
+    if (!highlightedVariant) return;
+    // Membership can change while passes are open — re-check at click time.
+    const bookId = findBookAncestor(state.directories, activeEntry.parentId);
+    if (!bookId) return;
+    const chapter = {
+      ...newEntry(bookId, 'writing'),
+      name: deriveEntryName(highlightedVariant.text),
+      refinedText: highlightedVariant.text,
+    };
+    dispatch({ type: 'CREATE_ENTRY', entry: chapter });
+    dispatch({ type: 'SET_ACTIVE_ENTRY', id: activeEntry.id });
+  };
+
+  const handleDismissPasses = () => {
+    dismissVariants();
+    setHighlightedPass(null);
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -294,7 +362,25 @@ export function Editor({ interimTranscript, isRecording }: Props) {
               </span>
             </div>
           </div>
-          {showDiff && canDiff ? (
+          <PassesBar
+            variants={variants}
+            errors={variantErrors}
+            highlighted={highlightedVariant?.label ?? null}
+            onHighlight={handleHighlightPass}
+            onRetry={(label) => void retryVariant(label)}
+            onAccept={handleAcceptPass}
+            onToNote={handlePassToNote}
+            onToChapter={handlePassToChapter}
+            canToChapter={bookAncestorId !== null}
+            onDismiss={handleDismissPasses}
+            isGenerating={isGeneratingVariants}
+          />
+          {highlightedVariant ? (
+            <VariantDiffView
+              oldText={activeEntry.refinedText}
+              newText={highlightedVariant.text}
+            />
+          ) : showDiff && canDiff ? (
             <DiffView
               oldText={activeEntry.rawTranscript}
               newText={activeEntry.refinedText}
@@ -324,12 +410,6 @@ export function Editor({ interimTranscript, isRecording }: Props) {
         </div>
       </div>
 
-      <VariantCards
-        variants={variants}
-        onAccept={acceptVariant}
-        disabled={isRefining || isGeneratingVariants}
-        note={variantsNote}
-      />
     </div>
   );
 }

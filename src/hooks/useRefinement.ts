@@ -225,6 +225,56 @@ export function useRefinement() {
     [activeEntry, dispatch]
   );
 
+  /** Re-run a single failed pass and merge it back into the set. */
+  const retryVariant = useCallback(
+    async (label: Variant['label']) => {
+      if (!activeEntry) return;
+      const spec = VARIANT_TEMPERATURES.find((t) => t.label === label);
+      if (!spec) return;
+
+      const systemPrompt = buildSystemPrompt(
+        state.refinementSettings,
+        activeEntry.prosody,
+        activeEntry.voiceConfig
+      );
+
+      const chipOrder = (l: Variant['label']) =>
+        VARIANT_TEMPERATURES.findIndex((t) => t.label === l);
+
+      setIsGeneratingVariants(true);
+      setRefinementError(null);
+      try {
+        const { variants: results, errors } = await generateVariantsApi({
+          systemPrompt,
+          userMessage: activeEntry.rawTranscript,
+          temperatures: [{ label: spec.label, temperature: spec.temperature }],
+        });
+        setVariants((prev) =>
+          [...prev.filter((v) => v.label !== label), ...results].sort(
+            (a, b) => chipOrder(a.label) - chipOrder(b.label)
+          )
+        );
+        setVariantErrors((prev) => [
+          ...prev.filter((e) => e.label !== label),
+          ...errors,
+        ]);
+      } catch (err) {
+        setRefinementError(
+          err instanceof Error ? err.message : 'Variant retry failed'
+        );
+        console.error('Variant retry failed:', err);
+      } finally {
+        setIsGeneratingVariants(false);
+      }
+    },
+    [activeEntry, state.refinementSettings]
+  );
+
+  const dismissVariants = useCallback(() => {
+    setVariants([]);
+    setVariantErrors([]);
+  }, []);
+
   return {
     isRefining,
     refinementError,
@@ -235,5 +285,7 @@ export function useRefinement() {
     isGeneratingVariants,
     generateVariants,
     acceptVariant,
+    retryVariant,
+    dismissVariants,
   };
 }
