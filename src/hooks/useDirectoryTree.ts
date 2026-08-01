@@ -12,6 +12,8 @@ export interface TreeNode {
   directoryKind?: DirectoryKind;
   /** 1-based position among a book's unattached writing entries. */
   chapterNumber?: number;
+  /** The row rendered after this one at the same level (drop targeting). */
+  nextSiblingId?: string;
 }
 
 export function useDirectoryTree(
@@ -123,6 +125,10 @@ export function buildTree(
     };
     if (isChapter) node.chapterNumber = chapter;
     entryNodes.push(node);
+  }
+
+  for (let i = 0; i < entryNodes.length - 1; i++) {
+    entryNodes[i].nextSiblingId = entryNodes[i + 1].id;
   }
 
   return [...dirNodes, ...entryNodes];
