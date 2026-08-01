@@ -5,7 +5,6 @@ export function useAudioAnalyser() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const timeDomainDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
-  const frequencyDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const animFrameRef = useRef<number>(0);
 
   const start = useCallback(async (stream?: MediaStream) => {
@@ -27,7 +26,6 @@ export function useAudioAnalyser() {
 
     analyserRef.current = analyser;
     timeDomainDataRef.current = new Uint8Array(analyser.frequencyBinCount);
-    frequencyDataRef.current = new Uint8Array(analyser.frequencyBinCount);
   }, []);
 
   const stop = useCallback(() => {
@@ -54,7 +52,7 @@ export function useAudioAnalyser() {
   const drawWaveform = useCallback(
     (canvas: HTMLCanvasElement, color: string = '#d98a54'): (() => void) => {
       const ctx = canvas.getContext('2d');
-      if (!ctx || !analyserRef.current || !timeDomainDataRef.current || !frequencyDataRef.current) {
+      if (!ctx || !analyserRef.current || !timeDomainDataRef.current) {
         return () => {};
       }
 
@@ -62,59 +60,60 @@ export function useAudioAnalyser() {
         cancelAnimationFrame(animFrameRef.current);
       }
 
+      const strokePath = (
+        timeDomainData: Uint8Array,
+        width: number,
+        height: number,
+        mirror: boolean
+      ) => {
+        const midline = height / 2;
+        ctx.beginPath();
+        const sliceWidth = width / timeDomainData.length;
+        let x = 0;
+        for (let i = 0; i < timeDomainData.length; i++) {
+          const v = timeDomainData[i] / 128.0;
+          const raw = (v * height) / 2;
+          const y = mirror ? 2 * midline - raw : raw;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+          x += sliceWidth;
+        }
+        ctx.lineTo(width, midline);
+        ctx.stroke();
+      };
+
       const draw = () => {
         animFrameRef.current = requestAnimationFrame(draw);
 
         const analyser = analyserRef.current;
         const timeDomainData = timeDomainDataRef.current;
-        const frequencyData = frequencyDataRef.current;
-        if (!analyser || !timeDomainData || !frequencyData) return;
+        if (!analyser || !timeDomainData) return;
 
         analyser.getByteTimeDomainData(timeDomainData);
-        analyser.getByteFrequencyData(frequencyData);
 
         // CSS-pixel coordinates: the context is pre-scaled by devicePixelRatio
         // in Waveform's resizeCanvas, so canvas.width/height (device px) would
         // draw ratio-times too large on HiDPI displays.
         const { width, height } = canvas.getBoundingClientRect();
-        const midline = height / 2;
-        const barCount = Math.min(96, frequencyData.length);
-        const barWidth = width / barCount;
 
         ctx.clearRect(0, 0, width, height);
 
-        const gradient = ctx.createLinearGradient(0, 0, width, 0);
-        gradient.addColorStop(0, 'rgba(217, 138, 84, 0)');
-        gradient.addColorStop(0.22, 'rgba(217, 138, 84, 0.24)');
-        gradient.addColorStop(0.5, 'rgba(244, 226, 206, 0.8)');
-        gradient.addColorStop(0.78, 'rgba(217, 138, 84, 0.24)');
-        gradient.addColorStop(1, 'rgba(217, 138, 84, 0)');
-
-        ctx.fillStyle = gradient;
-        for (let i = 0; i < barCount; i++) {
-          const index = Math.floor((i / barCount) * frequencyData.length);
-          const amplitude = frequencyData[index] / 255;
-          const barHeight = Math.max(2, amplitude * height * 0.72);
-          const x = i * barWidth;
-          ctx.fillRect(x, midline - barHeight / 2, Math.max(1, barWidth * 0.58), barHeight);
-        }
-
-        ctx.lineWidth = 1.35;
+        // The breath line, live: a calligraphic stroke along the filament
+        // with a faint mirrored ghost beneath it.
+        ctx.save();
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = 'rgba(217, 138, 84, 0.5)';
+        ctx.lineWidth = 1.1;
         ctx.strokeStyle = color;
-        ctx.beginPath();
+        strokePath(timeDomainData, width, height, false);
+        ctx.restore();
 
-        const sliceWidth = width / timeDomainData.length;
-        let x = 0;
-        for (let i = 0; i < timeDomainData.length; i++) {
-          const v = timeDomainData[i] / 128.0;
-          const y = (v * height) / 2;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-          x += sliceWidth;
-        }
-
-        ctx.lineTo(width, midline);
-        ctx.stroke();
+        ctx.save();
+        ctx.globalAlpha = 0.3;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = color;
+        strokePath(timeDomainData, width, height, true);
+        ctx.restore();
       };
 
       draw();
