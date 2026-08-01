@@ -8,6 +8,8 @@ export interface StoredRecording {
   durationMs: number;
   mimeType: string;
   blob: Blob;
+  /** Stored at save time so metadata listings never need the blob. */
+  byteSize?: number;
   /**
    * The text this take contributed to the entry's raw transcript, exactly as
    * it was appended. Serves as the baseline for detecting user corrections —
@@ -16,6 +18,18 @@ export interface StoredRecording {
    */
   transcript?: string;
 }
+
+/** Metadata face of a take — everything the list renders before hydration. */
+export interface TakeMeta {
+  entryId: string;
+  recordedAt: number;
+  durationMs: number;
+  mimeType: string;
+  byteSize: number;
+  transcript?: string;
+}
+
+export const TAKES_PAGE_SIZE = 10;
 
 function recordingKey(entryId: string, recordedAt: number): string {
   return `${entryId}:${recordedAt}`;
@@ -38,8 +52,82 @@ export async function saveRecording(
     durationMs: meta.durationMs,
     mimeType: blob.type || 'audio/webm',
     blob,
+    byteSize: blob.size,
   };
   await set(recordingKey(entryId, meta.recordedAt), recording, store);
+}
+
+/**
+ * Metadata for every take of an entry, newest first, without creating object
+ * URLs or touching blob contents. Legacy records fall back to blob.size.
+ */
+export async function listTakeMeta(entryId: string): Promise<TakeMeta[]> {
+  const recordings = await loadRecordings(entryId);
+  return recordings
+    .map((r) => ({
+      entryId: r.entryId,
+      recordedAt: r.recordedAt,
+      durationMs: r.durationMs,
+      mimeType: r.mimeType,
+      byteSize: r.byteSize ?? r.blob.size,
+      ...(r.transcript !== undefined ? { transcript: r.transcript } : {}),
+    }))
+    .sort((a, b) => b.recordedAt - a.recordedAt);
+}
+
+/**
+ * Pump a blob through its stream so hydration reports real byte progress —
+ * blob.size is known up front, making the bar determinate.
+ */
+export async function readBlobWithProgress(
+  blob: Blob,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<Blob> {
+  const total = blob.size;
+
+  if (typeof blob.stream === 'function') {
+    const reader = blob.stream().getReader();
+    const chunks: BlobPart[] = [];
+    let loaded = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      loaded += value.byteLength;
+      onProgress?.(loaded, total);
+    }
+    if (loaded !== total) onProgress?.(total, total);
+    return new Blob(chunks, { type: blob.type });
+  }
+
+  // Engines without Blob.stream (jsdom): sliced reads keep progress honest.
+  const CHUNK = 262_144;
+  const chunks: BlobPart[] = [];
+  let loaded = 0;
+  while (loaded < total) {
+    const end = Math.min(loaded + CHUNK, total);
+    chunks.push(await blob.slice(loaded, end).arrayBuffer());
+    loaded = end;
+    onProgress?.(loaded, total);
+  }
+  return new Blob(chunks, { type: blob.type });
+}
+
+/** Load one take's audio, streaming the read so progress is measurable. */
+export async function loadTakeBlob(
+  entryId: string,
+  recordedAt: number,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<Blob> {
+  const record = await get<StoredRecording | undefined>(
+    recordingKey(entryId, recordedAt),
+    store
+  );
+  if (!record) {
+    throw new Error('take not found — it may have been deleted');
+  }
+  const blob = await readBlobWithProgress(record.blob, onProgress);
+  return blob.type ? blob : new Blob([blob], { type: record.mimeType });
 }
 
 /**
