@@ -48,23 +48,57 @@ export type AppAction =
   | { type: 'CREATE_DIRECTORY'; directory: Directory }
   | { type: 'RENAME_DIRECTORY'; id: string; name: string }
   | { type: 'DELETE_DIRECTORY'; id: string }
+  | { type: 'MOVE_NODE'; nodeType: 'entry' | 'directory'; id: string; newParentId: string | null }
+  | { type: 'REORDER_ENTRY'; id: string; beforeId: string | null }
+  | { type: 'SET_DIRECTORY_KIND'; id: string; kind: DirectoryKind }
+  | { type: 'ATTACH_NOTE'; noteId: string; entryId: string }
+  | { type: 'DETACH_NOTE'; noteId: string }
   | { type: 'UPDATE_REFINEMENT_SETTINGS'; settings: Partial<RefinementSettings> }
   | { type: 'RENAME_ENTRY'; id: string; name: string }
   | { type: 'CONFIRM_LEXICON_TERM'; candidate: CorrectionCandidate }
   | { type: 'DELETE_LEXICON_TERM'; id: string }
   | { type: 'RECORD_LEXICON_MISFIRE'; id: string };
 
+/** True when `candidateId` sits anywhere below `ancestorId` in the directory tree. */
+export function isDescendantDirectory(
+  directories: Record<string, Directory>,
+  candidateId: string,
+  ancestorId: string
+): boolean {
+  let cursor = directories[candidateId]?.parentId ?? null;
+  while (cursor !== null) {
+    if (cursor === ancestorId) return true;
+    cursor = directories[cursor]?.parentId ?? null;
+  }
+  return false;
+}
+
+function maxOrderIn(entries: Record<string, Entry>, parentId: string | null): number {
+  let max = -1;
+  for (const entry of Object.values(entries)) {
+    if (entry.parentId === parentId && entry.order > max) max = entry.order;
+  }
+  return max;
+}
+
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'SET_ACTIVE_ENTRY':
       return { ...state, activeEntryId: action.id };
 
-    case 'CREATE_ENTRY':
+    case 'CREATE_ENTRY': {
+      // The reducer owns ordering: whatever the caller set, a new entry lands
+      // after its siblings so books never get colliding chapter positions.
+      const order = maxOrderIn(state.entries, action.entry.parentId) + 1;
       return {
         ...state,
-        entries: { ...state.entries, [action.entry.id]: action.entry },
+        entries: {
+          ...state.entries,
+          [action.entry.id]: { ...action.entry, order },
+        },
         activeEntryId: action.entry.id,
       };
+    }
 
     case 'UPDATE_ENTRY': {
       const existing = state.entries[action.id];
@@ -85,10 +119,152 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'DELETE_ENTRY': {
       const nextEntries = { ...state.entries };
       delete nextEntries[action.id];
+      // Notes pinned to the deleted entry survive, unpinned.
+      for (const [id, entry] of Object.entries(nextEntries)) {
+        if (entry.attachedToId === action.id) {
+          const detached = { ...entry };
+          delete detached.attachedToId;
+          nextEntries[id] = detached;
+        }
+      }
       return {
         ...state,
         entries: nextEntries,
         activeEntryId: state.activeEntryId === action.id ? null : state.activeEntryId,
+      };
+    }
+
+    case 'MOVE_NODE': {
+      if (action.nodeType === 'directory') {
+        const dir = state.directories[action.id];
+        if (!dir || dir.parentId === action.newParentId) return state;
+        if (action.newParentId !== null) {
+          if (!state.directories[action.newParentId]) return state;
+          if (
+            action.newParentId === action.id ||
+            isDescendantDirectory(state.directories, action.newParentId, action.id)
+          ) {
+            return state;
+          }
+        }
+        return {
+          ...state,
+          directories: {
+            ...state.directories,
+            [action.id]: { ...dir, parentId: action.newParentId },
+          },
+        };
+      }
+
+      const entry = state.entries[action.id];
+      if (!entry || entry.parentId === action.newParentId) return state;
+      if (action.newParentId !== null && !state.directories[action.newParentId]) {
+        return state;
+      }
+      const moved: Entry = {
+        ...entry,
+        parentId: action.newParentId,
+        order: maxOrderIn(state.entries, action.newParentId) + 1,
+        updatedAt: Date.now(),
+      };
+      // A note dragged away on its own comes unpinned; an entry that moves
+      // brings its pinned notes with it so display and location stay aligned.
+      if (moved.kind === 'note' && moved.attachedToId !== undefined) {
+        delete moved.attachedToId;
+      }
+      const nextEntries = { ...state.entries, [action.id]: moved };
+      for (const [id, candidate] of Object.entries(state.entries)) {
+        if (candidate.attachedToId === action.id) {
+          nextEntries[id] = { ...candidate, parentId: action.newParentId };
+        }
+      }
+      return { ...state, entries: nextEntries };
+    }
+
+    case 'REORDER_ENTRY': {
+      const entry = state.entries[action.id];
+      if (!entry || action.beforeId === action.id) return state;
+      const siblings = Object.values(state.entries)
+        .filter(
+          (e) =>
+            e.parentId === entry.parentId &&
+            e.id !== entry.id &&
+            e.attachedToId === undefined
+        )
+        .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+      const insertAt =
+        action.beforeId === null
+          ? siblings.length
+          : siblings.findIndex((s) => s.id === action.beforeId);
+      if (insertAt === -1) return state;
+      siblings.splice(insertAt, 0, entry);
+      const nextEntries = { ...state.entries };
+      siblings.forEach((sibling, index) => {
+        if (nextEntries[sibling.id].order !== index) {
+          nextEntries[sibling.id] = { ...nextEntries[sibling.id], order: index };
+        }
+      });
+      return { ...state, entries: nextEntries };
+    }
+
+    case 'SET_DIRECTORY_KIND': {
+      const dir = state.directories[action.id];
+      if (!dir || dir.kind === action.kind) return state;
+      let entries = state.entries;
+      if (action.kind === 'book') {
+        // Promotion freezes the alphabetical order the folder was showing.
+        const children = Object.values(state.entries)
+          .filter((e) => e.parentId === action.id && e.attachedToId === undefined)
+          .sort((a, b) => a.name.localeCompare(b.name));
+        const next = { ...state.entries };
+        children.forEach((child, index) => {
+          next[child.id] = { ...child, order: index };
+        });
+        entries = next;
+      }
+      return {
+        ...state,
+        entries,
+        directories: {
+          ...state.directories,
+          [action.id]: { ...dir, kind: action.kind },
+        },
+      };
+    }
+
+    case 'ATTACH_NOTE': {
+      const note = state.entries[action.noteId];
+      const target = state.entries[action.entryId];
+      if (
+        !note ||
+        !target ||
+        note.kind !== 'note' ||
+        target.kind === 'note' ||
+        action.noteId === action.entryId
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        entries: {
+          ...state.entries,
+          [action.noteId]: {
+            ...note,
+            attachedToId: action.entryId,
+            parentId: target.parentId,
+          },
+        },
+      };
+    }
+
+    case 'DETACH_NOTE': {
+      const note = state.entries[action.noteId];
+      if (!note || note.attachedToId === undefined) return state;
+      const detached = { ...note };
+      delete detached.attachedToId;
+      return {
+        ...state,
+        entries: { ...state.entries, [action.noteId]: detached },
       };
     }
 
@@ -127,6 +303,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       for (const [id, entry] of Object.entries(state.entries)) {
         if (entry.parentId === null || !directoryIds.has(entry.parentId)) {
           restEntries[id] = entry;
+        }
+      }
+      // Unpin survivors whose target entry died in the cascade.
+      for (const [id, entry] of Object.entries(restEntries)) {
+        if (entry.attachedToId !== undefined && !restEntries[entry.attachedToId]) {
+          const detached = { ...entry };
+          delete detached.attachedToId;
+          restEntries[id] = detached;
         }
       }
       return {

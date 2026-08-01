@@ -1,6 +1,7 @@
 import {
   appReducer,
   collectDirectoryCascade,
+  isDescendantDirectory,
   newEntry,
   type AppState,
 } from './AppContext';
@@ -170,6 +171,227 @@ describe('newEntry', () => {
   it('creates notes when asked', () => {
     const entry = newEntry(null, 'note');
     expect(entry.kind).toBe('note');
+  });
+});
+
+describe('appReducer MOVE_NODE', () => {
+  it('moves an entry to a new parent and appends its order after existing siblings', () => {
+    const state = makeState();
+    state.entries['entry-b'].order = 4;
+    const next = appReducer(state, {
+      type: 'MOVE_NODE',
+      nodeType: 'entry',
+      id: 'entry-root',
+      newParentId: 'dir-b',
+    });
+    expect(next.entries['entry-root'].parentId).toBe('dir-b');
+    expect(next.entries['entry-root'].order).toBe(5);
+  });
+
+  it('brings attached notes along when their entry moves', () => {
+    const state = makeState();
+    state.entries['note-1'] = makeEntry('note-1', null, {
+      kind: 'note',
+      attachedToId: 'entry-root',
+    });
+    const next = appReducer(state, {
+      type: 'MOVE_NODE',
+      nodeType: 'entry',
+      id: 'entry-root',
+      newParentId: 'dir-d',
+    });
+    expect(next.entries['note-1'].parentId).toBe('dir-d');
+    expect(next.entries['note-1'].attachedToId).toBe('entry-root');
+  });
+
+  it('detaches a note that is moved away on its own', () => {
+    const state = makeState();
+    state.entries['note-1'] = makeEntry('note-1', null, {
+      kind: 'note',
+      attachedToId: 'entry-root',
+    });
+    const next = appReducer(state, {
+      type: 'MOVE_NODE',
+      nodeType: 'entry',
+      id: 'note-1',
+      newParentId: 'dir-d',
+    });
+    expect(next.entries['note-1'].parentId).toBe('dir-d');
+    expect(next.entries['note-1'].attachedToId).toBeUndefined();
+  });
+
+  it('refuses to move a directory into its own descendant', () => {
+    const state = makeState();
+    const next = appReducer(state, {
+      type: 'MOVE_NODE',
+      nodeType: 'directory',
+      id: 'dir-a',
+      newParentId: 'dir-c',
+    });
+    expect(next).toBe(state);
+  });
+
+  it('refuses to move a directory into itself', () => {
+    const state = makeState();
+    expect(
+      appReducer(state, {
+        type: 'MOVE_NODE',
+        nodeType: 'directory',
+        id: 'dir-a',
+        newParentId: 'dir-a',
+      })
+    ).toBe(state);
+  });
+
+  it('moves a directory to the root', () => {
+    const state = makeState();
+    const next = appReducer(state, {
+      type: 'MOVE_NODE',
+      nodeType: 'directory',
+      id: 'dir-c',
+      newParentId: null,
+    });
+    expect(next.directories['dir-c'].parentId).toBeNull();
+  });
+});
+
+describe('appReducer CREATE_ENTRY ordering', () => {
+  it('assigns order after existing siblings', () => {
+    const state = makeState();
+    state.entries['entry-d'].order = 2;
+    const created = makeEntry('entry-new', 'dir-d');
+    const next = appReducer(state, { type: 'CREATE_ENTRY', entry: created });
+    expect(next.entries['entry-new'].order).toBe(3);
+  });
+});
+
+describe('appReducer REORDER_ENTRY', () => {
+  function bookState(): AppState {
+    const state = makeState();
+    state.directories['book-1'] = makeDirectory('book-1', null, 'book');
+    state.entries['ch-1'] = makeEntry('ch-1', 'book-1', { order: 0 });
+    state.entries['ch-2'] = makeEntry('ch-2', 'book-1', { order: 1 });
+    state.entries['ch-3'] = makeEntry('ch-3', 'book-1', { order: 2 });
+    return state;
+  }
+
+  it('places the moved entry before beforeId and re-sequences', () => {
+    const next = appReducer(bookState(), {
+      type: 'REORDER_ENTRY',
+      id: 'ch-3',
+      beforeId: 'ch-1',
+    });
+    expect(next.entries['ch-3'].order).toBe(0);
+    expect(next.entries['ch-1'].order).toBe(1);
+    expect(next.entries['ch-2'].order).toBe(2);
+  });
+
+  it('moves to the end when beforeId is null', () => {
+    const next = appReducer(bookState(), {
+      type: 'REORDER_ENTRY',
+      id: 'ch-1',
+      beforeId: null,
+    });
+    expect(next.entries['ch-2'].order).toBe(0);
+    expect(next.entries['ch-3'].order).toBe(1);
+    expect(next.entries['ch-1'].order).toBe(2);
+  });
+
+  it('returns state unchanged for unknown beforeId', () => {
+    const state = bookState();
+    expect(
+      appReducer(state, { type: 'REORDER_ENTRY', id: 'ch-1', beforeId: 'missing' })
+    ).toBe(state);
+  });
+});
+
+describe('appReducer SET_DIRECTORY_KIND', () => {
+  it('freezes alphabetical order when promoting a folder to a book', () => {
+    const state = makeState();
+    state.entries['zeta'] = makeEntry('zeta', 'dir-d', { name: 'Zeta', order: 9 });
+    state.entries['alpha'] = makeEntry('alpha', 'dir-d', { name: 'Alpha', order: 3 });
+    state.entries['entry-d'].name = 'Middling';
+    state.entries['entry-d'].order = 7;
+
+    const next = appReducer(state, {
+      type: 'SET_DIRECTORY_KIND',
+      id: 'dir-d',
+      kind: 'book',
+    });
+    expect(next.directories['dir-d'].kind).toBe('book');
+    expect(next.entries['alpha'].order).toBe(0);
+    expect(next.entries['entry-d'].order).toBe(1);
+    expect(next.entries['zeta'].order).toBe(2);
+  });
+
+  it('demoting a book to folder keeps orders inert', () => {
+    const state = makeState();
+    state.directories['dir-d'] = makeDirectory('dir-d', null, 'book');
+    state.entries['entry-d'].order = 5;
+    const next = appReducer(state, {
+      type: 'SET_DIRECTORY_KIND',
+      id: 'dir-d',
+      kind: 'folder',
+    });
+    expect(next.directories['dir-d'].kind).toBe('folder');
+    expect(next.entries['entry-d'].order).toBe(5);
+  });
+});
+
+describe('appReducer note attachment', () => {
+  it('ATTACH_NOTE sets attachedToId and syncs parentId to the target', () => {
+    const state = makeState();
+    state.entries['note-1'] = makeEntry('note-1', null, { kind: 'note' });
+    const next = appReducer(state, {
+      type: 'ATTACH_NOTE',
+      noteId: 'note-1',
+      entryId: 'entry-b',
+    });
+    expect(next.entries['note-1'].attachedToId).toBe('entry-b');
+    expect(next.entries['note-1'].parentId).toBe('dir-b');
+  });
+
+  it('ATTACH_NOTE refuses note targets and non-notes', () => {
+    const state = makeState();
+    state.entries['note-1'] = makeEntry('note-1', null, { kind: 'note' });
+    state.entries['note-2'] = makeEntry('note-2', null, { kind: 'note' });
+    expect(
+      appReducer(state, { type: 'ATTACH_NOTE', noteId: 'note-1', entryId: 'note-2' })
+    ).toBe(state);
+    expect(
+      appReducer(state, { type: 'ATTACH_NOTE', noteId: 'entry-root', entryId: 'entry-b' })
+    ).toBe(state);
+  });
+
+  it('DETACH_NOTE clears the link and leaves the note in place', () => {
+    const state = makeState();
+    state.entries['note-1'] = makeEntry('note-1', 'dir-b', {
+      kind: 'note',
+      attachedToId: 'entry-b',
+    });
+    const next = appReducer(state, { type: 'DETACH_NOTE', noteId: 'note-1' });
+    expect(next.entries['note-1'].attachedToId).toBeUndefined();
+    expect(next.entries['note-1'].parentId).toBe('dir-b');
+  });
+
+  it('DELETE_ENTRY detaches surviving notes that pointed at it', () => {
+    const state = makeState();
+    state.entries['note-1'] = makeEntry('note-1', 'dir-d', {
+      kind: 'note',
+      attachedToId: 'entry-d',
+    });
+    const next = appReducer(state, { type: 'DELETE_ENTRY', id: 'entry-d' });
+    expect(next.entries['note-1']).toBeDefined();
+    expect(next.entries['note-1'].attachedToId).toBeUndefined();
+  });
+});
+
+describe('isDescendantDirectory', () => {
+  it('detects deep descendants and rejects unrelated directories', () => {
+    const { directories } = makeState();
+    expect(isDescendantDirectory(directories, 'dir-c', 'dir-a')).toBe(true);
+    expect(isDescendantDirectory(directories, 'dir-a', 'dir-c')).toBe(false);
+    expect(isDescendantDirectory(directories, 'dir-d', 'dir-a')).toBe(false);
   });
 });
 
