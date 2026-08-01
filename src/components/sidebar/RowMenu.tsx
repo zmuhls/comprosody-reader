@@ -52,14 +52,11 @@ export function RowMenu({ node, onClose }: Props) {
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 
+  // Any writing entry is a valid target — ATTACH_NOTE moves the note into
+  // the target's container, so cross-container attachment is safe.
   const attachTargets = isNote
     ? Object.values(entries)
-        .filter(
-          (e) =>
-            e.kind === 'writing' &&
-            e.parentId === (entry?.parentId ?? null) &&
-            e.id !== node.id
-        )
+        .filter((e) => e.kind === 'writing' && e.id !== node.id)
         .sort((a, b) => a.name.localeCompare(b.name))
     : [];
 
