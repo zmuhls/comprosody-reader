@@ -11,6 +11,7 @@ import { Toolbar } from './Toolbar';
 import { PassesBar } from './PassesBar';
 import { VariantDiffView } from './VariantDiffView';
 import { DiffView } from './DiffView';
+import { MarginNotes } from './MarginNotes';
 
 interface Props {
   interimTranscript: string;
@@ -56,6 +57,7 @@ export function Editor({ interimTranscript, isRecording }: Props) {
     entryId: string;
     label: Variant['label'];
   } | null>(null);
+  const [notesEntryId, setNotesEntryId] = useState<string | null>(null);
   const copiedTimerRef = useRef<number | null>(null);
 
   const activeEntry = state.activeEntryId
@@ -199,6 +201,41 @@ export function Editor({ interimTranscript, isRecording }: Props) {
       : null;
   const bookAncestorId = findBookAncestor(state.directories, activeEntry.parentId);
 
+  // Location breadcrumb: ancestor chain plus chapter position inside a book.
+  const crumbs: string[] = [];
+  {
+    let cursor = activeEntry.parentId;
+    while (cursor !== null) {
+      const dir = state.directories[cursor];
+      if (!dir) break;
+      crumbs.unshift(dir.name);
+      cursor = dir.parentId;
+    }
+  }
+  const parentDir = activeEntry.parentId
+    ? state.directories[activeEntry.parentId]
+    : null;
+  let chapterMarker: string | null = null;
+  if (parentDir?.kind === 'book' && activeEntry.kind === 'writing') {
+    const chapters = Object.values(state.entries)
+      .filter(
+        (e) =>
+          e.parentId === activeEntry.parentId &&
+          e.kind === 'writing' &&
+          e.attachedToId === undefined
+      )
+      .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+    const position = chapters.findIndex((e) => e.id === activeEntry.id);
+    if (position !== -1) {
+      chapterMarker = `ch ${position + 1} of ${chapters.length}`;
+    }
+  }
+
+  const attachedNoteCount = Object.values(state.entries).filter(
+    (e) => e.attachedToId === activeEntry.id
+  ).length;
+  const showNotes = notesEntryId === activeEntry.id;
+
   const handleHighlightPass = (label: Variant['label'] | null) => {
     setHighlightedPass(label ? { entryId: activeEntry.id, label } : null);
   };
@@ -246,8 +283,14 @@ export function Editor({ interimTranscript, isRecording }: Props) {
       <div className="border-b border-border bg-surface/90 px-5 py-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="min-w-0">
-            <div className="text-[10px] uppercase tracking-[0.32em] text-text-muted">
-              active entry
+            <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.32em] text-text-muted">
+              <span>{activeEntry.kind === 'note' ? 'note' : 'active entry'}</span>
+              {(crumbs.length > 0 || chapterMarker) && (
+                <span className="tracking-[0.18em] text-text-muted/80">
+                  {crumbs.join(' / ')}
+                  {chapterMarker ? `${crumbs.length > 0 ? ' / ' : ''}${chapterMarker}` : ''}
+                </span>
+              )}
             </div>
             <input
               value={activeEntry.name}
@@ -347,6 +390,20 @@ export function Editor({ interimTranscript, isRecording }: Props) {
             </div>
             <div className="flex items-center gap-3">
               <button
+                onClick={() =>
+                  setNotesEntryId((current) =>
+                    current === activeEntry.id ? null : activeEntry.id
+                  )
+                }
+                className={`border px-3 py-2 text-[11px] uppercase tracking-[0.18em] transition-colors ${
+                  showNotes
+                    ? 'border-border-focus text-text-primary'
+                    : 'border-border text-text-secondary hover:border-border-strong hover:text-text-primary'
+                }`}
+              >
+                notes{attachedNoteCount > 0 ? ` (${attachedNoteCount})` : ''}
+              </button>
+              <button
                 onClick={handleToggleDiff}
                 disabled={!canDiff}
                 className="border border-border px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35"
@@ -375,38 +432,41 @@ export function Editor({ interimTranscript, isRecording }: Props) {
             onDismiss={handleDismissPasses}
             isGenerating={isGeneratingVariants}
           />
-          {highlightedVariant ? (
-            <VariantDiffView
-              oldText={activeEntry.refinedText}
-              newText={highlightedVariant.text}
-            />
-          ) : showDiff && canDiff ? (
-            <DiffView
-              oldText={activeEntry.rawTranscript}
-              newText={activeEntry.refinedText}
-            />
-          ) : (
-            <textarea
-              ref={refinedRef}
-              value={activeEntry.refinedText}
-              readOnly={isRefining}
-              aria-busy={isRefining}
-              onChange={(e) =>
-                dispatch({
-                  type: 'UPDATE_ENTRY',
-                  id: activeEntry.id,
-                  updates: { refinedText: e.target.value },
-                })
-              }
-              onSelect={handleSelectionChange}
-              onMouseUp={handleSelectionChange}
-              onKeyUp={handleSelectionChange}
-              placeholder="Refined text appears here. Use seed draft to bring the transcript across for manual shaping."
-              className={`flex-1 w-full resize-none bg-transparent px-5 py-5 text-[1rem] leading-relaxed text-text-primary outline-none placeholder:text-text-muted/50 font-writing ${
-                isRefining ? 'cursor-wait opacity-70' : ''
-              }`}
-            />
-          )}
+          <div className="flex min-h-0 flex-1">
+            {highlightedVariant ? (
+              <VariantDiffView
+                oldText={activeEntry.refinedText}
+                newText={highlightedVariant.text}
+              />
+            ) : showDiff && canDiff ? (
+              <DiffView
+                oldText={activeEntry.rawTranscript}
+                newText={activeEntry.refinedText}
+              />
+            ) : (
+              <textarea
+                ref={refinedRef}
+                value={activeEntry.refinedText}
+                readOnly={isRefining}
+                aria-busy={isRefining}
+                onChange={(e) =>
+                  dispatch({
+                    type: 'UPDATE_ENTRY',
+                    id: activeEntry.id,
+                    updates: { refinedText: e.target.value },
+                  })
+                }
+                onSelect={handleSelectionChange}
+                onMouseUp={handleSelectionChange}
+                onKeyUp={handleSelectionChange}
+                placeholder="Refined text appears here. Use seed draft to bring the transcript across for manual shaping."
+                className={`flex-1 w-full resize-none bg-transparent px-5 py-5 text-[1rem] leading-relaxed text-text-primary outline-none placeholder:text-text-muted/50 font-writing ${
+                  isRefining ? 'cursor-wait opacity-70' : ''
+                }`}
+              />
+            )}
+            {showNotes && <MarginNotes entryId={activeEntry.id} />}
+          </div>
         </div>
       </div>
 
