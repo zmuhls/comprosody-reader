@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
 import { buildSystemPrompt, buildSelectionPrompt } from '../lib/prompts';
+import { buildRefineContext } from '../lib/refineContext';
 import { streamRefinement, generateVariantsApi } from '../lib/claude';
 import type { Variant, VariantError } from '../types/llm';
 import type { Entry } from '../types/editor';
@@ -47,7 +48,8 @@ export function useRefinement() {
     const systemPrompt = buildSystemPrompt(
       state.refinementSettings,
       activeEntry.prosody,
-      activeEntry.voiceConfig
+      activeEntry.voiceConfig,
+      buildRefineContext(activeEntry.id, state.entries, state.directories)
     );
 
     setIsRefining(true);
@@ -112,7 +114,8 @@ export function useRefinement() {
         activeEntry.voiceConfig,
         contextBefore,
         selection,
-        contextAfter
+        contextAfter,
+        buildRefineContext(activeEntry.id, state.entries, state.directories)
       );
 
       setIsRefining(true);
@@ -175,7 +178,8 @@ export function useRefinement() {
     const systemPrompt = buildSystemPrompt(
       state.refinementSettings,
       activeEntry.prosody,
-      activeEntry.voiceConfig
+      activeEntry.voiceConfig,
+      buildRefineContext(activeEntry.id, state.entries, state.directories)
     );
 
     setIsGeneratingVariants(true);
@@ -235,7 +239,8 @@ export function useRefinement() {
       const systemPrompt = buildSystemPrompt(
         state.refinementSettings,
         activeEntry.prosody,
-        activeEntry.voiceConfig
+        activeEntry.voiceConfig,
+        buildRefineContext(activeEntry.id, state.entries, state.directories)
       );
 
       const chipOrder = (l: Variant['label']) =>
