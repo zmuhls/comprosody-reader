@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useApp } from '../../context/AppContext';
 import { DirectoryTree } from '../sidebar/DirectoryTree';
 import { EntryActions } from '../sidebar/EntryActions';
 import { LexiconPanel } from '../sidebar/LexiconPanel';
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export function Sidebar({ open, onClose }: Props) {
+  const { dispatch } = useApp();
   const [serverOk, setServerOk] = useState<boolean | null>(null);
   const [query, setQuery] = useState('');
 
@@ -41,9 +43,16 @@ export function Sidebar({ open, onClose }: Props) {
     >
       <div className="border-b border-border px-5 py-5">
         <div className="flex items-start justify-between">
-          <div className="text-[10px] uppercase tracking-[0.32em] text-text-muted">
-            studio
-          </div>
+          <button
+            onClick={() => {
+              dispatch({ type: 'SET_ACTIVE_ENTRY', id: null });
+              onClose();
+            }}
+            className="font-brand text-3xl italic text-text-primary transition-colors hover:text-accent"
+            title="home"
+          >
+            comprosody
+          </button>
           <button
             onClick={onClose}
             className="-mr-1 px-2 py-1 text-sm text-text-muted transition-colors hover:text-text-primary lg:hidden"
@@ -52,11 +61,8 @@ export function Sidebar({ open, onClose }: Props) {
             ×
           </button>
         </div>
-        <h1 className="mt-2 font-brand text-3xl italic text-text-primary">
-          comprosody
-        </h1>
-        <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary">
-          dictation to prose
+        <p className="mt-1 text-[10px] uppercase tracking-[0.24em] text-text-muted">
+          agentic reader
         </p>
       </div>
 

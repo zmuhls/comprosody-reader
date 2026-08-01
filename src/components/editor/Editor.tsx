@@ -235,19 +235,54 @@ export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Prop
   }, [canRefine, hasContent, refine, handleCopy]);
 
   if (!activeEntry) {
+    const startEntry = (kind: 'writing' | 'note') => {
+      dispatch({ type: 'CREATE_ENTRY', entry: newEntry(null, kind) });
+    };
     return (
       <div className="relative flex flex-1 items-center justify-center">
         <div className="absolute left-4 top-4">
           <HamburgerButton onClick={onToggleSidebar} />
         </div>
-        <div className="max-w-md px-8 text-center">
-          <p className="font-brand text-3xl italic text-text-secondary">
-            open a session
+        <div className="px-8 text-center">
+          <h1 className="font-brand text-5xl italic text-text-primary">
+            Comprosody
+          </h1>
+          <p className="mt-4 text-[10px] uppercase leading-loose tracking-[0.4em] text-text-muted">
+            agentic reader
+            <br />
+            vocal composer
           </p>
-          <p className="mt-3 text-sm leading-relaxed text-text-muted">
-            Create an entry from the library or start recording from the footer.
-            The app will attach the session to a fresh entry automatically.
-          </p>
+          <div className="mt-12 space-y-2 text-[11px] uppercase tracking-[0.2em] text-text-secondary">
+            <p>
+              <span className="text-text-primary">record</span>
+              <span className="mx-2 text-text-muted/40">—</span>voice to
+              transcript
+            </p>
+            <p>
+              <span className="text-text-primary">refine</span>
+              <span className="mx-2 text-text-muted/40">—</span>passes shape
+              the draft
+            </p>
+            <p>
+              <span className="text-text-primary">compose</span>
+              <span className="mx-2 text-text-muted/40">—</span>books ·
+              chapters · notes
+            </p>
+          </div>
+          <div className="mt-12 flex items-center justify-center gap-2">
+            <button
+              onClick={() => startEntry('writing')}
+              className="border border-border px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
+            >
+              + entry
+            </button>
+            <button
+              onClick={() => startEntry('note')}
+              className="border border-border px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
+            >
+              + note
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -256,7 +291,6 @@ export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Prop
   const transcriptWordCount = countWords(activeEntry.rawTranscript);
   const draftWordCount = countWords(activeEntry.refinedText);
   const draftParagraphs = countParagraphs(activeEntry.refinedText);
-  const toneSummary = `${state.refinementSettings.genre} / ${state.refinementSettings.scale}`;
   const recordedDurationMs = activeEntry.recordedDurationMs ?? 0;
   const canDiff = hasTranscript && hasRefinedText;
 
@@ -356,7 +390,7 @@ export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Prop
               className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.32em] text-text-muted"
               aria-live="polite"
             >
-              <span>{activeEntry.kind === 'note' ? 'note' : 'active entry'}</span>
+              {activeEntry.kind === 'note' && <span>note</span>}
               {(crumbs.length > 0 || chapterMarker) && (
                 <span className="tracking-[0.18em] text-text-muted/80">
                   {crumbs.join(' / ')}
@@ -397,35 +431,21 @@ export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Prop
               }
               className="mt-2 w-full max-w-2xl border-b border-transparent bg-transparent pb-2 text-3xl text-text-primary outline-none transition-colors focus:border-border-strong font-brand"
             />
-            <p className="mt-2 hidden max-w-2xl text-sm leading-relaxed text-text-secondary sm:block">
-              Keep the transcript close to the spoken source, then use controlled
-              refinement passes to shape the prose instead of flattening it.
-            </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2">
-            <span className="border border-border px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-text-secondary">
-              transcript {transcriptWordCount}w
-            </span>
-            <span className="border border-border px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-text-secondary">
-              draft {draftWordCount}w
-            </span>
-            <span className="border border-border px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-text-secondary">
-              paragraphs {draftParagraphs}
-            </span>
-            {recordedDurationMs > 0 && (
-              <span className="border border-border px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-text-secondary">
-                take {formatDuration(recordedDurationMs)}
-              </span>
-            )}
-            <span className="border border-border px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-text-secondary">
-              {toneSummary}
-            </span>
-            <span className="border border-border px-3 py-2 text-[10px] uppercase tracking-[0.2em] text-text-secondary">
-              updated {formatUpdatedAt(activeEntry.updatedAt)}
-            </span>
-          </div>
+          <details className="group shrink-0">
+            <summary className="cursor-pointer list-none text-[10px] uppercase tracking-[0.2em] text-text-muted transition-colors hover:text-text-secondary [&::-webkit-details-marker]:hidden">
+              {draftWordCount}w
+            </summary>
+            <div className="mt-2 text-[10px] uppercase tracking-[0.18em] leading-relaxed text-text-muted">
+              transcript {transcriptWordCount}w · draft {draftWordCount}w ·{' '}
+              {draftParagraphs} ¶
+              {recordedDurationMs > 0 &&
+                ` · take ${formatDuration(recordedDurationMs)}`}{' '}
+              · updated {formatUpdatedAt(activeEntry.updatedAt)}
+            </div>
+          </details>
         </div>
 
         {refinementError && (
@@ -474,44 +494,32 @@ export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Prop
 
         {/* Refined text */}
         <div className="flex min-w-0 flex-1 flex-col bg-surface-writing">
-          <div className="flex items-center justify-between border-b border-border px-5 py-3">
-            <div>
-              <div className="text-[10px] uppercase tracking-[0.28em] text-text-muted">
-                refined draft
-              </div>
-              <div className="mt-1 text-[11px] text-text-secondary">
-                Selection-based refinement works on this pane.
-              </div>
+          <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
+            <div className="min-w-0 truncate text-[10px] uppercase tracking-[0.28em] text-text-muted">
+              draft
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex shrink-0 items-center gap-2">
               <button
                 onClick={() =>
                   setNotesEntryId((current) =>
                     current === activeEntry.id ? null : activeEntry.id
                   )
                 }
-                className={`border px-3 py-2 text-[11px] uppercase tracking-[0.18em] transition-colors ${
+                className={`px-2 py-1 text-[10px] uppercase tracking-[0.18em] transition-colors ${
                   showNotes
-                    ? 'border-border-focus text-text-primary'
-                    : 'border-border text-text-secondary hover:border-border-strong hover:text-text-primary'
+                    ? 'text-text-primary'
+                    : 'text-text-muted hover:text-text-primary'
                 }`}
               >
-                notes{attachedNoteCount > 0 ? ` (${attachedNoteCount})` : ''}
+                notes{attachedNoteCount > 0 ? ` ${attachedNoteCount}` : ''}
               </button>
               <button
                 onClick={handleToggleDiff}
                 disabled={!canDiff}
-                className="border border-border px-3 py-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35"
+                className="px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-text-muted transition-colors hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35"
               >
                 {showDiff ? 'edit' : 'diff'}
               </button>
-              <span className="text-[10px] uppercase tracking-[0.22em] text-text-muted">
-                {isRecording
-                  ? 'recording live'
-                  : showDiff && canDiff
-                    ? 'diff view'
-                    : 'manual editing'}
-              </span>
             </div>
           </div>
           <PassesBar
@@ -554,7 +562,7 @@ export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Prop
                 onSelect={handleSelectionChange}
                 onMouseUp={handleSelectionChange}
                 onKeyUp={handleSelectionChange}
-                placeholder="Refined text appears here. Use seed draft to bring the transcript across for manual shaping."
+                placeholder="refine the transcript, or write here"
                 className={`flex-1 w-full resize-none bg-transparent px-5 py-5 text-[1rem] leading-relaxed text-text-primary outline-none placeholder:text-text-muted/50 font-writing ${
                   isRefining ? 'cursor-wait opacity-70' : ''
                 }`}

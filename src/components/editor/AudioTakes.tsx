@@ -240,15 +240,11 @@ export function AudioTakes({ entryId, audioTakes }: Props) {
   if (total === 0) return null;
 
   return (
-    <div className="border-b border-border px-5 py-3">
-      <div className="flex items-baseline justify-between">
-        <div className="text-[10px] uppercase tracking-[0.28em] text-text-muted">
-          takes
-        </div>
-        <span className="text-[9px] uppercase tracking-[0.18em] tabular-nums text-text-muted">
-          {Math.min(visibleCount, total)} of {total}
-        </span>
-      </div>
+    <details className="border-b border-border px-5 py-3">
+      <summary className="flex cursor-pointer list-none items-baseline justify-between text-[10px] uppercase tracking-[0.28em] text-text-muted transition-colors hover:text-text-secondary [&::-webkit-details-marker]:hidden">
+        <span>takes</span>
+        <span className="tabular-nums tracking-[0.18em]">{total}</span>
+      </summary>
 
       <div className="mt-2 flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
         {visible.map((take, index) => (
@@ -273,6 +269,6 @@ export function AudioTakes({ entryId, audioTakes }: Props) {
           </pre>
         </details>
       )}
-    </div>
+    </details>
   );
 }

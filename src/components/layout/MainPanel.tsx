@@ -125,59 +125,75 @@ export function MainPanel({ onToggleSidebar }: MainPanelProps) {
     [appendTranscript, recordTakeText]
   );
 
-  const handleStart = useCallback(async () => {
-    setRecordingError(null);
+  const beginRecording = useCallback(
+    async (entryId: string) => {
+      setRecordingError(null);
 
-    // Rescue a pending failed take before its live transcript is lost —
-    // the audio itself is already persisted in IndexedDB.
-    if (failedTake) {
-      if (failedTake.liveTranscript) {
-        ingestTranscript(
-          failedTake.entryId,
-          failedTake.recordedAt,
-          failedTake.liveTranscript
-        );
+      // Rescue a pending failed take before its live transcript is lost —
+      // the audio itself is already persisted in IndexedDB.
+      if (failedTake) {
+        if (failedTake.liveTranscript) {
+          ingestTranscript(
+            failedTake.entryId,
+            failedTake.recordedAt,
+            failedTake.liveTranscript
+          );
+        }
+        setFailedTake(null);
+        clearTranscriptionError();
       }
-      setFailedTake(null);
-      clearTranscriptionError();
-    }
 
+      recordingEntryIdRef.current = entryId;
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        streamRef.current = stream;
+        await audio.start(stream);
+        recorder.start(stream);
+        recDispatch({ type: 'START_RECORDING', startedAt: Date.now() });
+        speech.start();
+      } catch (err) {
+        recordingEntryIdRef.current = null;
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
+          streamRef.current = null;
+        }
+        audio.stop();
+        const message =
+          err instanceof Error ? err.message : 'Unable to start recording.';
+        setRecordingError(message);
+      }
+    },
+    [
+      audio,
+      clearTranscriptionError,
+      failedTake,
+      ingestTranscript,
+      recDispatch,
+      recorder,
+      speech,
+    ]
+  );
+
+  const handleStart = useCallback(async () => {
     const entry = activeEntry ?? newEntry(null);
     if (!activeEntry) {
       dispatch({ type: 'CREATE_ENTRY', entry });
     }
+    await beginRecording(entry.id);
+  }, [activeEntry, beginRecording, dispatch]);
 
-    recordingEntryIdRef.current = entry.id;
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      await audio.start(stream);
-      recorder.start(stream);
-      recDispatch({ type: 'START_RECORDING', startedAt: Date.now() });
-      speech.start();
-    } catch (err) {
-      recordingEntryIdRef.current = null;
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-        streamRef.current = null;
-      }
-      audio.stop();
-      const message =
-        err instanceof Error ? err.message : 'Unable to start recording.';
-      setRecordingError(message);
-    }
-  }, [
-    activeEntry,
-    audio,
-    clearTranscriptionError,
-    dispatch,
-    failedTake,
-    ingestTranscript,
-    recDispatch,
-    recorder,
-    speech,
-  ]);
+  // Vocal note: record into a fresh note from anywhere. A note taken while a
+  // writing entry is open pins to it, surfacing in that entry's notes panel.
+  const handleStartNote = useCallback(async () => {
+    const base = newEntry(activeEntry?.parentId ?? null, 'note');
+    const note =
+      activeEntry && activeEntry.kind === 'writing'
+        ? { ...base, attachedToId: activeEntry.id }
+        : base;
+    dispatch({ type: 'CREATE_ENTRY', entry: note });
+    await beginRecording(note.id);
+  }, [activeEntry, beginRecording, dispatch]);
 
   const handleStop = useCallback(async () => {
     const entryId = recordingEntryIdRef.current ?? state.activeEntryId;
@@ -378,6 +394,7 @@ export function MainPanel({ onToggleSidebar }: MainPanelProps) {
         liveWordCount={liveWordCount}
         drawWaveform={audio.drawWaveform}
         onStart={handleStart}
+        onStartNote={handleStartNote}
         onStop={handleStop}
         onRetryTranscription={handleRetryTranscription}
         onUseLiveTranscript={handleUseLiveTranscript}
