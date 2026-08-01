@@ -9,6 +9,7 @@ import {
   type Dispatch,
 } from 'react';
 import type { Entry, Directory } from '../types/editor';
+import type { LexiconTerm, CorrectionCandidate } from '../types/lexicon';
 import type { RefinementSettings } from '../types/llm';
 import { defaultVoiceConfig, defaultProsody } from '../types/audio';
 import {
@@ -17,9 +18,12 @@ import {
   saveEntries,
   loadDirectories,
   saveDirectories,
+  loadLexicon,
+  saveLexicon,
   loadRefinementSettings,
   saveRefinementSettings,
 } from '../lib/storage';
+import { mergeCandidate } from '../lib/lexicon';
 import { countWords } from '../lib/entries';
 
 const DEFAULT_REFINEMENT_SETTINGS: RefinementSettings = {
@@ -33,6 +37,7 @@ export interface AppState {
   directories: Record<string, Directory>;
   activeEntryId: string | null;
   refinementSettings: RefinementSettings;
+  lexicon: Record<string, LexiconTerm>;
 }
 
 export type AppAction =
@@ -44,7 +49,10 @@ export type AppAction =
   | { type: 'RENAME_DIRECTORY'; id: string; name: string }
   | { type: 'DELETE_DIRECTORY'; id: string }
   | { type: 'UPDATE_REFINEMENT_SETTINGS'; settings: Partial<RefinementSettings> }
-  | { type: 'RENAME_ENTRY'; id: string; name: string };
+  | { type: 'RENAME_ENTRY'; id: string; name: string }
+  | { type: 'CONFIRM_LEXICON_TERM'; candidate: CorrectionCandidate }
+  | { type: 'DELETE_LEXICON_TERM'; id: string }
+  | { type: 'RECORD_LEXICON_MISFIRE'; id: string };
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -150,6 +158,31 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    case 'CONFIRM_LEXICON_TERM':
+      return {
+        ...state,
+        lexicon: mergeCandidate(state.lexicon, action.candidate, Date.now()),
+      };
+
+    case 'DELETE_LEXICON_TERM': {
+      if (!state.lexicon[action.id]) return state;
+      const nextLexicon = { ...state.lexicon };
+      delete nextLexicon[action.id];
+      return { ...state, lexicon: nextLexicon };
+    }
+
+    case 'RECORD_LEXICON_MISFIRE': {
+      const term = state.lexicon[action.id];
+      if (!term) return state;
+      return {
+        ...state,
+        lexicon: {
+          ...state.lexicon,
+          [action.id]: { ...term, misfires: term.misfires + 1, lastUsedAt: Date.now() },
+        },
+      };
+    }
+
     default:
       return state;
   }
@@ -184,6 +217,7 @@ function createInitialState(): AppState {
     directories: loadDirectories(),
     activeEntryId: null,
     refinementSettings: savedSettings ?? DEFAULT_REFINEMENT_SETTINGS,
+    lexicon: loadLexicon(),
   };
 }
 
@@ -196,8 +230,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, null, createInitialState);
   const entriesPersist = useMemo(() => createDebouncedPersist(saveEntries), []);
   const dirsPersist = useMemo(() => createDebouncedPersist(saveDirectories), []);
+  const lexiconPersist = useMemo(() => createDebouncedPersist(saveLexicon), []);
   const hasHydratedEntries = useRef(false);
   const hasHydratedDirs = useRef(false);
+  const hasHydratedLexicon = useRef(false);
 
   // Persist entries to localStorage, debounced; skip the redundant mount write
   useEffect(() => {
@@ -217,6 +253,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dirsPersist.schedule(state.directories);
   }, [state.directories, dirsPersist]);
 
+  // Persist the lexicon to localStorage, debounced; skip the redundant mount write
+  useEffect(() => {
+    if (!hasHydratedLexicon.current) {
+      hasHydratedLexicon.current = true;
+      return;
+    }
+    lexiconPersist.schedule(state.lexicon);
+  }, [state.lexicon, lexiconPersist]);
+
   useEffect(() => {
     saveRefinementSettings(state.refinementSettings);
   }, [state.refinementSettings]);
@@ -226,6 +271,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const flushAll = () => {
       entriesPersist.flush();
       dirsPersist.flush();
+      lexiconPersist.flush();
     };
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') flushAll();
@@ -237,7 +283,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       document.removeEventListener('visibilitychange', onVisibilityChange);
       flushAll();
     };
-  }, [entriesPersist, dirsPersist]);
+  }, [entriesPersist, dirsPersist, lexiconPersist]);
 
   return (
     <AppContext.Provider value={{ state, dispatch }}>

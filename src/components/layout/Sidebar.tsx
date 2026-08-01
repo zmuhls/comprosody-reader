@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { DirectoryTree } from '../sidebar/DirectoryTree';
 import { EntryActions } from '../sidebar/EntryActions';
+import { LexiconPanel } from '../sidebar/LexiconPanel';
 
 export function Sidebar() {
   const [serverOk, setServerOk] = useState<boolean | null>(null);
@@ -55,6 +56,8 @@ export function Sidebar() {
       <div className="flex-1 overflow-y-auto">
         <DirectoryTree query={query} />
       </div>
+
+      <LexiconPanel />
 
       <div className="border-t border-border px-5 py-4">
         <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-muted">

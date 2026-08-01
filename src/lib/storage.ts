@@ -1,5 +1,6 @@
 import { STORAGE_KEYS } from '../constants';
 import type { Entry, Directory } from '../types/editor';
+import type { LexiconTerm } from '../types/lexicon';
 import type { RefinementSettings } from '../types/llm';
 import { defaultProsody, defaultVoiceConfig } from '../types/audio';
 import { countWords } from './entries';
@@ -100,6 +101,23 @@ export function saveDirectories(dirs: Record<string, Directory>): void {
     localStorage.setItem(STORAGE_KEYS.directories, JSON.stringify(dirs));
   } catch (err) {
     console.warn('failed to persist directories', err);
+  }
+}
+
+export function loadLexicon(): Record<string, LexiconTerm> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.lexicon);
+    return raw ? (JSON.parse(raw) as Record<string, LexiconTerm>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveLexicon(lexicon: Record<string, LexiconTerm>): void {
+  try {
+    localStorage.setItem(STORAGE_KEYS.lexicon, JSON.stringify(lexicon));
+  } catch (err) {
+    console.warn('failed to persist lexicon', err);
   }
 }
 

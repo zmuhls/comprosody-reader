@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect, useState } from 'react';
+import { useRef, useCallback, useEffect, useMemo, useState } from 'react';
 import { useApp, newEntry } from '../../context/AppContext';
 import { useRecording } from '../../context/RecordingContext';
 import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
@@ -7,13 +7,18 @@ import { useMediaRecorder } from '../../hooks/useMediaRecorder';
 import { useTranscription } from '../../hooks/useTranscription';
 import { useProsody } from '../../hooks/useProsody';
 import { deriveEntryName, countWords } from '../../lib/entries';
-import { saveRecording } from '../../lib/audioStore';
+import { saveRecording, attachTranscript } from '../../lib/audioStore';
+import { applyLexicon, rankForHint } from '../../lib/lexicon';
+import { LEXICON_HINT_CAP, LEXICON_TERM_MAX_LEN } from '../../constants';
+import type { AppliedSubstitution } from '../../types/lexicon';
 import { RecordingFooter } from '../dictation/RecordingFooter';
+import { AutoCorrectionNotice } from '../editor/AutoCorrectionNotice';
 import { Editor } from '../editor/Editor';
 
 interface FailedTake {
   blob: Blob;
   entryId: string;
+  recordedAt: number;
   liveTranscript: string;
 }
 
@@ -28,6 +33,16 @@ export function MainPanel() {
   const prosody = useProsody(audio.getTimeDomainData);
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [failedTake, setFailedTake] = useState<FailedTake | null>(null);
+  // Tagged with the entry so a revert edits the transcript it actually changed.
+  const [applied, setApplied] = useState<{
+    entryId: string;
+    substitutions: AppliedSubstitution[];
+  } | null>(null);
+
+  const vocabulary = useMemo(
+    () => rankForHint(state.lexicon, LEXICON_HINT_CAP, LEXICON_TERM_MAX_LEN),
+    [state.lexicon]
+  );
 
   const streamRef = useRef<MediaStream | null>(null);
   const stateRef = useRef(state);
@@ -78,6 +93,34 @@ export function MainPanel() {
     [dispatch]
   );
 
+  // Record what a take contributed, so later edits to the transcript can be
+  // diffed against it to isolate the user's corrections.
+  const recordTakeText = useCallback(
+    (entryId: string, recordedAt: number, text: string) => {
+      void attachTranscript(entryId, recordedAt, text).catch((err) => {
+        console.error('Failed to record take transcript:', err);
+      });
+    },
+    []
+  );
+
+  /**
+   * Run confirmed substitutions over a fresh transcript before it lands in the
+   * entry. The corrected text — not the model's raw output — becomes the take's
+   * baseline, so the pass is not re-proposed as a correction on the next diff.
+   */
+  const ingestTranscript = useCallback(
+    (entryId: string, recordedAt: number | null, transcript: string) => {
+      const result = applyLexicon(transcript, stateRef.current.lexicon);
+      appendTranscript(entryId, result.text);
+      if (recordedAt !== null) recordTakeText(entryId, recordedAt, result.text);
+      if (result.applied.length > 0) {
+        setApplied({ entryId, substitutions: result.applied });
+      }
+    },
+    [appendTranscript, recordTakeText]
+  );
+
   const handleStart = useCallback(async () => {
     setRecordingError(null);
 
@@ -85,7 +128,11 @@ export function MainPanel() {
     // the audio itself is already persisted in IndexedDB.
     if (failedTake) {
       if (failedTake.liveTranscript) {
-        appendTranscript(failedTake.entryId, failedTake.liveTranscript);
+        ingestTranscript(
+          failedTake.entryId,
+          failedTake.recordedAt,
+          failedTake.liveTranscript
+        );
       }
       setFailedTake(null);
       clearTranscriptionError();
@@ -118,11 +165,11 @@ export function MainPanel() {
     }
   }, [
     activeEntry,
-    appendTranscript,
     audio,
     clearTranscriptionError,
     dispatch,
     failedTake,
+    ingestTranscript,
     recDispatch,
     recorder,
     speech,
@@ -147,14 +194,16 @@ export function MainPanel() {
     const durationMs = session ? Date.now() - session.startedAt : 0;
 
     // Persist the take to IndexedDB — non-fatal on quota or availability errors.
-    if (entry && session && audioBlob.size > 0) {
-      void saveRecording(entry.id, audioBlob, {
-        recordedAt: session.startedAt,
-        durationMs,
-      }).catch((err) => {
-        console.error('Failed to persist recording:', err);
-      });
-    }
+    // Held so the transcript can be attached to the same record once it lands.
+    const takeSaved =
+      entry && session && audioBlob.size > 0
+        ? saveRecording(entry.id, audioBlob, {
+            recordedAt: session.startedAt,
+            durationMs,
+          }).catch((err) => {
+            console.error('Failed to persist recording:', err);
+          })
+        : null;
 
     // Save prosody + voice config, and bump take stats when audio was captured
     if (entry && session) {
@@ -175,31 +224,35 @@ export function MainPanel() {
       });
     }
 
+    // The take record must exist before its transcript can be attached.
+    if (takeSaved) await takeSaved;
+
     // Send to the server for transcription; on failure hold the take for a
     // user-chosen retry instead of silently appending the live transcript.
     if (entry && audioBlob.size > 0) {
       try {
-        const result = await transcribe(audioBlob);
-        appendTranscript(entry.id, result.transcript);
+        const result = await transcribe(audioBlob, vocabulary);
+        ingestTranscript(entry.id, session?.startedAt ?? null, result.transcript);
       } catch {
         setFailedTake({
           blob: audioBlob,
           entryId: entry.id,
+          recordedAt: session?.startedAt ?? Date.now(),
           liveTranscript: speech.getFinalTranscript(),
         });
       }
     } else if (entry) {
       const fallbackText = speech.getFinalTranscript();
       if (fallbackText) {
-        appendTranscript(entry.id, fallbackText);
+        ingestTranscript(entry.id, null, fallbackText);
       }
     }
 
     recordingEntryIdRef.current = null;
   }, [
-    appendTranscript,
     audio,
     dispatch,
+    ingestTranscript,
     prosody,
     recDispatch,
     recState.session,
@@ -208,6 +261,7 @@ export function MainPanel() {
     speech,
     state.activeEntryId,
     transcribe,
+    vocabulary,
   ]);
 
   const handleRetryTranscription = useCallback(async () => {
@@ -215,24 +269,58 @@ export function MainPanel() {
     if (!take) return;
 
     try {
-      const result = await transcribe(take.blob);
-      appendTranscript(take.entryId, result.transcript);
+      const result = await transcribe(take.blob, vocabulary);
+      ingestTranscript(take.entryId, take.recordedAt, result.transcript);
       setFailedTake(null);
     } catch {
       // transcriptionError is re-set by transcribe(); the take stays armed
     }
-  }, [appendTranscript, failedTake, transcribe]);
+  }, [failedTake, ingestTranscript, transcribe, vocabulary]);
 
   const handleUseLiveTranscript = useCallback(() => {
     const take = failedTake;
     if (!take) return;
 
     if (take.liveTranscript) {
-      appendTranscript(take.entryId, take.liveTranscript);
+      ingestTranscript(take.entryId, take.recordedAt, take.liveTranscript);
     }
     setFailedTake(null);
     clearTranscriptionError();
-  }, [appendTranscript, clearTranscriptionError, failedTake]);
+  }, [clearTranscriptionError, failedTake, ingestTranscript]);
+
+  /**
+   * Undo one substitution and demote the rule behind it. The demotion is the
+   * point: a rule the user reverts stops firing, which is what keeps a bad
+   * lexicon entry from rewriting every future transcript.
+   */
+  const handleRevertSubstitution = useCallback(
+    (substitution: AppliedSubstitution) => {
+      dispatch({ type: 'RECORD_LEXICON_MISFIRE', id: substitution.termId });
+
+      const entryId = applied?.entryId;
+      const entry = entryId ? stateRef.current.entries[entryId] : null;
+      if (entryId && entry) {
+        dispatch({
+          type: 'UPDATE_ENTRY',
+          id: entryId,
+          updates: {
+            rawTranscript: entry.rawTranscript
+              .split(substitution.canonical)
+              .join(substitution.heard),
+          },
+        });
+      }
+
+      setApplied((prev) => {
+        if (!prev) return null;
+        const rest = prev.substitutions.filter(
+          (s) => s.termId !== substitution.termId || s.heard !== substitution.heard
+        );
+        return rest.length > 0 ? { ...prev, substitutions: rest } : null;
+      });
+    },
+    [applied, dispatch]
+  );
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -260,6 +348,16 @@ export function MainPanel() {
       <Editor
         interimTranscript={speech.interimTranscript}
         isRecording={recState.isRecording}
+      />
+
+      <AutoCorrectionNotice
+        applied={
+          applied && applied.entryId === state.activeEntryId
+            ? applied.substitutions
+            : []
+        }
+        onRevert={handleRevertSubstitution}
+        onDismiss={() => setApplied(null)}
       />
 
       <RecordingFooter

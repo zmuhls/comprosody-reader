@@ -44,7 +44,7 @@ All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs)
 
 ### Frontend state (two contexts, both useReducer)
 
-**AppContext** — entries (`Record<string, Entry>`), directories, `activeEntryId`, refinementSettings (genre, scale, temperature). Entries/directories persist to localStorage via a 300 ms trailing debounce (`createDebouncedPersist` in `src/lib/storage.ts`) with flush on `pagehide`/`visibilitychange`; settings save immediately. All savers are quota-safe. `loadEntries` normalizes legacy data (backfills `wordCount`, `recordedDurationMs`, `audioTakes`, `draftHistory`; `schemaVersion` `'2'`). `DELETE_DIRECTORY` cascades recursively (shared `collectDirectoryCascade` BFS, also used by `useStorage` to cascade IndexedDB deletes).
+**AppContext** — entries (`Record<string, Entry>`), directories, `activeEntryId`, refinementSettings (genre, scale, temperature), lexicon (`Record<string, LexiconTerm>`). Entries/directories/lexicon persist to localStorage via a 300 ms trailing debounce (`createDebouncedPersist` in `src/lib/storage.ts`) with flush on `pagehide`/`visibilitychange`; settings save immediately. Any new debounced collection must also register its `flush()` in `flushAll`, or up to 300 ms of writes are lost on tab close. All savers are quota-safe. `loadEntries` normalizes legacy data (backfills `wordCount`, `recordedDurationMs`, `audioTakes`, `draftHistory`; `schemaVersion` `'2'`). `DELETE_DIRECTORY` cascades recursively (shared `collectDirectoryCascade` BFS, also used by `useStorage` to cascade IndexedDB deletes).
 
 **RecordingContext** — `isRecording`, session (interim/final transcripts, pauses, volume samples), prosody diagnostics (`ProsodyDiagnostics`), voice config (`VoiceConfig`). Ephemeral — resets each recording. Audio itself persists durably to IndexedDB via `src/lib/audioStore.ts` (idb-keyval; one record per take, keyed `${entryId}:${recordedAt}`), surfaced by the `AudioTakes` player in the editor.
 
@@ -58,6 +58,20 @@ All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs)
 4. **useProsody** — 500ms interval keyed on `isRecording`: computes pace/energy/fluency/density, dispatches `UPDATE_PROSODY`
 
 On stop: the take is saved to IndexedDB (fire-and-forget) and the blob goes to `POST /api/transcribe`. On transcription failure the footer offers `retry upload` / `use live transcript` (Web Speech fallback) instead of silently substituting; a pending failed take's live transcript is auto-rescued if a new recording starts.
+
+### Lexicon (transcription fidelity loop)
+
+The app learns the user's vocabulary from their own corrections. `src/lib/lexicon.ts` holds the pure functions; nothing here is per-entry — the lexicon is global.
+
+**Capture.** Each take records the text it contributed (`StoredRecording.transcript`). `loadTranscriptBaseline()` concatenates those in recording order; `extractCandidates()` diffs that baseline against the current `rawTranscript` with `diffWords` and keeps adjacent removed/added pairs that survive a phonetic filter — `phoneticSimilarity()` (normalized Levenshtein plus a folded consonant skeleton), a ≤3-word cap, and a ≥4-char minimum. The filter exists because the transcript pane serves two purposes a diff cannot tell apart: fixing mishearings and revising content. Survivors surface as confirm chips (`CorrectionChips`, via `useCorrectionCandidates`).
+
+**Apply.** Two deliberately overlapping mechanisms:
+- *Upstream hint* — `rankForHint()` → `encodeLexiconHint()` → base64 `X-Lexicon` header → `optHeaderStringArray()` → a `role: 'system'` message in `transcribe()`. Generalizes to word forms never explicitly taught. The header exists because `/api/transcribe` streams raw audio as its body, so there is no JSON envelope; a malformed hint decodes to `[]` rather than blocking transcription. The wire format is pinned by a literal asserted in both `src/lib/lexicon.test.ts` and `server/lib/validate.test.ts`.
+- *Deterministic pass* — `applyLexicon()` runs client-side in `MainPanel`'s `ingestTranscript` before text reaches the entry. Case-sensitive and word-bounded. Two distinct safety guards: case sensitivity lets `Marc → Mark` fire without touching the common word `marc`, while `differsOnlyByCase` refuses rules like `mark → Mark` outright.
+
+Substitutions are reported by `AutoCorrectionNotice` — the transcript no longer matches the model's output, so saying so is required. Reverting there records a misfire; `isSubstitutionActive()` stops a rule firing once `misfires >= confirmations`, which is what prevents a bad entry from rewriting every future transcript. Demoted terms still feed the upstream hint (demotion disables the blunt find/replace, not the vocabulary). `LexiconPanel` in the sidebar lists, adds (including hint-only terms with no heard form), deletes, and re-enables.
+
+**The metric:** deterministic substitutions fire exactly where the upstream hint failed. If that count trends down as the lexicon grows, the hint works; if it stays flat, only the find/replace is carrying the feature.
 
 ### Editor features
 

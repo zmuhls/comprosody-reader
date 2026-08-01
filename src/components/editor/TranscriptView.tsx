@@ -1,4 +1,8 @@
 import { AudioTakes } from './AudioTakes';
+import { CorrectionChips } from './CorrectionChips';
+import { useApp } from '../../context/AppContext';
+import { useCorrectionCandidates } from '../../hooks/useCorrectionCandidates';
+import type { CorrectionCandidate } from '../../types/lexicon';
 
 interface Props {
   entryId: string;
@@ -17,6 +21,20 @@ export function TranscriptView({
   audioTakes,
   onChangeTranscript,
 }: Props) {
+  const { dispatch } = useApp();
+  // Proposals are noise mid-recording; the transcript is still being appended.
+  const { candidates, dismiss } = useCorrectionCandidates(
+    isRecording ? null : entryId,
+    rawTranscript
+  );
+
+  const handleConfirm = (candidate: CorrectionCandidate) => {
+    dispatch({ type: 'CONFIRM_LEXICON_TERM', candidate });
+    // The baseline still holds the misheard form, so the diff would keep
+    // re-proposing this pair until the next take overwrites it.
+    dismiss(candidate.id);
+  };
+
   const composedTranscript =
     rawTranscript +
     (isRecording && interimTranscript ? ` ${interimTranscript}` : '');
@@ -38,6 +56,11 @@ export function TranscriptView({
           {isRecording ? 'live input' : 'editable'}
         </span>
       </div>
+      <CorrectionChips
+        candidates={candidates}
+        onConfirm={handleConfirm}
+        onDismiss={dismiss}
+      />
       <AudioTakes entryId={entryId} audioTakes={audioTakes} />
       <div className="relative flex-1">
         <textarea

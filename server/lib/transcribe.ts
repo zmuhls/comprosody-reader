@@ -22,14 +22,53 @@ export function audioFormatFromContentType(contentType: string | undefined): str
   return 'webm';
 }
 
+/**
+ * Bias decoding toward spellings the speaker has taught the app. Hedged on
+ * purpose — the model must not force a term onto audio that does not support
+ * it, or the hint would corrupt transcripts instead of correcting them.
+ */
+export function buildVocabularyPrompt(vocabulary: string[]): string {
+  return [
+    'The speaker uses the following vocabulary: proper nouns, technical terms,',
+    'and names that are easily misheard. When the audio is consistent with one',
+    'of these, prefer its exact spelling. Do not force these words onto audio',
+    `that does not support them: ${vocabulary.join(', ')}`,
+  ].join(' ');
+}
+
 export async function transcribe(
   audioBuffer: Buffer,
-  format: string
+  format: string,
+  vocabulary: string[] = []
 ): Promise<TranscriptionResult> {
   const transcribeModel =
     process.env.OPENROUTER_TRANSCRIBE_MODEL || 'google/gemini-2.5-flash';
 
   const base64Audio = audioBuffer.toString('base64');
+
+  const messages: unknown[] = [];
+  if (vocabulary.length > 0) {
+    messages.push({
+      role: 'system',
+      content: buildVocabularyPrompt(vocabulary),
+    });
+  }
+  messages.push({
+    role: 'user',
+    content: [
+      {
+        type: 'text',
+        text: 'Transcribe this audio recording exactly as spoken. Return only the transcribed text, nothing else. No commentary, labels, or formatting.',
+      },
+      {
+        type: 'input_audio',
+        input_audio: {
+          data: base64Audio,
+          format,
+        },
+      },
+    ],
+  });
 
   try {
     const response = await fetch(OPENROUTER_URL, {
@@ -42,24 +81,7 @@ export async function transcribe(
       },
       body: JSON.stringify({
         model: transcribeModel,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: 'Transcribe this audio recording exactly as spoken. Return only the transcribed text, nothing else. No commentary, labels, or formatting.',
-              },
-              {
-                type: 'input_audio',
-                input_audio: {
-                  data: base64Audio,
-                  format,
-                },
-              },
-            ],
-          },
-        ],
+        messages,
         temperature: 0,
         max_tokens: 4000,
       }),

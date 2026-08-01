@@ -36,6 +36,34 @@ export function reqString(
   return value;
 }
 
+/**
+ * Decode an optional base64-encoded JSON string array from a request header.
+ *
+ * Returns [] rather than throwing on anything malformed: this carries an
+ * optional transcription hint, and a corrupt hint must never block a
+ * transcription the user is waiting on.
+ */
+export function optHeaderStringArray(
+  value: unknown,
+  maxItems: number,
+  maxItemLen: number
+): string[] {
+  if (typeof value !== 'string' || value.length === 0) return [];
+  try {
+    const parsed: unknown = JSON.parse(
+      Buffer.from(value, 'base64').toString('utf8')
+    );
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0 && item.length <= maxItemLen)
+      .slice(0, maxItems);
+  } catch {
+    return [];
+  }
+}
+
 export function reqNumber(
   body: Record<string, unknown>,
   key: string,

@@ -1,4 +1,18 @@
-import { audioFormatFromContentType } from './transcribe.js';
+import { audioFormatFromContentType, buildVocabularyPrompt } from './transcribe.js';
+
+describe('buildVocabularyPrompt', () => {
+  it('lists every term', () => {
+    const prompt = buildVocabularyPrompt(['comprosody', 'zmuhls']);
+    expect(prompt).toContain('comprosody');
+    expect(prompt).toContain('zmuhls');
+  });
+
+  // Without this hedge the hint would corrupt transcripts instead of
+  // correcting them, forcing taught words onto audio that never contained them.
+  it('instructs the model not to force terms onto unsupporting audio', () => {
+    expect(buildVocabularyPrompt(['comprosody'])).toContain('Do not force');
+  });
+});
 
 describe('audioFormatFromContentType', () => {
   it('maps webm content types to webm', () => {

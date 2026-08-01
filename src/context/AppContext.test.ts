@@ -49,6 +49,7 @@ function makeState(): AppState {
     },
     activeEntryId: null,
     refinementSettings: { genre: 'freewrite', scale: 'sentence', temperature: 0.5 },
+    lexicon: {},
   };
 }
 
@@ -152,5 +153,50 @@ describe('newEntry', () => {
     expect(entry.recordedDurationMs).toBe(0);
     expect(entry.audioTakes).toBe(0);
     expect(entry.draftHistory).toEqual([]);
+  });
+});
+
+describe('appReducer lexicon actions', () => {
+  const candidate = {
+    id: 'com prosody→comprosody',
+    heard: 'com prosody',
+    canonical: 'comprosody',
+    similarity: 1,
+  };
+
+  it('CONFIRM_LEXICON_TERM adds a term, then folds a repeat confirmation', () => {
+    const state = makeState();
+    const once = appReducer(state, { type: 'CONFIRM_LEXICON_TERM', candidate });
+    expect(Object.keys(once.lexicon)).toHaveLength(1);
+
+    const twice = appReducer(once, { type: 'CONFIRM_LEXICON_TERM', candidate });
+    expect(Object.keys(twice.lexicon)).toHaveLength(1);
+    expect(Object.values(twice.lexicon)[0].confirmations).toBe(2);
+  });
+
+  it('RECORD_LEXICON_MISFIRE increments misfires', () => {
+    const confirmed = appReducer(makeState(), {
+      type: 'CONFIRM_LEXICON_TERM',
+      candidate,
+    });
+    const termId = Object.keys(confirmed.lexicon)[0];
+    const next = appReducer(confirmed, { type: 'RECORD_LEXICON_MISFIRE', id: termId });
+    expect(next.lexicon[termId].misfires).toBe(1);
+  });
+
+  it('DELETE_LEXICON_TERM removes the term', () => {
+    const confirmed = appReducer(makeState(), {
+      type: 'CONFIRM_LEXICON_TERM',
+      candidate,
+    });
+    const termId = Object.keys(confirmed.lexicon)[0];
+    const next = appReducer(confirmed, { type: 'DELETE_LEXICON_TERM', id: termId });
+    expect(next.lexicon).toEqual({});
+  });
+
+  it('returns state unchanged for unknown lexicon ids', () => {
+    const state = makeState();
+    expect(appReducer(state, { type: 'DELETE_LEXICON_TERM', id: 'missing' })).toBe(state);
+    expect(appReducer(state, { type: 'RECORD_LEXICON_MISFIRE', id: 'missing' })).toBe(state);
   });
 });

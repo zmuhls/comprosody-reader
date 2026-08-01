@@ -8,6 +8,10 @@ Audit findings from 2026-04-10, resolved in the 2026-07-26 optimization pass (br
   - `OPENROUTER_TRANSCRIBE_MODEL=google/gemini-2.5-flash` (used by `server/lib/transcribe.ts`)
   - `CORS_ORIGIN=http://localhost:5173` (comma-separated allowlist read by `server/index.ts`)
 
+- [ ] **Refinement provenance gap** — nothing links a refinement to the settings/prosody that produced it. `entry.prosody` is a single snapshot overwritten on every recording stop (`MainPanel.tsx` `handleStop`), while `rawTranscript` accumulates across takes, so on a multi-take entry the stored prosody no longer describes what produced `refinedText`. `draftHistory` is bare `string[]` — no timestamp, no settings, no prosody. Does not affect the lexicon loop (which diffs per-take transcripts), but blocks any future refinement-style learning: you cannot learn from a signal you cannot attribute.
+
+- [ ] **Lexicon hint efficacy unmeasured** — the deterministic pass fires exactly where the upstream vocabulary hint failed, so `AppliedSubstitution` counts are the metric for whether the hint is doing anything. Currently surfaced per-transcription in the UI but never aggregated. If the count stays flat as the lexicon grows, the hint is inert and only the find/replace is carrying the feature.
+
 ## Done
 
 ### Critical
@@ -66,3 +70,15 @@ Audit findings from 2026-04-10, resolved in the 2026-07-26 optimization pass (br
 - [x] Keyboard shortcuts: Ctrl/Cmd+Shift+Space record toggle, Ctrl/Cmd+Enter refine, Ctrl/Cmd+Shift+C copy.
 - [x] Live recording stats (elapsed `m:ss`, running word count) in the footer; per-entry word badge in the sidebar; take-duration chip in the editor.
 - [x] Delete confirmations on entries/directories; health check re-polls every 30 s and on window focus.
+
+### Lexicon — transcription fidelity loop (2026-07-31)
+
+Closes the loop `correction → confirmed term → vocabulary hint → fewer corrections`. Design: `docs/superpowers/specs/`; plan approved on branch `optimization-pass`.
+
+- [x] `src/lib/lexicon.ts` — pure phonetic filter (`phoneticSimilarity` via normalized Levenshtein + folded consonant skeleton), `extractCandidates` (reuses `diffWords`), `applyLexicon`, `rankForHint`, `encodeLexiconHint`, `mergeCandidate`. 40 unit tests.
+- [x] `StoredRecording.transcript` — each take records the text it contributed, giving the correction diff its baseline and closing the "takes stored without their transcript" gap.
+- [x] Confirm chips (`CorrectionChips`) in the transcript pane; phonetic filter rejects content edits, sentence rewrites, and case-only changes so they never reach the lexicon.
+- [x] Vocabulary hint reaches the model: base64 `X-Lexicon` header (raw-audio body has no JSON envelope) → `optHeaderStringArray` → `transcribe(audio, format, vocabulary)` system message. Malformed hints decode to `[]` rather than blocking transcription. Wire format pinned by a literal asserted on both sides.
+- [x] Client-side deterministic pass with case-sensitive, word-bounded matching; `AutoCorrectionNotice` reports what was rewritten after the model produced it.
+- [x] Misfire demotion — reverting a substitution disables that rule (`misfires >= confirmations`), keeping a bad entry from rewriting every future transcript. Demoted terms still feed the upstream hint.
+- [x] `LexiconPanel` in the sidebar: list, hand-add (incl. hint-only terms), delete, re-enable demoted.

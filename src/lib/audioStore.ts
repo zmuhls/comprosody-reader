@@ -1,4 +1,4 @@
-import { createStore, set, keys, getMany, delMany } from 'idb-keyval';
+import { createStore, set, get, keys, getMany, delMany } from 'idb-keyval';
 
 const store = createStore('comprosody-audio', 'recordings');
 
@@ -8,6 +8,13 @@ export interface StoredRecording {
   durationMs: number;
   mimeType: string;
   blob: Blob;
+  /**
+   * The text this take contributed to the entry's raw transcript, exactly as
+   * it was appended. Serves as the baseline for detecting user corrections —
+   * diffing it against the current transcript isolates what the user changed.
+   * Optional so records written before this field keep loading.
+   */
+  transcript?: string;
 }
 
 function recordingKey(entryId: string, recordedAt: number): string {
@@ -33,6 +40,35 @@ export async function saveRecording(
     blob,
   };
   await set(recordingKey(entryId, meta.recordedAt), recording, store);
+}
+
+/**
+ * Record the text a take produced, once transcription resolves. Separate from
+ * saveRecording so the blob is not rewritten, and a no-op when the take is
+ * missing (its write may have failed on quota).
+ */
+export async function attachTranscript(
+  entryId: string,
+  recordedAt: number,
+  transcript: string,
+): Promise<void> {
+  const key = recordingKey(entryId, recordedAt);
+  const existing = await get<StoredRecording | undefined>(key, store);
+  if (!existing) return;
+  await set(key, { ...existing, transcript }, store);
+}
+
+/**
+ * Concatenation of every take's contributed text, in recording order, joined
+ * the same way appendTranscript joins them. This is what the entry's raw
+ * transcript looked like before the user touched it.
+ */
+export async function loadTranscriptBaseline(entryId: string): Promise<string> {
+  const recordings = await loadRecordings(entryId);
+  return recordings
+    .map((r) => r.transcript?.trim() ?? '')
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 export async function loadRecordings(entryId: string): Promise<StoredRecording[]> {

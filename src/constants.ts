@@ -28,5 +28,11 @@ export const STORAGE_KEYS = {
   entries: 'comprosody:entries',
   directories: 'comprosody:directories',
   settings: 'comprosody:settings',
+  lexicon: 'comprosody:lexicon',
   schemaVersion: 'comprosody:schemaVersion',
 } as const;
+
+/** Canonical terms sent upstream as a transcription vocabulary hint. */
+export const LEXICON_HINT_CAP = 120;
+/** Longer "terms" are phrases; they bloat the hint without helping decoding. */
+export const LEXICON_TERM_MAX_LEN = 64;
