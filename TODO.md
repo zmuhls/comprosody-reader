@@ -2,6 +2,13 @@
 
 Audit findings from 2026-04-10, resolved in the 2026-07-26 optimization pass (branch `optimization-pass`). One item remains open below; everything else moved to Done with its resolution.
 
+## Open (added 2026-08-01, library & studio workup)
+
+- [ ] **Diagnostic blind spot for refineContext** — `scripts/prosody-pipeline-diagnostic.ts` never calls `buildSystemPrompt` with the new `refineContext` argument, so its oversized-prompt tracking misses the whole fifth dimension. Worst case adds ~200–270 tokens (cap 1200 chars). Flagged by prompt-composition review.
+- [ ] **Margin-notes bottom sheet overlays the footer below `xl`** — it's dismissible, but the record seal is unreachable while open on small screens. Consider docking above the footer instead of `bottom-0`.
+- [ ] **No way to create directly into an empty book** — `+ entry`/`+ note` target the active entry's parent; an empty book can only be filled by drag or *move to…*. A "new chapter here" row action on book rows would close the gap.
+- [ ] **Audio hydrate/release hysteresis is viewport-based** — the takes list scrolls in its own container, so the 200px/600px root margins both collapse to the container clip edge. Works (release confirmed in e2e), but passing the container as the IntersectionObserver `root` would restore the intended hysteresis band.
+
 ## Open
 
 - [ ] **`.env.example` missing new vars** — needs two additions (blocked for automation by the protected-files hook; edit manually):

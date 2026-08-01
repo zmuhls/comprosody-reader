@@ -44,7 +44,11 @@ All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs)
 
 ### Frontend state (two contexts, both useReducer)
 
-**AppContext** — entries (`Record<string, Entry>`), directories, `activeEntryId`, refinementSettings (genre, scale, temperature), lexicon (`Record<string, LexiconTerm>`). Entries/directories/lexicon persist to localStorage via a 300 ms trailing debounce (`createDebouncedPersist` in `src/lib/storage.ts`) with flush on `pagehide`/`visibilitychange`; settings save immediately. Any new debounced collection must also register its `flush()` in `flushAll`, or up to 300 ms of writes are lost on tab close. All savers are quota-safe. `loadEntries` normalizes legacy data (backfills `wordCount`, `recordedDurationMs`, `audioTakes`, `draftHistory`; `schemaVersion` `'2'`). `DELETE_DIRECTORY` cascades recursively (shared `collectDirectoryCascade` BFS, also used by `useStorage` to cascade IndexedDB deletes).
+**AppContext** — entries (`Record<string, Entry>`), directories, `activeEntryId`, refinementSettings (genre, scale, temperature), lexicon (`Record<string, LexiconTerm>`). Entries/directories/lexicon persist to localStorage via a 300 ms trailing debounce (`createDebouncedPersist` in `src/lib/storage.ts`) with flush on `pagehide`/`visibilitychange`; settings save immediately. Any new debounced collection must also register its `flush()` in `flushAll`, or up to 300 ms of writes are lost on tab close. All savers are quota-safe. `loadEntries` normalizes legacy data (`schemaVersion` `'3'`: backfills `kind`, name-ranked `order`, plus the older `wordCount`/`recordedDurationMs`/`audioTakes`/`draftHistory`). `DELETE_DIRECTORY` cascades recursively (shared `collectDirectoryCascade` BFS, also used by `useStorage` to cascade IndexedDB deletes) and unpins surviving notes.
+
+### Library model (schema v3)
+
+`Directory.kind` is `'folder' | 'book'`; `Entry.kind` is `'writing' | 'note'`. Books order children by `Entry.order` (folders stay alphabetical); promotion folder→book freezes the alphabetical order as chapter order (`SET_DIRECTORY_KIND`). Notes can pin to a writing entry via `attachedToId` (`ATTACH_NOTE` also syncs `parentId` so tree position and display never disagree; the tree nests them under their target). The reducer owns ordering invariants: `CREATE_ENTRY` appends (`maxOrder+1`), `MOVE_NODE` is cycle-guarded and drags pinned notes along (moving a note alone unpins it), `REORDER_ENTRY` re-sequences a book. Sidebar rows drag natively (`src/components/sidebar/dnd.ts` — pure `resolveDropIntent` + a module-scoped payload mirror because `dataTransfer.getData` is empty during `dragover`); the `⋯` RowMenu (*move to…*, *make book/folder*, *attach*, *delete*) is the keyboard path. Dropping a note on a writing row attaches it.
 
 **RecordingContext** — `isRecording`, session (interim/final transcripts, pauses, volume samples), prosody diagnostics (`ProsodyDiagnostics`), voice config (`VoiceConfig`). Ephemeral — resets each recording. Audio itself persists durably to IndexedDB via `src/lib/audioStore.ts` (idb-keyval; one record per take, keyed `${entryId}:${recordedAt}`), surfaced by the `AudioTakes` player in the editor.
 
@@ -75,7 +79,11 @@ Substitutions are reported by `AutoCorrectionNotice` — the transcript no longe
 
 ### Editor features
 
-Refined-pane textarea locks (`readOnly`) while refinement streams; `refineSelection` verifies the captured selection still matches before splicing. `entry.draftHistory` (cap 10) backs toolbar undo across full-refine/selection/variant overwrites. `DiffView` renders raw-vs-refined via `diffWords` (from `diff`). `src/lib/export.ts` provides markdown download and clipboard copy. Shortcuts: Ctrl/Cmd+Shift+Space (record), Ctrl/Cmd+Enter (refine), Ctrl/Cmd+Shift+C (copy).
+Refined-pane textarea locks (`readOnly`) while refinement streams; `refineSelection` verifies the captured selection still matches before splicing. `entry.draftHistory` (cap 10) backs toolbar undo across full-refine/selection/variant overwrites. `DiffView` renders raw-vs-refined via `diffWords` (from `diff`). `src/lib/export.ts` provides markdown download and clipboard copy. Shortcuts: Ctrl/Cmd+Shift+Space (record), Ctrl/Cmd+Enter (refine), Ctrl/Cmd+Shift+C (copy), `[`/`]` page between sibling chapters (touch swipe does the same via `useSwipePaging`).
+
+Settings render as a delimited rail (`SettingsRail`: register · scale · reach); temperature is labeled **reach** in UI copy only, with a shared `InfoPopover` explaining it in plain language. Variants are **passes**: chips in the draft-pane header (`PassesBar`), where highlighting a chip renders `VariantDiffView` (green insertions / struck red removals) in the draft pane itself — accept splices, *→ note* saves the pass as an attached note, *+ chapter* appends it to the entry's book, failed passes get a per-chip retry (`retryVariant`). `MarginNotes` lists attached notes (side column at `xl`, bottom sheet below) with an *include in refinement* toggle (`includeInRefinement`). The entry header shows a location breadcrumb (`Book / ch 2 of 5`). The sidebar becomes a slide-over drawer below `lg`.
+
+`AudioTakes` is metadata-first: `listTakeMeta` renders rows without touching blobs; a take hydrates via `loadTakeBlob` (streamed read, determinate progress bar) when it nears the viewport or on demand, pages of 10 reveal through a sentinel IntersectionObserver, object URLs are revoked when rows scroll far away, and a ring-buffered log strip reports each hydration/release.
 
 ### Prompt composition system
 
@@ -86,6 +94,7 @@ Refined-pane textarea locks (`readOnly`) while refinement streams; `refineSelect
 - **Prosody readings** → each metric (pace, energy, fluency, density) is mapped through `interpret*()` to a human label, then to an implication sentence from a lookup table (e.g., "slow, deliberate" → "preserve complex syntactic structures")
 - **Voice config** (4 booleans) → structural rules: silences-as-paragraphs, preserve-false-starts, preserve-fillers, mirror-cadence
 - **Transition guidance** — dynamically generated rules for smoothing oral-to-written artifacts, conditioned on fluency level
+- **Refine context** (optional fifth dimension) — `src/lib/refineContext.ts` assembles book position, neighboring-chapter first sentences, and included margin notes (cap 1,200 chars; notes truncate first, the book line never does), spliced in just before the final output-format instruction. Absent context leaves prompts byte-identical (test-pinned).
 
 These compose into a single system prompt. Raw transcript goes as user message. Selection refinement adds `[START]`/`[END]` markers with surrounding context.
 

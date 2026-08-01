@@ -250,7 +250,7 @@ export function AudioTakes({ entryId, audioTakes }: Props) {
         </span>
       </div>
 
-      <div className="mt-2 flex flex-col gap-2">
+      <div className="mt-2 flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
         {visible.map((take, index) => (
           <TakeRow
             key={take.recordedAt}
