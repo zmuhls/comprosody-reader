@@ -2,26 +2,55 @@ interface Props {
   isRecording: boolean;
   onStart: () => void;
   onStop: () => void;
+  disabled?: boolean;
+  /** Live vocal energy 0–1; drives the recording glow so the seal breathes. */
+  energy?: number;
 }
 
-export function RecordButton({ isRecording, onStart, onStop }: Props) {
+export function RecordButton({
+  isRecording,
+  onStart,
+  onStop,
+  disabled,
+  energy = 0,
+}: Props) {
+  const title = disabled
+    ? 'Transcribing previous take'
+    : isRecording
+      ? 'Stop recording'
+      : 'Start recording';
+
+  // Double ring: a canvas-colored gap between the outer border and an inner
+  // ring, like a seal. While recording the outer glow tracks vocal energy.
+  const ringShadow = isRecording
+    ? `inset 0 0 0 3px var(--color-canvas), inset 0 0 0 4px rgba(220, 101, 89, 0.55), 0 0 ${
+        10 + energy * 26
+      }px rgba(220, 101, 89, ${(0.25 + energy * 0.4).toFixed(3)})`
+    : 'inset 0 0 0 3px var(--color-canvas), inset 0 0 0 4px rgba(217, 138, 84, 0.45), 0 10px 30px rgba(0, 0, 0, 0.3)';
+
   return (
     <button
       onClick={isRecording ? onStop : onStart}
-      className={`relative flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border transition-all duration-300 ${
+      disabled={disabled}
+      aria-label={title}
+      aria-pressed={isRecording}
+      className={`relative flex h-14 w-14 shrink-0 items-center justify-center rounded-full border transition-colors duration-300 disabled:cursor-not-allowed disabled:opacity-35 ${
         isRecording
-          ? 'border-recording bg-recording/18 shadow-[0_0_0_1px_rgba(220,101,89,0.25),0_18px_40px_rgba(220,101,89,0.18)] hover:bg-recording/24'
-          : 'border-accent bg-accent/16 shadow-[0_0_0_1px_rgba(217,138,84,0.18),0_18px_40px_rgba(0,0,0,0.24)] hover:bg-accent/24 hover:border-accent-hover'
+          ? 'border-recording bg-recording/12'
+          : 'border-accent/70 bg-accent/10 hover:border-accent hover:bg-accent/18'
       }`}
-      title={isRecording ? 'Stop recording' : 'Start recording'}
+      style={{ boxShadow: ringShadow }}
+      title={title}
     >
-      {isRecording ? (
-        <div className="h-4 w-4 rounded-[4px] bg-recording" />
-      ) : (
-        <div className="h-5 w-5 rounded-full border border-accent-hover bg-accent" />
-      )}
+      <div
+        className={`transition-all duration-300 ${
+          isRecording
+            ? 'h-4 w-4 rounded-[3px] bg-recording'
+            : 'h-5 w-5 rounded-full bg-accent'
+        }`}
+      />
       {isRecording && (
-        <span className="absolute inset-0 rounded-2xl border border-recording animate-ping opacity-25" />
+        <span className="absolute inset-0 rounded-full border border-recording opacity-25 motion-safe:animate-ping" />
       )}
     </button>
   );

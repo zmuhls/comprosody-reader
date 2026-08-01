@@ -12,11 +12,16 @@ function Toggle({
 }) {
   return (
     <label className="flex cursor-pointer items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-text-secondary transition-colors select-none hover:text-text-primary">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="peer sr-only"
+      />
       <div
-        className={`relative h-4 w-7 cursor-pointer border transition-colors ${
+        className={`relative h-4 w-7 border transition-colors peer-focus-visible:border-border-focus ${
           checked ? 'border-accent bg-accent/15' : 'border-border bg-surface'
         }`}
-        onClick={() => onChange(!checked)}
       >
         <div
           className={`absolute top-[3px] h-2 w-2 transition-transform ${

@@ -20,14 +20,11 @@ export type RecordingAction =
   | { type: 'STOP_RECORDING' }
   | { type: 'UPDATE_INTERIM'; text: string }
   | { type: 'APPEND_FINAL'; text: string }
-  | { type: 'SET_TRANSCRIPT'; text: string }
-  | { type: 'ADD_WORD_TIMESTAMP'; word: string; start: number; end: number }
   | { type: 'ADD_PAUSE'; start: number; end: number }
   | { type: 'ADD_VOLUME_SAMPLE'; value: number }
   | { type: 'UPDATE_PROSODY'; prosody: ProsodyDiagnostics }
   | { type: 'FINALIZE_PROSODY'; prosody: ProsodyDiagnostics }
-  | { type: 'SET_VOICE_CONFIG'; config: Partial<VoiceConfig> }
-  | { type: 'SET_AUDIO_BLOB'; blob: Blob };
+  | { type: 'SET_VOICE_CONFIG'; config: Partial<VoiceConfig> };
 
 export function recordingReducer(
   state: RecordingState,
@@ -42,10 +39,8 @@ export function recordingReducer(
           startedAt: action.startedAt,
           interimTranscript: '',
           finalTranscript: '',
-          wordTimestamps: [],
           pauses: [],
           volumeSamples: [],
-          audioBlob: null,
         },
         prosody: defaultProsody,
       };
@@ -70,31 +65,6 @@ export function recordingReducer(
             ? state.session.finalTranscript + ' ' + action.text
             : action.text,
           interimTranscript: '',
-        },
-      };
-
-    case 'SET_TRANSCRIPT':
-      if (!state.session) return state;
-      return {
-        ...state,
-        session: {
-          ...state.session,
-          finalTranscript: action.text,
-          interimTranscript: '',
-          wordTimestamps: [],
-        },
-      };
-
-    case 'ADD_WORD_TIMESTAMP':
-      if (!state.session) return state;
-      return {
-        ...state,
-        session: {
-          ...state.session,
-          wordTimestamps: [
-            ...state.session.wordTimestamps,
-            { word: action.word, start: action.start, end: action.end },
-          ],
         },
       };
 
@@ -131,13 +101,6 @@ export function recordingReducer(
       return {
         ...state,
         voiceConfig: { ...state.voiceConfig, ...action.config },
-      };
-
-    case 'SET_AUDIO_BLOB':
-      if (!state.session) return state;
-      return {
-        ...state,
-        session: { ...state.session, audioBlob: action.blob },
       };
 
     default:

@@ -17,10 +17,8 @@ function makeRecordingState(): RecordingState {
       startedAt: 1000,
       interimTranscript: '',
       finalTranscript: '',
-      wordTimestamps: [],
       pauses: [],
       volumeSamples: [],
-      audioBlob: null,
     },
     prosody: { ...defaultProsody },
     voiceConfig: { ...defaultVoiceConfig },
@@ -37,7 +35,6 @@ describe('recordingReducer', () => {
     expect(next.session!.startedAt).toBe(5000);
     expect(next.session!.finalTranscript).toBe('');
     expect(next.session!.interimTranscript).toBe('');
-    expect(next.session!.wordTimestamps).toEqual([]);
     expect(next.session!.pauses).toEqual([]);
     expect(next.session!.volumeSamples).toEqual([]);
     expect(next.prosody).toEqual(defaultProsody);
@@ -77,16 +74,6 @@ describe('recordingReducer', () => {
     state.session!.finalTranscript = 'hello';
     const next = recordingReducer(state, { type: 'APPEND_FINAL', text: 'world' });
     expect(next.session!.finalTranscript).toBe('hello world');
-  });
-
-  it('ADD_WORD_TIMESTAMP appends timestamp', () => {
-    const state = makeRecordingState();
-    state.session!.wordTimestamps = [{ word: 'first', start: 0.1, end: 0.3 }];
-    const next = recordingReducer(state, { type: 'ADD_WORD_TIMESTAMP', word: 'second', start: 0.4, end: 0.6 });
-    expect(next.session!.wordTimestamps).toEqual([
-      { word: 'first', start: 0.1, end: 0.3 },
-      { word: 'second', start: 0.4, end: 0.6 },
-    ]);
   });
 
   it('ADD_PAUSE appends pause', () => {

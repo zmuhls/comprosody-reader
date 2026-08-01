@@ -18,3 +18,8 @@ export interface Variant {
   temperature: number;
   text: string;
 }
+
+export interface VariantError {
+  label: Variant['label'];
+  error: string;
+}

@@ -1,72 +1,60 @@
 import { useState, useCallback } from 'react';
-import { useRecording } from '../context/RecordingContext';
-
-interface TranscriptionWord {
-  word: string;
-  start: number;
-  end: number;
-}
+import { encodeLexiconHint } from '../lib/lexicon';
 
 interface TranscriptionResponse {
   transcript: string;
-  words: TranscriptionWord[];
-  language: string;
-  duration: number;
   error?: string;
 }
 
+/** Mirrors the server's cap in server/routes/transcribe.ts. */
+const MAX_LEXICON_HEADER_CHARS = 4096;
+
 export function useTranscription() {
-  const { dispatch } = useRecording();
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
 
-  const transcribe = useCallback(
-    async (audioBlob: Blob) => {
-      setIsTranscribing(true);
-      setTranscriptionError(null);
+  const transcribe = useCallback(async (audioBlob: Blob, vocabulary: string[] = []) => {
+    setIsTranscribing(true);
+    setTranscriptionError(null);
 
-      try {
-        const response = await fetch('/api/transcribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
-          body: audioBlob,
-        });
+    try {
+      const headers: Record<string, string> = {
+        'Content-Type': audioBlob.type || 'audio/webm',
+      };
+      // The body is raw audio, so the vocabulary hint travels as a header.
+      const hint = encodeLexiconHint(vocabulary, MAX_LEXICON_HEADER_CHARS);
+      if (hint) headers['X-Lexicon'] = hint;
 
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.error || `Transcription failed: ${response.status}`);
-        }
+      const response = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers,
+        body: audioBlob,
+      });
 
-        const data: TranscriptionResponse = await response.json();
-
-        if (data.error) throw new Error(data.error);
-
-        dispatch({ type: 'SET_TRANSCRIPT', text: data.transcript });
-
-        for (const w of data.words) {
-          dispatch({
-            type: 'ADD_WORD_TIMESTAMP',
-            word: w.word,
-            start: w.start,
-            end: w.end,
-          });
-        }
-
-        dispatch({ type: 'SET_AUDIO_BLOB', blob: audioBlob });
-
-        return data;
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Transcription failed';
-        setTranscriptionError(message);
-        console.error('Transcription failed:', err);
-        throw err;
-      } finally {
-        setIsTranscribing(false);
+      if (!response.ok) {
+        const err = await response.json().catch(() => null);
+        throw new Error(err?.error || `Transcription failed: ${response.status}`);
       }
-    },
-    [dispatch]
-  );
 
-  return { isTranscribing, transcriptionError, transcribe };
+      const data: TranscriptionResponse = await response.json();
+
+      if (data.error) throw new Error(data.error);
+
+      return data;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Transcription failed';
+      setTranscriptionError(message);
+      console.error('Transcription failed:', err);
+      throw err;
+    } finally {
+      setIsTranscribing(false);
+    }
+  }, []);
+
+  const clearTranscriptionError = useCallback(() => {
+    setTranscriptionError(null);
+  }, []);
+
+  return { isTranscribing, transcriptionError, clearTranscriptionError, transcribe };
 }

@@ -9,7 +9,6 @@ import {
 
 export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | null) {
   const { state, dispatch } = useRecording();
-  const intervalRef = useRef<number>(0);
   const lastSpeechTimeRef = useRef<number>(0);
   const pauseStartRef = useRef<number | null>(null);
 
@@ -59,24 +58,25 @@ export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | nu
     });
   }, [state.session, getTimeDomainData, dispatch]);
 
+  // The interval is keyed on isRecording alone; `update` is read through a ref
+  // so session mutations (interim/final/pause dispatches) never tear down the
+  // timer or reset in-progress pause tracking.
+  const updateRef = useRef(update);
   useEffect(() => {
-    if (state.isRecording) {
-      intervalRef.current = window.setInterval(update, 500);
-      lastSpeechTimeRef.current = Date.now();
-      pauseStartRef.current = null;
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = 0;
-      }
-    }
+    updateRef.current = update;
+  }, [update]);
+
+  useEffect(() => {
+    if (!state.isRecording) return;
+
+    lastSpeechTimeRef.current = Date.now();
+    pauseStartRef.current = null;
+    const intervalId = window.setInterval(() => updateRef.current(), 500);
+
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = 0;
-      }
+      window.clearInterval(intervalId);
     };
-  }, [state.isRecording, update]);
+  }, [state.isRecording]);
 
   return state.prosody;
 }
