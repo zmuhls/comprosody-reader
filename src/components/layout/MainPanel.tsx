@@ -22,7 +22,11 @@ interface FailedTake {
   liveTranscript: string;
 }
 
-export function MainPanel() {
+interface MainPanelProps {
+  onToggleSidebar: () => void;
+}
+
+export function MainPanel({ onToggleSidebar }: MainPanelProps) {
   const { state, dispatch } = useApp();
   const { state: recState, dispatch: recDispatch } = useRecording();
   const speech = useSpeechRecognition();
@@ -348,6 +352,7 @@ export function MainPanel() {
       <Editor
         interimTranscript={speech.interimTranscript}
         isRecording={recState.isRecording}
+        onToggleSidebar={onToggleSidebar}
       />
 
       <AutoCorrectionNotice

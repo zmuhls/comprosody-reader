@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useApp, newEntry } from '../../context/AppContext';
 import { useRefinement } from '../../hooks/useRefinement';
+import { getPagingSiblings, useSwipePaging } from '../../hooks/useSwipePaging';
 import { countParagraphs, countWords, deriveEntryName } from '../../lib/entries';
 import { formatDuration, formatUpdatedAt } from '../../lib/time';
 import { copyEntryToClipboard, downloadEntry } from '../../lib/export';
@@ -16,6 +17,19 @@ import { MarginNotes } from './MarginNotes';
 interface Props {
   interimTranscript: string;
   isRecording: boolean;
+  onToggleSidebar: () => void;
+}
+
+function HamburgerButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex h-10 w-10 shrink-0 items-center justify-center border border-border text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary lg:hidden"
+      aria-label="open library"
+    >
+      ≡
+    </button>
+  );
 }
 
 /** Nearest enclosing book, walking up from a containing directory id. */
@@ -33,7 +47,7 @@ function findBookAncestor(
   return null;
 }
 
-export function Editor({ interimTranscript, isRecording }: Props) {
+export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Props) {
   const { state, dispatch } = useApp();
   const {
     isRefining,
@@ -154,6 +168,54 @@ export function Editor({ interimTranscript, isRecording }: Props) {
     };
   }, []);
 
+  // Swipe (touch) and bracket keys page between sibling chapters/entries.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const goToSibling = useCallback(
+    (direction: 'prev' | 'next') => {
+      const currentId = state.activeEntryId;
+      if (!currentId) return;
+      const { prev, next } = getPagingSiblings(
+        currentId,
+        state.entries,
+        state.directories
+      );
+      const target = direction === 'prev' ? prev : next;
+      if (target) dispatch({ type: 'SET_ACTIVE_ENTRY', id: target });
+    },
+    [state.activeEntryId, state.entries, state.directories, dispatch]
+  );
+
+  useSwipePaging(rootRef, {
+    onPrev: () => goToSibling('prev'),
+    onNext: () => goToSibling('next'),
+    enabled: !!state.activeEntryId && !isRecording,
+  });
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      if (event.key === '[') {
+        event.preventDefault();
+        goToSibling('prev');
+      } else if (event.key === ']') {
+        event.preventDefault();
+        goToSibling('next');
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [goToSibling]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return;
@@ -174,7 +236,10 @@ export function Editor({ interimTranscript, isRecording }: Props) {
 
   if (!activeEntry) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="relative flex flex-1 items-center justify-center">
+        <div className="absolute left-4 top-4">
+          <HamburgerButton onClick={onToggleSidebar} />
+        </div>
         <div className="max-w-md px-8 text-center">
           <p className="font-brand text-3xl italic text-text-secondary">
             open a session
@@ -278,17 +343,46 @@ export function Editor({ interimTranscript, isRecording }: Props) {
     setHighlightedPass(null);
   };
 
+  const paging = getPagingSiblings(activeEntry.id, state.entries, state.directories);
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b border-border bg-surface/90 px-5 py-5">
+    <div ref={rootRef} className="flex min-h-0 flex-1 flex-col">
+      <div className="border-b border-border bg-surface/90 px-4 py-4 sm:px-5 sm:py-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.32em] text-text-muted">
+          <div className="flex min-w-0 items-start gap-3">
+            <HamburgerButton onClick={onToggleSidebar} />
+            <div className="min-w-0 flex-1">
+            <div
+              className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.32em] text-text-muted"
+              aria-live="polite"
+            >
               <span>{activeEntry.kind === 'note' ? 'note' : 'active entry'}</span>
               {(crumbs.length > 0 || chapterMarker) && (
                 <span className="tracking-[0.18em] text-text-muted/80">
                   {crumbs.join(' / ')}
                   {chapterMarker ? `${crumbs.length > 0 ? ' / ' : ''}${chapterMarker}` : ''}
+                </span>
+              )}
+              {(paging.prev !== null || paging.next !== null) && (
+                <span className="flex items-center gap-1 tracking-normal">
+                  <button
+                    onClick={() => goToSibling('prev')}
+                    disabled={paging.prev === null}
+                    className="px-1.5 py-0.5 text-[12px] leading-none text-text-secondary transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-30"
+                    aria-label="previous page"
+                    title="previous ( [ or swipe right )"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    onClick={() => goToSibling('next')}
+                    disabled={paging.next === null}
+                    className="px-1.5 py-0.5 text-[12px] leading-none text-text-secondary transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-30"
+                    aria-label="next page"
+                    title="next ( ] or swipe left )"
+                  >
+                    ›
+                  </button>
                 </span>
               )}
             </div>
@@ -303,10 +397,11 @@ export function Editor({ interimTranscript, isRecording }: Props) {
               }
               className="mt-2 w-full max-w-2xl border-b border-transparent bg-transparent pb-2 text-3xl text-text-primary outline-none transition-colors focus:border-border-strong font-brand"
             />
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-text-secondary">
+            <p className="mt-2 hidden max-w-2xl text-sm leading-relaxed text-text-secondary sm:block">
               Keep the transcript close to the spoken source, then use controlled
               refinement passes to shape the prose instead of flattening it.
             </p>
+            </div>
           </div>
 
           <div className="flex flex-wrap gap-2">

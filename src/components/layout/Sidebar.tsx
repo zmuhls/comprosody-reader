@@ -3,7 +3,12 @@ import { DirectoryTree } from '../sidebar/DirectoryTree';
 import { EntryActions } from '../sidebar/EntryActions';
 import { LexiconPanel } from '../sidebar/LexiconPanel';
 
-export function Sidebar() {
+interface Props {
+  open: boolean;
+  onClose: () => void;
+}
+
+export function Sidebar({ open, onClose }: Props) {
   const [serverOk, setServerOk] = useState<boolean | null>(null);
   const [query, setQuery] = useState('');
 
@@ -29,10 +34,23 @@ export function Sidebar() {
   }, []);
 
   return (
-    <aside className="flex h-screen w-64 flex-shrink-0 flex-col border-r border-border bg-surface backdrop-blur-md">
+    <aside
+      className={`fixed inset-y-0 left-0 z-40 flex h-screen w-72 flex-shrink-0 flex-col border-r border-border bg-surface-raised backdrop-blur-md transition-transform duration-200 lg:static lg:z-auto lg:w-64 lg:translate-x-0 lg:bg-surface ${
+        open ? 'translate-x-0' : '-translate-x-full'
+      }`}
+    >
       <div className="border-b border-border px-5 py-5">
-        <div className="text-[10px] uppercase tracking-[0.32em] text-text-muted">
-          studio
+        <div className="flex items-start justify-between">
+          <div className="text-[10px] uppercase tracking-[0.32em] text-text-muted">
+            studio
+          </div>
+          <button
+            onClick={onClose}
+            className="-mr-1 px-2 py-1 text-sm text-text-muted transition-colors hover:text-text-primary lg:hidden"
+            aria-label="close library"
+          >
+            ×
+          </button>
         </div>
         <h1 className="mt-2 font-brand text-3xl italic text-text-primary">
           comprosody
