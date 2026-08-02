@@ -2,10 +2,18 @@
 
 Audit findings from 2026-04-10, resolved in the 2026-07-26 optimization pass (branch `optimization-pass`). One item remains open below; everything else moved to Done with its resolution.
 
+## Next steps — ElevenLabs phase-out (logged 2026-08-01)
+
+Recon result: there is **no ElevenLabs code, dependency, env var, or doc reference anywhere in the tree**. The exploratory transcription wiring from 2026-07-31 never produced a commit; its only artifact was a stale git worktree at `.claude/worktrees/elevenlabs` (detached HEAD at `6c426c7`, clean, zero elevenlabs references). Transcription already runs entirely on OpenRouter (`OPENROUTER_TRANSCRIBE_MODEL`, default `google/gemini-2.5-flash`) via `POST /api/transcribe`.
+
+- [x] Remove the stale worktree (`git worktree remove .claude/worktrees/elevenlabs`) — nothing unique in it; the checkout commit exists in the main repo.
+- [x] Confirm OpenRouter transcription is the sole, permanent path (no dual-provider switch to maintain).
+- [ ] **Gate for any future dedicated-STT provider** (ElevenLabs or otherwise): it must support vocabulary biasing equivalent to the `X-Lexicon` system-message hint, or the transcription-fidelity loop loses its upstream half and only the deterministic find/replace carries the lexicon. Evaluate against that requirement before wiring anything.
+- [ ] If ElevenLabs voice features (e.g. TTS readback of drafts) become desirable later, they enter as a new spec under `docs/superpowers/specs/` — not a revival of the old worktree.
+
 ## Open (added 2026-08-01, library & studio workup)
 
 - [ ] **Diagnostic blind spot for refineContext** — `scripts/prosody-pipeline-diagnostic.ts` never calls `buildSystemPrompt` with the new `refineContext` argument, so its oversized-prompt tracking misses the whole fifth dimension. Worst case adds ~200–270 tokens (cap 1200 chars). Flagged by prompt-composition review.
-- [ ] **Margin-notes bottom sheet overlays the footer below `xl`** — it's dismissible, but the record seal is unreachable while open on small screens. Consider docking above the footer instead of `bottom-0`.
 - [ ] **No way to create directly into an empty book** — `+ entry`/`+ note` target the active entry's parent; an empty book can only be filled by drag or *move to…*. A "new chapter here" row action on book rows would close the gap.
 - [ ] **Audio hydrate/release hysteresis is viewport-based** — the takes list scrolls in its own container, so the 200px/600px root margins both collapse to the container clip edge. Works (release confirmed in e2e), but passing the container as the IntersectionObserver `root` would restore the intended hysteresis band.
 
@@ -65,6 +73,11 @@ Audit findings from 2026-04-10, resolved in the 2026-07-26 optimization pass (br
 - [x] `useProsody` interval no longer restarts on every render tick.
 - [x] Safari support: MediaRecorder mimeType probe (`webm;codecs=opus` → `webm` → `mp4`), server maps Content-Type to upstream audio format.
 - [x] localStorage load normalization/migration (`schemaVersion` 2) backfills new entry metadata on legacy data.
+
+### Mobile keyboard fix (2026-08-01)
+
+- [x] **iOS keyboard sheared the editor out of view** — root cause: `h-screen` shell + `overflow-hidden` vs iOS Safari's overlay keyboard (layout viewport never resizes; Safari pans the window instead). Fixed with `useAppViewportHeight` (VisualViewport → `--app-height` → `h-app` utility), a below-`xl` scrollable pane column (panes size to content, iOS caret-reveal scrolls the focused pane into view), the `short:` variant (≤520px height melts the entry header away), and a 16px form-control floor on coarse pointers to stop focus auto-zoom.
+- [x] **Margin-notes bottom sheet overlays the footer below `xl`** — now `absolute` inside the editor column, docked above the footer; also keeps it above the on-screen keyboard.
 
 ### New features (2026-07-26)
 
