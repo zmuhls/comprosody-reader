@@ -40,7 +40,10 @@ export function TranscriptView({
     (isRecording && interimTranscript ? ` ${interimTranscript}` : '');
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-surface-writing">
+    // flex-none: in the mobile scroll column the pane must size to its
+    // content (flex-1's zero basis would let it compress and spill); at xl
+    // it's a grid item and flex properties are inert.
+    <div className="flex min-h-[60%] min-w-0 flex-none flex-col bg-surface-writing xl:min-h-0">
       <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
         <div className="min-w-0 truncate text-[10px] uppercase tracking-[0.28em] text-text-muted">
           transcript

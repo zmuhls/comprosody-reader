@@ -16,7 +16,7 @@ export function MarginNotes({ entryId }: Props) {
 
   return (
     <aside
-      className="fixed inset-x-0 bottom-0 z-20 max-h-[50vh] overflow-y-auto border-t border-border bg-surface-raised xl:static xl:z-auto xl:max-h-none xl:w-60 xl:shrink-0 xl:border-l xl:border-t-0 xl:bg-transparent"
+      className="absolute inset-x-0 bottom-0 z-20 max-h-[50%] overflow-y-auto overscroll-contain border-t border-border bg-surface-raised xl:static xl:z-auto xl:max-h-none xl:w-60 xl:shrink-0 xl:border-l xl:border-t-0 xl:bg-transparent"
       aria-label="margin notes"
     >
       <div className="px-4 py-3">

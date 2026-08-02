@@ -1,6 +1,11 @@
 @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;500;600&family=EB+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=JetBrains+Mono:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
+/* Active when the visible area is keyboard-height (phone with the on-screen
+   keyboard up, or a very short window) — used to melt non-essential chrome
+   away so the writing surface keeps real estate. */
+@custom-variant short (@media (max-height: 520px));
+
 @theme {
   --color-canvas: #0d1014;
   --color-surface: rgba(18, 23, 29, 0.84);
@@ -32,6 +37,13 @@ body,
   height: 100%;
 }
 
+/* Visible-area height: tracks the on-screen keyboard via --app-height
+   (set by useAppViewportHeight), falling back to the dynamic viewport. */
+@utility h-app {
+  height: 100dvh;
+  height: var(--app-height, 100dvh);
+}
+
 body {
   margin: 0;
   background: var(--color-canvas);
@@ -44,6 +56,16 @@ body {
 
 textarea {
   font-family: var(--font-writing);
+}
+
+/* iOS auto-zooms (and pans) the page when a focused control renders below
+   16px — keep form fields at 16px on touch devices to suppress it. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
 }
 
 select {

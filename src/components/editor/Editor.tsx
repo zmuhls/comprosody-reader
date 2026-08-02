@@ -380,8 +380,8 @@ export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Prop
   const paging = getPagingSiblings(activeEntry.id, state.entries, state.directories);
 
   return (
-    <div ref={rootRef} className="flex min-h-0 flex-1 flex-col">
-      <div className="border-b border-border bg-surface/90 px-4 py-4 sm:px-5 sm:py-5">
+    <div ref={rootRef} className="relative flex min-h-0 flex-1 flex-col">
+      <div className="border-b border-border bg-surface/90 px-4 py-4 sm:px-5 sm:py-5 short:hidden">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="flex min-w-0 items-start gap-3">
             <HamburgerButton onClick={onToggleSidebar} />
@@ -472,7 +472,11 @@ export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Prop
         isGeneratingVariants={isGeneratingVariants}
       />
 
-      <div className="grid flex-1 min-h-0 xl:grid-cols-[minmax(0,0.95fr)_1px_minmax(0,1.05fr)]">
+      {/* Below xl the panes stack in a scroll column: each keeps a real
+          minimum height and the container scrolls, so the on-screen keyboard
+          compresses the scrollport instead of crushing both panes (iOS then
+          auto-scrolls the focused textarea into view). */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain xl:grid xl:overflow-visible xl:grid-cols-[minmax(0,0.95fr)_1px_minmax(0,1.05fr)]">
         {/* Raw transcript */}
         <TranscriptView
           entryId={activeEntry.id}
@@ -492,8 +496,8 @@ export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Prop
         {/* Divider */}
         <div className="hidden bg-border xl:block" />
 
-        {/* Refined text */}
-        <div className="flex min-w-0 flex-1 flex-col bg-surface-writing">
+        {/* Refined text — flex-none for the same reason as TranscriptView */}
+        <div className="flex min-h-[60%] min-w-0 flex-none flex-col bg-surface-writing xl:min-h-0">
           <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
             <div className="min-w-0 truncate text-[10px] uppercase tracking-[0.28em] text-text-muted">
               draft

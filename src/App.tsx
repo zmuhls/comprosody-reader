@@ -3,13 +3,15 @@ import { AppProvider } from './context/AppContext';
 import { RecordingProvider } from './context/RecordingContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { MainPanel } from './components/layout/MainPanel';
+import { useAppViewportHeight } from './hooks/useAppViewportHeight';
 
 function AppInner() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  useAppViewportHeight();
 
   return (
     <RecordingProvider>
-      <div className="app-shell flex h-screen overflow-hidden text-text-primary">
+      <div className="app-shell flex h-app overflow-hidden text-text-primary">
         <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
         {sidebarOpen && (
           <button
