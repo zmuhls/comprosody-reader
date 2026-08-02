@@ -59,6 +59,9 @@ describe('mobile touch target stylesheet contract', () => {
       ),
     ).toContain('min-height: 44px');
     expect(declarationsFor('.provider-trigger')).toContain('min-height: 44px');
+    expect(declarationsFor('.background-limit-trigger')).toContain(
+      'min-height: 44px',
+    );
   });
 
   it('keeps title and full-row targets at least 44px high', () => {
@@ -71,5 +74,22 @@ describe('mobile touch target stylesheet contract', () => {
         '.mobile-workspace-switch button',
       ),
     ).toContain('min-height: 44px');
+  });
+
+  it('keeps the microphone fully inside its keyboard-open dock', () => {
+    const dock = declarationsFor(
+      'html[data-virtual-keyboard="open"] .interaction-dock',
+    );
+    const control = declarationsFor(
+      'html[data-virtual-keyboard="open"] .record-control',
+    );
+    const button = declarationsFor(
+      'html[data-virtual-keyboard="open"] .record-button',
+    );
+
+    expect(dock).toContain('height: 82px');
+    expect(control).toContain('top: 8px');
+    expect(button).toContain('height: 50px');
+    expect(8 + 50).toBeLessThan(82);
   });
 });

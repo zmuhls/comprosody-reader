@@ -89,6 +89,23 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/refine/complete') {
+    try {
+      const body = await readJson(request);
+      const isNoteTitle =
+        typeof body.systemPrompt === 'string' &&
+        body.systemPrompt.includes('concise, specific titles');
+      json(response, 200, {
+        text: isNoteTitle
+          ? 'Archive and Public Memory'
+          : 'A concise completed refinement.',
+      });
+    } catch {
+      json(response, 400, { error: 'Invalid request body' });
+    }
+    return;
+  }
+
   if (
     request.method === 'POST' &&
     url.pathname === '/api/transcribe/realtime-token'

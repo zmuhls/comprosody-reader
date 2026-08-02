@@ -3,6 +3,8 @@ import type { ProsodyDiagnostics, VoiceConfig } from './audio';
 export interface Entry {
   id: string;
   name: string;
+  titleSource?: 'manual' | 'agent' | 'fallback';
+  titleBasis?: string;
   parentId: string | null;
   rawTranscript: string;
   refinedText: string;

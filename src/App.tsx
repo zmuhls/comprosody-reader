@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AppProvider } from './context/AppContext';
 import { RecordingProvider } from './context/RecordingContext';
 import { Sidebar } from './components/layout/Sidebar';
@@ -11,6 +11,8 @@ import { LibraryProvider, useLibrary } from './context/LibraryContext';
 import { ReadingPane } from './components/library/ReadingPane';
 import { SpeechProvider } from './context/SpeechContext';
 import { Icon } from './components/ui/Icon';
+import { SidebarResizer } from './components/layout/SidebarResizer';
+import { installVisualViewportSync } from './lib/visualViewport';
 
 type MobileWorkspaceView = 'reader' | 'note';
 
@@ -29,6 +31,8 @@ function AppInner() {
       view: 'reader',
     });
   const { activePublication } = useLibrary();
+
+  useEffect(() => installVisualViewportSync(), []);
   const activePublicationId = activePublication?.id ?? null;
   const mobileWorkspaceView =
     mobileWorkspaceSelection.publicationId === activePublicationId
@@ -60,6 +64,7 @@ function AppInner() {
             onClose={() => setIsSidebarOpen(false)}
             returnFocusTarget={sidebarReturnFocusTarget}
           />
+          <SidebarResizer />
           <div
             className={`workspace-stage ${
               activePublication

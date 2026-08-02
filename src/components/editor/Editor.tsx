@@ -26,13 +26,17 @@ import { RefinementSidecar } from './RefinementSidecar';
 import type { Entry } from '../../types/editor';
 import { LinkedPassages } from '../library/LinkedPassages';
 import { SpeechControl } from '../speech/SpeechControl';
+import { useAutomaticNoteTitle } from '../../hooks/useAutomaticNoteTitle';
 
 interface Props {
+  backgroundLimitMs: number;
+  backgroundNotice: string;
   drawWaveform: (canvas: HTMLCanvasElement, color?: string) => void;
   interimTranscript: string;
   isRecording: boolean;
   isTranscribing: boolean;
   onOpenSidebar: (returnFocusTarget?: HTMLElement) => void;
+  onBackgroundLimitChange: (milliseconds: number) => void;
   onProviderChange: (provider: TranscriptionProviderId) => void;
   onStart: () => void;
   onStop: () => void;
@@ -68,33 +72,83 @@ export function DocumentTitle({
   onCommit: (title: string) => void;
   onEnterBody: () => void;
 }) {
+  const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState({
     baseName: entry.name,
     value: entry.name,
   });
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const lastTouchAtRef = useRef(Number.NEGATIVE_INFINITY);
   const value = draft.baseName === entry.name ? draft.value : entry.name;
 
-  const commit = () => {
+  useEffect(() => {
+    if (!isEditing) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [isEditing]);
+
+  const beginEditing = () => {
+    setDraft({ baseName: entry.name, value: entry.name });
+    setIsEditing(true);
+  };
+
+  const commit = (enterBody = false) => {
     const nextTitle = value.trim() || 'Untitled';
     setDraft({ baseName: entry.name, value: nextTitle });
     if (nextTitle !== entry.name) onCommit(nextTitle);
+    setIsEditing(false);
+    if (enterBody) onEnterBody();
   };
+
+  if (!isEditing) {
+    return (
+      <button
+        aria-label={`Rename note title: ${entry.name}`}
+        className="document-title document-title-display"
+        onDoubleClick={beginEditing}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== 'F2') return;
+          event.preventDefault();
+          beginEditing();
+        }}
+        onPointerUp={(event) => {
+          if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
+          const now = performance.now();
+          if (now - lastTouchAtRef.current <= 460) {
+            event.preventDefault();
+            beginEditing();
+            lastTouchAtRef.current = Number.NEGATIVE_INFINITY;
+          } else {
+            lastTouchAtRef.current = now;
+          }
+        }}
+        title="Double-click or double-tap to rename"
+        type="button"
+      >
+        {entry.name}
+      </button>
+    );
+  }
 
   return (
     <input
       aria-label="Note title"
-      className="document-title"
-      onBlur={commit}
+      className="document-title document-title-input"
+      onBlur={() => commit()}
       onChange={(event) =>
         setDraft({ baseName: entry.name, value: event.target.value })
       }
       onKeyDown={(event) => {
         if (event.key === 'Enter') {
           event.preventDefault();
-          event.currentTarget.blur();
-          onEnterBody();
+          commit(true);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          setDraft({ baseName: entry.name, value: entry.name });
+          setIsEditing(false);
         }
       }}
+      ref={inputRef}
       value={value}
     />
   );
@@ -142,11 +196,14 @@ export function SourceTranscriptDrawer({
 }
 
 export const Editor = memo(function Editor({
+  backgroundLimitMs,
+  backgroundNotice,
   drawWaveform,
   interimTranscript,
   isRecording,
   isTranscribing,
   onOpenSidebar,
+  onBackgroundLimitChange,
   onProviderChange,
   onStart,
   onStop,
@@ -173,6 +230,7 @@ export const Editor = memo(function Editor({
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
     : null;
+  const automaticTitleStatus = useAutomaticNoteTitle(activeEntry);
 
   useEffect(() => {
     activeEntryIdRef.current = state.activeEntryId;
@@ -623,18 +681,31 @@ export const Editor = memo(function Editor({
           <time className="document-date" dateTime={new Date(activeEntry.createdAt).toISOString()}>
             {documentDate(activeEntry.createdAt)}
           </time>
-          <DocumentTitle
-            key={activeEntry.id}
-            entry={activeEntry}
-            onCommit={(nextTitle) =>
-              dispatch({
-                type: 'RENAME_ENTRY',
-                id: activeEntry.id,
-                name: nextTitle,
-              })
-            }
-            onEnterBody={() => editor?.commands.focus('start')}
-          />
+          <div className="document-title-group">
+            <DocumentTitle
+              key={activeEntry.id}
+              entry={activeEntry}
+              onCommit={(nextTitle) =>
+                dispatch({
+                  type: 'RENAME_ENTRY',
+                  id: activeEntry.id,
+                  name: nextTitle,
+                })
+              }
+              onEnterBody={() => editor?.commands.focus('start')}
+            />
+            <span
+              aria-live="polite"
+              className="automatic-title-status"
+              data-active={automaticTitleStatus === 'suggesting'}
+            >
+              {automaticTitleStatus === 'suggesting'
+                ? 'Comprosody is titling this note…'
+                : activeEntry.titleSource === 'agent'
+                  ? 'Titled by Comprosody'
+                  : ''}
+            </span>
+          </div>
           <LinkedPassages entryId={activeEntry.id} />
           <EditorContent editor={editor} />
 
@@ -715,10 +786,13 @@ export const Editor = memo(function Editor({
           onInstruction={applyInstruction}
         />
         <RecordingDock
+          backgroundLimitMs={backgroundLimitMs}
+          backgroundNotice={backgroundNotice}
           drawWaveform={drawWaveform}
           isRecording={isRecording}
           isTranscribing={isTranscribing}
           onProviderChange={onProviderChange}
+          onBackgroundLimitChange={onBackgroundLimitChange}
           onStart={onStart}
           onStop={onStop}
           prosody={prosody}

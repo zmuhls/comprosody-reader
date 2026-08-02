@@ -23,12 +23,35 @@ import { selectTranscriptionHints } from '../../lib/voiceProfile';
 import { SESSION_LOGOUT_INTENT_EVENT } from '../../lib/session';
 import type { TranscriptionProviderId } from '../../types/transcription';
 import { Editor } from '../editor/Editor';
+import {
+  BACKGROUND_RECORDING_LIMIT_KEY,
+  DEFAULT_BACKGROUND_RECORDING_LIMIT_MS,
+  formatBackgroundRecordingLimit,
+  normalizeBackgroundRecordingLimit,
+} from '../../lib/backgroundRecording';
 
 interface MainPanelProps {
   onOpenSidebar: (returnFocusTarget?: HTMLElement) => void;
 }
 
 const PROVIDER_STORAGE_KEY = 'cadence:transcription-provider';
+
+function initialBackgroundRecordingLimit(): number {
+  try {
+    return normalizeBackgroundRecordingLimit(
+      localStorage.getItem(BACKGROUND_RECORDING_LIMIT_KEY),
+    );
+  } catch {
+    return DEFAULT_BACKGROUND_RECORDING_LIMIT_MS;
+  }
+}
+
+function stopMediaStream(stream: MediaStream | null): void {
+  stream?.getTracks().forEach((track) => {
+    track.onended = null;
+    track.stop();
+  });
+}
 
 interface RecordingTarget {
   entryId: string;
@@ -51,6 +74,10 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
   const { state, dispatch, voiceProfile } = useApp();
   const { state: recordingState, dispatch: recordingDispatch } = useRecording();
   const [provider, setProvider] = useState<TranscriptionProviderId>(initialProvider);
+  const [backgroundLimitMs, setBackgroundLimitMs] = useState(
+    initialBackgroundRecordingLimit,
+  );
+  const [backgroundNotice, setBackgroundNotice] = useState('');
   const audio = useAudioAnalyser();
   const recorder = useMediaRecorder();
   const realtime = useRealtimeTranscription();
@@ -83,6 +110,10 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
   const recordingTargetRef = useRef<RecordingTarget | null>(null);
   const privateWorkEpochRef = useRef(0);
   const stateRef = useRef(state);
+  const handleStopRef = useRef<() => Promise<void>>(async () => undefined);
+  const stopInFlightRef = useRef(false);
+  const backgroundedAtRef = useRef<number | null>(null);
+  const backgroundStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
@@ -123,7 +154,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
       refinement.cancel();
       void realtime.cancel();
       audio.stop();
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopMediaStream(streamRef.current);
       streamRef.current = null;
     };
 
@@ -184,11 +215,19 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
         recordingTargetRef.current !== target ||
         !stateRef.current.entries[target.entryId]
       ) {
-        stream.getTracks().forEach((track) => track.stop());
+        stopMediaStream(stream);
         return;
       }
 
       streamRef.current = stream;
+      stream.getTracks().forEach((track) => {
+        track.onended = () => {
+          if (recordingTargetRef.current !== target) return;
+          recorder.checkpoint();
+          setBackgroundNotice('Microphone interrupted · saving captured audio');
+          void handleStopRef.current();
+        };
+      });
       recordingDispatch({ type: 'START_RECORDING', startedAt: Date.now() });
       await audio.start(stream);
       recorder.start(stream);
@@ -197,7 +236,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
       }
     } catch (error) {
       audio.stop();
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopMediaStream(streamRef.current);
       streamRef.current = null;
       if (recordingTargetRef.current === target) {
         recordingTargetRef.current = null;
@@ -219,165 +258,170 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
   ]);
 
   const handleStop = useCallback(async () => {
-    if (!recordingState.isRecording) return;
-
-    const target = recordingTargetRef.current;
-    const stoppedAt = Date.now();
-    const recordingDurationMs = recordingState.session
-      ? Math.max(0, stoppedAt - recordingState.session.startedAt)
-      : 0;
-    const capturedProsody = { ...prosody };
-    const capturedVoiceConfig = { ...recordingState.voiceConfig };
-    recordingDispatch({ type: 'STOP_RECORDING' });
-    let audioBlob: Blob;
-    let realtimeTranscript = '';
-    let shouldUseBatch = target?.provider !== 'elevenlabs';
+    if (!recordingState.isRecording || stopInFlightRef.current) return;
+    stopInFlightRef.current = true;
 
     try {
-      audioBlob = await recorder.stop();
-      if (!target || target.epoch !== privateWorkEpochRef.current) {
+      const target = recordingTargetRef.current;
+      const stoppedAt = Date.now();
+      const recordingDurationMs = recordingState.session
+        ? Math.max(0, stoppedAt - recordingState.session.startedAt)
+        : 0;
+      const capturedProsody = { ...prosody };
+      const capturedVoiceConfig = { ...recordingState.voiceConfig };
+      recordingDispatch({ type: 'STOP_RECORDING' });
+      let audioBlob: Blob;
+      let realtimeTranscript = '';
+      let shouldUseBatch = target?.provider !== 'elevenlabs';
+
+      try {
+        audioBlob = await recorder.stop();
+        if (!target || target.epoch !== privateWorkEpochRef.current) {
+          if (target?.provider === 'elevenlabs') {
+            await realtime.cancel();
+          }
+          return;
+        }
+        if (target.provider === 'elevenlabs') {
+          try {
+            const realtimeResult = await realtime.stop();
+            if (target.epoch !== privateWorkEpochRef.current) return;
+            realtimeTranscript = realtimeResult.transcript;
+            shouldUseBatch = realtimeResult.shouldFallback;
+          } catch {
+            shouldUseBatch = true;
+          }
+        }
+      } catch (error) {
+        if (target && target.epoch !== privateWorkEpochRef.current) return;
         if (target?.provider === 'elevenlabs') {
           await realtime.cancel();
         }
+        setRecordingError(error);
+        if (recordingTargetRef.current === target) {
+          recordingTargetRef.current = null;
+        }
+        return;
+      } finally {
+        audio.stop();
+        stopMediaStream(streamRef.current);
+        streamRef.current = null;
+      }
+
+      if (
+        !target ||
+        target.epoch !== privateWorkEpochRef.current ||
+        !stateRef.current.entries[target.entryId]
+      ) {
+        if (recordingTargetRef.current === target) {
+          recordingTargetRef.current = null;
+        }
         return;
       }
-      if (target?.provider === 'elevenlabs') {
-        try {
-          const realtimeResult = await realtime.stop();
-          if (target.epoch !== privateWorkEpochRef.current) return;
-          realtimeTranscript = realtimeResult.transcript;
-          shouldUseBatch = realtimeResult.shouldFallback;
-        } catch {
-          shouldUseBatch = true;
+
+      let snapshotSaved = false;
+      const saveSnapshot = (
+        metrics: typeof capturedProsody,
+        entry = stateRef.current.entries[target.entryId],
+      ) => {
+        if (!entry) return;
+        dispatch({
+          type: 'UPDATE_ENTRY',
+          id: target.entryId,
+          updates: {
+            prosody: { ...metrics },
+            prosodyHistory: appendProsodySnapshot(
+              entry.prosodyHistory,
+              metrics,
+              stoppedAt,
+            ),
+            voiceConfig: capturedVoiceConfig,
+          },
+        });
+        recordingDispatch({ type: 'FINALIZE_PROSODY', prosody: metrics });
+        snapshotSaved = true;
+      };
+
+      try {
+        if (audioBlob.size === 0) {
+          saveSnapshot(capturedProsody);
+          return;
+        }
+
+        const result =
+          target.provider === 'elevenlabs' &&
+          !shouldUseBatch &&
+          realtimeTranscript
+            ? {
+                duration: recordingDurationMs / 1_000,
+                language: 'en',
+                transcript: realtimeTranscript,
+                words: [],
+              }
+            : await transcribe(audioBlob, {
+                provider: target.provider,
+                keyterms: target.keyterms,
+              });
+        if (target.epoch !== privateWorkEpochRef.current) return;
+        const transcript = result.transcript.trim();
+        if (!transcript) {
+          saveSnapshot(capturedProsody);
+          return;
+        }
+
+        const latestEntry = stateRef.current.entries[target.entryId];
+        if (!latestEntry) return;
+
+        const appended = appendRecordingTranscript(latestEntry, transcript);
+        const correctedProsody = completeTranscriptProsody(
+          capturedProsody,
+          transcript,
+          recordingDurationMs,
+        );
+        dispatch({
+          type: 'UPDATE_ENTRY',
+          id: target.entryId,
+          updates: {
+            rawTranscript: appended.rawTranscript,
+            refinedText: appended.documentText,
+            prosody: correctedProsody,
+            prosodyHistory: appendProsodySnapshot(
+              latestEntry.prosodyHistory,
+              correctedProsody,
+              stoppedAt,
+            ),
+            voiceConfig: capturedVoiceConfig,
+          },
+        });
+        recordingDispatch({
+          type: 'FINALIZE_PROSODY',
+          prosody: correctedProsody,
+        });
+        snapshotSaved = true;
+
+        if (recordingTargetRef.current === target) {
+          recordingTargetRef.current = null;
+        }
+        if (stateRef.current.refinementSettings.autoRefine !== false) {
+          void refinement.refine({
+            entryId: target.entryId,
+            mode: 'faithful',
+            sourceText: appended.documentText,
+            autoTriggered: true,
+          });
+        }
+      } catch {
+        if (target.epoch !== privateWorkEpochRef.current) return;
+        // useTranscription reports the request error. The unverified speech is
+        // deliberately not inserted or reconstructed through a cloud fallback.
+        if (!snapshotSaved) saveSnapshot(capturedProsody);
+      } finally {
+        if (recordingTargetRef.current === target) {
+          recordingTargetRef.current = null;
         }
       }
-    } catch (error) {
-      if (target && target.epoch !== privateWorkEpochRef.current) return;
-      if (target?.provider === 'elevenlabs') {
-        await realtime.cancel();
-      }
-      setRecordingError(error);
-      if (recordingTargetRef.current === target) {
-        recordingTargetRef.current = null;
-      }
-      return;
     } finally {
-      audio.stop();
-      streamRef.current?.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
-    if (
-      !target ||
-      target.epoch !== privateWorkEpochRef.current ||
-      !stateRef.current.entries[target.entryId]
-    ) {
-      if (recordingTargetRef.current === target) {
-        recordingTargetRef.current = null;
-      }
-      return;
-    }
-
-    let snapshotSaved = false;
-    const saveSnapshot = (
-      metrics: typeof capturedProsody,
-      entry = stateRef.current.entries[target.entryId],
-    ) => {
-      if (!entry) return;
-      dispatch({
-        type: 'UPDATE_ENTRY',
-        id: target.entryId,
-        updates: {
-          prosody: { ...metrics },
-          prosodyHistory: appendProsodySnapshot(
-            entry.prosodyHistory,
-            metrics,
-            stoppedAt,
-          ),
-          voiceConfig: capturedVoiceConfig,
-        },
-      });
-      recordingDispatch({ type: 'FINALIZE_PROSODY', prosody: metrics });
-      snapshotSaved = true;
-    };
-
-    try {
-      if (audioBlob.size === 0) {
-        saveSnapshot(capturedProsody);
-        return;
-      }
-
-      const result =
-        target.provider === 'elevenlabs' &&
-        !shouldUseBatch &&
-        realtimeTranscript
-          ? {
-              duration: recordingDurationMs / 1_000,
-              language: 'en',
-              transcript: realtimeTranscript,
-              words: [],
-            }
-          : await transcribe(audioBlob, {
-              provider: target.provider,
-              keyterms: target.keyterms,
-            });
-      if (target.epoch !== privateWorkEpochRef.current) return;
-      const transcript = result.transcript.trim();
-      if (!transcript) {
-        saveSnapshot(capturedProsody);
-        return;
-      }
-
-      const latestEntry = stateRef.current.entries[target.entryId];
-      if (!latestEntry) return;
-
-      const appended = appendRecordingTranscript(latestEntry, transcript);
-      const correctedProsody = completeTranscriptProsody(
-        capturedProsody,
-        transcript,
-        recordingDurationMs,
-      );
-      dispatch({
-        type: 'UPDATE_ENTRY',
-        id: target.entryId,
-        updates: {
-          rawTranscript: appended.rawTranscript,
-          refinedText: appended.documentText,
-          prosody: correctedProsody,
-          prosodyHistory: appendProsodySnapshot(
-            latestEntry.prosodyHistory,
-            correctedProsody,
-            stoppedAt,
-          ),
-          voiceConfig: capturedVoiceConfig,
-        },
-      });
-      recordingDispatch({
-        type: 'FINALIZE_PROSODY',
-        prosody: correctedProsody,
-      });
-      snapshotSaved = true;
-
-      if (recordingTargetRef.current === target) {
-        recordingTargetRef.current = null;
-      }
-      if (stateRef.current.refinementSettings.autoRefine !== false) {
-        void refinement.refine({
-          entryId: target.entryId,
-          mode: 'faithful',
-          sourceText: appended.documentText,
-          autoTriggered: true,
-        });
-      }
-    } catch {
-      if (target.epoch !== privateWorkEpochRef.current) return;
-      // useTranscription reports the request error. The unverified speech is
-      // deliberately not inserted or reconstructed through a cloud fallback.
-      if (!snapshotSaved) saveSnapshot(capturedProsody);
-    } finally {
-      if (recordingTargetRef.current === target) {
-        recordingTargetRef.current = null;
-      }
+      stopInFlightRef.current = false;
     }
   }, [
     audio,
@@ -392,9 +436,94 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     transcribe,
   ]);
 
+  useLayoutEffect(() => {
+    handleStopRef.current = handleStop;
+  }, [handleStop]);
+
+  useEffect(() => {
+    if (!recordingState.isRecording) {
+      if (backgroundStopTimerRef.current) {
+        clearTimeout(backgroundStopTimerRef.current);
+        backgroundStopTimerRef.current = null;
+      }
+      backgroundedAtRef.current = null;
+      return;
+    }
+
+    const startBackgroundGrace = () => {
+      if (backgroundedAtRef.current !== null) return;
+      backgroundedAtRef.current = Date.now();
+      recorder.checkpoint();
+      setBackgroundNotice(
+        `Recording while away · up to ${formatBackgroundRecordingLimit(backgroundLimitMs)}`,
+      );
+      backgroundStopTimerRef.current = setTimeout(() => {
+        backgroundStopTimerRef.current = null;
+        backgroundedAtRef.current = null;
+        setBackgroundNotice('Away limit reached · finalizing recording');
+        void handleStopRef.current();
+      }, backgroundLimitMs);
+    };
+
+    const finishBackgroundGrace = () => {
+      if (backgroundedAtRef.current === null) return;
+      const elapsed = Date.now() - backgroundedAtRef.current;
+      backgroundedAtRef.current = null;
+      if (backgroundStopTimerRef.current) {
+        clearTimeout(backgroundStopTimerRef.current);
+        backgroundStopTimerRef.current = null;
+      }
+      setBackgroundNotice(
+        elapsed >= backgroundLimitMs
+          ? 'Away limit reached · finalizing recording'
+          : 'Returned · finalizing background recording',
+      );
+      void handleStopRef.current();
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') startBackgroundGrace();
+      else finishBackgroundGrace();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', startBackgroundGrace);
+    window.addEventListener('pageshow', finishBackgroundGrace);
+    if (document.visibilityState === 'hidden') startBackgroundGrace();
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', startBackgroundGrace);
+      window.removeEventListener('pageshow', finishBackgroundGrace);
+      if (backgroundStopTimerRef.current) {
+        clearTimeout(backgroundStopTimerRef.current);
+        backgroundStopTimerRef.current = null;
+      }
+    };
+  }, [backgroundLimitMs, recorder, recordingState.isRecording]);
+
+  useEffect(() => {
+    if (recordingState.isRecording || isTranscribing || realtime.status === 'finalizing') return;
+    if (!backgroundNotice) return;
+    const timer = setTimeout(() => setBackgroundNotice(''), 2_000);
+    return () => clearTimeout(timer);
+  }, [backgroundNotice, isTranscribing, realtime.status, recordingState.isRecording]);
+
+  const updateBackgroundLimit = useCallback((milliseconds: number) => {
+    const normalized = normalizeBackgroundRecordingLimit(milliseconds);
+    setBackgroundLimitMs(normalized);
+    try {
+      localStorage.setItem(BACKGROUND_RECORDING_LIMIT_KEY, String(normalized));
+    } catch {
+      // The selected limit remains active for this session.
+    }
+  }, []);
+
   return (
     <div className="main-panel">
       <Editor
+        backgroundLimitMs={backgroundLimitMs}
+        backgroundNotice={backgroundNotice}
         key={state.activeEntryId ?? 'no-active-entry'}
         drawWaveform={audio.drawWaveform}
         interimTranscript={realtime.liveTranscript}
@@ -402,6 +531,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
         isTranscribing={
           isTranscribing || realtime.status === 'finalizing'
         }
+        onBackgroundLimitChange={updateBackgroundLimit}
         onOpenSidebar={onOpenSidebar}
         onProviderChange={setProvider}
         onStart={handleStart}

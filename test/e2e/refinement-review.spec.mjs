@@ -16,6 +16,12 @@ async function installRealtimeBrowserMocks(page) {
       configurable: true,
       value: {
         getUserMedia: async () => stream,
+        getSupportedConstraints: () => ({
+          channelCount: true,
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: true,
+        }),
       },
     });
 

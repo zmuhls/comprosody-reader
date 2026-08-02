@@ -10,12 +10,19 @@ import { ProsodyPanel } from './ProsodyPanel';
 import { RecordButton } from './RecordButton';
 import { VoiceConfigToggles } from './VoiceConfigToggles';
 import { Waveform } from './Waveform';
+import {
+  BACKGROUND_RECORDING_LIMITS,
+  formatBackgroundRecordingLimit,
+} from '../../lib/backgroundRecording';
 
 interface RecordingDockProps {
+  backgroundLimitMs: number;
+  backgroundNotice: string;
   drawWaveform: (canvas: HTMLCanvasElement, color?: string) => void;
   isRecording: boolean;
   isTranscribing: boolean;
   onProviderChange: (provider: TranscriptionProviderId) => void;
+  onBackgroundLimitChange: (milliseconds: number) => void;
   onStart: () => void;
   onStop: () => void;
   prosody: ProsodyDiagnostics;
@@ -31,10 +38,13 @@ function formatElapsed(milliseconds: number): string {
 }
 
 export function RecordingDock({
+  backgroundLimitMs,
+  backgroundNotice,
   drawWaveform,
   isRecording,
   isTranscribing,
   onProviderChange,
+  onBackgroundLimitChange,
   onStart,
   onStop,
   prosody,
@@ -113,6 +123,41 @@ export function RecordingDock({
         </Select.Portal>
       </Select.Root>
 
+      <Select.Root
+        disabled={isRecording || isTranscribing}
+        onValueChange={(value) => onBackgroundLimitChange(Number(value))}
+        value={String(backgroundLimitMs)}
+      >
+        <Select.Trigger
+          aria-label="Background recording limit"
+          className="background-limit-trigger"
+          disabled={isRecording || isTranscribing}
+          title="Best-effort iPhone app-switch recording window"
+        >
+          away {formatBackgroundRecordingLimit(backgroundLimitMs)}
+          <Select.Icon>
+            <Icon name="chevron-down" size={12} />
+          </Select.Icon>
+        </Select.Trigger>
+        <Select.Portal>
+          <Select.Content className="ui-menu" position="popper" sideOffset={7}>
+            <Select.Viewport>
+              {BACKGROUND_RECORDING_LIMITS.map((milliseconds) => (
+                <Select.Item
+                  className="ui-menu-item"
+                  key={milliseconds}
+                  value={String(milliseconds)}
+                >
+                  <Select.ItemText>
+                    Stop after {formatBackgroundRecordingLimit(milliseconds)} away
+                  </Select.ItemText>
+                </Select.Item>
+              ))}
+            </Select.Viewport>
+          </Select.Content>
+        </Select.Portal>
+      </Select.Root>
+
       <Popover.Root>
         <Popover.Trigger className="voice-profile-trigger" type="button">
           Voice profile
@@ -141,11 +186,11 @@ export function RecordingDock({
       </Popover.Root>
 
       <span className="recording-state-text">
-        {isTranscribing
+        {backgroundNotice || (isTranscribing
           ? `Transcribing · ${providerDetails.shortLabel}`
           : isRecording
             ? `Listening · ${providerDetails.shortLabel}`
-            : `Ready · ${providerDetails.shortLabel}`}
+            : `Ready · ${providerDetails.shortLabel}`)}
       </span>
     </div>
   );

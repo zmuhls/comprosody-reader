@@ -46,11 +46,13 @@ vi.mock('../../lib/voiceProfile', async (importOriginal) => ({
 }));
 vi.mock('../editor/Editor', () => ({
   Editor: ({
+    backgroundNotice,
     onProviderChange,
     onStart,
     onStop,
     provider,
   }: {
+    backgroundNotice: string;
     onProviderChange: (provider: TranscriptionProviderId) => void;
     onStart: () => void;
     onStop: () => void;
@@ -58,6 +60,7 @@ vi.mock('../editor/Editor', () => ({
   }) => (
     <div>
       <output data-testid="provider">{provider}</output>
+      <output data-testid="background-notice">{backgroundNotice}</output>
       <button onClick={onStart} type="button">
         start
       </button>
@@ -96,6 +99,10 @@ describe('MainPanel recording integrity', () => {
   });
 
   afterEach(() => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
     vi.restoreAllMocks();
   });
 
@@ -200,6 +207,7 @@ describe('MainPanel recording integrity', () => {
     });
     mocks.useMediaRecorder.mockReturnValue({
       cancel: recorderCancel,
+      checkpoint: vi.fn(),
       start: recorderStart,
       stop: recorderStop,
     });
@@ -489,6 +497,7 @@ describe('MainPanel recording integrity', () => {
     });
     mocks.useMediaRecorder.mockReturnValue({
       cancel: vi.fn(),
+      checkpoint: vi.fn(),
       start: vi.fn(),
       stop: vi
         .fn()
@@ -552,5 +561,161 @@ describe('MainPanel recording integrity', () => {
     );
     expect(transcribe).toHaveBeenCalledTimes(batchCalls);
     expect(stopTrack).toHaveBeenCalledTimes(1);
+  });
+
+  it('checkpoints while away and finalizes once when the page returns', async () => {
+    let appState: AppState = {
+      entries: { origin: makeEntry('origin', 'Opening thought.') },
+      directories: {},
+      activeEntryId: 'origin',
+      refinementSettings: {
+        autoRefine: false,
+        genre: 'academic',
+        highFidelity: true,
+        mode: 'faithful',
+        scale: 'sentence',
+        temperature: 0.2,
+      },
+      errors: [],
+      history: [],
+      historyIndex: -1,
+    };
+    let recordingState: RecordingState = {
+      isRecording: false,
+      session: null,
+      prosody: { ...defaultProsody },
+      voiceConfig: { ...defaultVoiceConfig },
+    };
+    const appDispatch = vi.fn((action: AppAction) => {
+      if (action.type !== 'UPDATE_ENTRY') return;
+      appState = {
+        ...appState,
+        entries: {
+          ...appState.entries,
+          [action.id]: { ...appState.entries[action.id], ...action.updates },
+        },
+      };
+    });
+    const recordingDispatch = vi.fn((action: RecordingAction) => {
+      if (action.type === 'START_RECORDING') {
+        recordingState = {
+          ...recordingState,
+          isRecording: true,
+          session: {
+            finalTranscript: '',
+            interimTranscript: '',
+            pauses: [],
+            startedAt: action.startedAt,
+            volumeSamples: [],
+            wordTimestamps: [],
+          },
+        };
+      } else if (action.type === 'STOP_RECORDING') {
+        recordingState = { ...recordingState, isRecording: false };
+      }
+    });
+    mocks.useApp.mockImplementation(() => ({
+      dispatch: appDispatch,
+      state: appState,
+      storageReady: true,
+      voiceProfile: { learnedHints: [] },
+    }));
+    mocks.useRecording.mockImplementation(() => ({
+      dispatch: recordingDispatch,
+      state: recordingState,
+    }));
+    mocks.selectTranscriptionHints.mockReturnValue({ phrases: [], terms: [] });
+
+    const track = { onended: null as (() => void) | null, stop: vi.fn() };
+    const stream = { getTracks: () => [track] } as unknown as MediaStream;
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: vi.fn().mockResolvedValue(stream) },
+    });
+    mocks.useAudioAnalyser.mockReturnValue({
+      drawWaveform: vi.fn(),
+      getTimeDomainData: vi.fn(),
+      start: vi.fn().mockResolvedValue(undefined),
+      stop: vi.fn(),
+    });
+    const checkpoint = vi.fn();
+    let resolveStop!: (blob: Blob) => void;
+    const recorderStop = vi.fn(() => new Promise<Blob>((resolve) => {
+      resolveStop = resolve;
+    }));
+    mocks.useMediaRecorder.mockReturnValue({
+      cancel: vi.fn(),
+      checkpoint,
+      start: vi.fn(),
+      stop: recorderStop,
+    });
+    mocks.useProsody.mockReturnValue({ ...defaultProsody });
+    mocks.useTranscription.mockReturnValue({
+      cancel: vi.fn(),
+      isTranscribing: false,
+      transcribe: vi.fn(),
+    });
+    mocks.useRealtimeTranscription.mockReturnValue({
+      cancel: vi.fn().mockResolvedValue(undefined),
+      liveError: null,
+      liveTranscript: '',
+      start: vi.fn().mockResolvedValue(true),
+      status: 'idle',
+      stop: vi.fn(),
+      surfaceError: vi.fn(),
+    });
+    mocks.useRefinement.mockReturnValue({
+      acceptProposal: vi.fn(),
+      acceptVariant: vi.fn(),
+      attempts: [],
+      cancel: vi.fn(),
+      dismissProposal: vi.fn(),
+      generateVariants: vi.fn(),
+      isGeneratingVariants: false,
+      isRefining: false,
+      proposal: null,
+      refine: vi.fn(),
+      refineSelection: vi.fn(),
+      rejectProposal: vi.fn(),
+      retryProposal: vi.fn(),
+      streamingText: '',
+      variants: [],
+    });
+
+    let visibility: DocumentVisibilityState = 'visible';
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => visibility,
+    });
+
+    const view = render(<MainPanel onOpenSidebar={vi.fn()} />);
+    fireEvent.click(view.getByRole('button', { name: 'start' }));
+    await waitFor(() => expect(recordingState.isRecording).toBe(true));
+    view.rerender(<MainPanel onOpenSidebar={vi.fn()} />);
+
+    act(() => {
+      visibility = 'hidden';
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(checkpoint).toHaveBeenCalledTimes(1);
+    expect(view.getByTestId('background-notice').textContent).toContain(
+      'Recording while away',
+    );
+
+    act(() => {
+      visibility = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pageshow'));
+    });
+    await waitFor(() => expect(recorderStop).toHaveBeenCalledTimes(1));
+    expect(view.getByTestId('background-notice').textContent).toContain(
+      'Returned',
+    );
+
+    await act(async () => {
+      resolveStop(new Blob([], { type: 'audio/webm' }));
+      await Promise.resolve();
+    });
+    expect(track.stop).toHaveBeenCalledTimes(1);
   });
 });

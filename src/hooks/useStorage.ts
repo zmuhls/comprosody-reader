@@ -35,6 +35,13 @@ export function useStorage() {
     [dispatch]
   );
 
+  const moveEntry = useCallback(
+    (id: string, parentId: string | null) => {
+      dispatch({ type: 'MOVE_ENTRY', id, parentId });
+    },
+    [dispatch]
+  );
+
   const createDirectory = useCallback(
     (parentId: string | null, name: string = 'New Folder') => {
       const dir = newDirectory(parentId, name);
@@ -58,6 +65,13 @@ export function useStorage() {
     [dispatch]
   );
 
+  const moveDirectory = useCallback(
+    (id: string, parentId: string | null) => {
+      dispatch({ type: 'MOVE_DIRECTORY', id, parentId });
+    },
+    [dispatch]
+  );
+
   return {
     entries: state.entries,
     directories: state.directories,
@@ -68,8 +82,10 @@ export function useStorage() {
     updateEntry,
     deleteEntry,
     renameEntry,
+    moveEntry,
     createDirectory,
     renameDirectory,
+    moveDirectory,
     deleteDirectory,
   };
 }

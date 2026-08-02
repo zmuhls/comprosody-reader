@@ -17,7 +17,17 @@ function makeEntry(name: string): Entry {
   };
 }
 
+function touchPointerUp(element: Element): void {
+  const event = new Event('pointerup', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'pointerType', { value: 'touch' });
+  fireEvent(element, event);
+}
+
 describe('DocumentTitle', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('synchronizes an external rename even when a local draft exists', () => {
     const onCommit = vi.fn();
     const onEnterBody = vi.fn();
@@ -27,6 +37,9 @@ describe('DocumentTitle', () => {
         onCommit={onCommit}
         onEnterBody={onEnterBody}
       />,
+    );
+    fireEvent.doubleClick(
+      screen.getByRole('button', { name: 'Rename note title: Original' }),
     );
     const title = screen.getByRole('textbox', { name: 'Note title' });
     fireEvent.change(title, { target: { value: 'Uncommitted draft' } });
@@ -41,6 +54,33 @@ describe('DocumentTitle', () => {
     );
 
     expect((title as HTMLInputElement).value).toBe('Renamed elsewhere');
+  });
+
+  it('renames on double tap and enters the note body after Enter', () => {
+    const onCommit = vi.fn();
+    const onEnterBody = vi.fn();
+    vi.spyOn(performance, 'now')
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(1_220);
+    render(
+      <DocumentTitle
+        entry={makeEntry('Original')}
+        onCommit={onCommit}
+        onEnterBody={onEnterBody}
+      />,
+    );
+    const display = screen.getByRole('button', {
+      name: 'Rename note title: Original',
+    });
+
+    touchPointerUp(display);
+    touchPointerUp(display);
+    const input = screen.getByRole('textbox', { name: 'Note title' });
+    fireEvent.change(input, { target: { value: 'Chosen note title' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(onCommit).toHaveBeenCalledWith('Chosen note title');
+    expect(onEnterBody).toHaveBeenCalledOnce();
   });
 });
 

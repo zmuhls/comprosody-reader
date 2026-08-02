@@ -60,6 +60,8 @@ export type AppAction =
   | { type: 'CREATE_DIRECTORY'; directory: Directory }
   | { type: 'RENAME_DIRECTORY'; id: string; name: string }
   | { type: 'DELETE_DIRECTORY'; id: string }
+  | { type: 'MOVE_ENTRY'; id: string; parentId: string | null }
+  | { type: 'MOVE_DIRECTORY'; id: string; parentId: string | null }
   | { type: 'UPDATE_REFINEMENT_SETTINGS'; settings: Partial<RefinementSettings> }
   | { type: 'RENAME_ENTRY'; id: string; name: string }
   | { type: 'SET_ERROR'; error: AppError }
@@ -187,6 +189,41 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    case 'MOVE_ENTRY': {
+      const entry = state.entries[action.id];
+      if (!entry || entry.parentId === action.parentId) return state;
+      if (action.parentId !== null && !state.directories[action.parentId]) return state;
+      const nextEntries = {
+        ...state.entries,
+        [action.id]: { ...entry, parentId: action.parentId, updatedAt: Date.now() },
+      };
+      return {
+        ...state,
+        entries: nextEntries,
+        ...recordHistory(state, nextEntries),
+      };
+    }
+
+    case 'MOVE_DIRECTORY': {
+      const directory = state.directories[action.id];
+      if (!directory || directory.parentId === action.parentId) return state;
+      if (action.parentId !== null && !state.directories[action.parentId]) return state;
+      if (action.parentId === action.id) return state;
+      if (
+        action.parentId !== null
+        && collectDescendantDirectoryIds(action.id, state.directories).has(action.parentId)
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        directories: {
+          ...state.directories,
+          [action.id]: { ...directory, parentId: action.parentId },
+        },
+      };
+    }
+
     case 'UPDATE_REFINEMENT_SETTINGS':
       return {
         ...state,
@@ -196,9 +233,15 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'RENAME_ENTRY': {
       const entry = state.entries[action.id];
       if (!entry) return state;
-      const nextEntries = {
+      const nextEntries: Record<string, Entry> = {
         ...state.entries,
-        [action.id]: { ...entry, name: action.name, updatedAt: Date.now() },
+        [action.id]: {
+          ...entry,
+          name: action.name,
+          titleSource: 'manual',
+          titleBasis: undefined,
+          updatedAt: Date.now(),
+        },
       };
       return {
         ...state,
@@ -431,6 +474,7 @@ export function newEntry(parentId: string | null): Entry {
   return {
     id: crypto.randomUUID(),
     name: 'Untitled',
+    titleSource: 'fallback',
     parentId,
     rawTranscript: '',
     refinedText: '',

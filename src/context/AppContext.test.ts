@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { appReducer, type AppState } from './AppContext';
-import type { Entry } from '../types/editor';
+import type { Directory, Entry } from '../types/editor';
 import { defaultProsody, defaultVoiceConfig } from '../types/audio';
 
 function entry(id: string, updatedAt: number): Entry {
@@ -65,5 +65,59 @@ describe('workspace hydration', () => {
     );
 
     expect(hydrated.activeEntryId).toBe('active');
+  });
+});
+
+describe('workspace organization', () => {
+  const directories: Record<string, Directory> = {
+    archive: { id: 'archive', name: 'Archive', parentId: null },
+    chapter: { id: 'chapter', name: 'Chapter', parentId: 'archive' },
+  };
+
+  it('moves a note into a valid directory and records undo history', () => {
+    const note = entry('note', 10);
+    const moved = appReducer(state({ entries: { note }, directories }), {
+      type: 'MOVE_ENTRY',
+      id: note.id,
+      parentId: 'chapter',
+    });
+
+    expect(moved.entries.note.parentId).toBe('chapter');
+    expect(moved.history).toHaveLength(2);
+  });
+
+  it('rejects missing destinations and directory cycles', () => {
+    const note = entry('note', 10);
+    const original = state({ entries: { note }, directories });
+
+    expect(
+      appReducer(original, {
+        type: 'MOVE_ENTRY',
+        id: note.id,
+        parentId: 'missing',
+      }),
+    ).toBe(original);
+    expect(
+      appReducer(original, {
+        type: 'MOVE_DIRECTORY',
+        id: 'archive',
+        parentId: 'chapter',
+      }),
+    ).toBe(original);
+  });
+
+  it('protects a user-renamed note from later automatic titles', () => {
+    const note = { ...entry('note', 10), titleSource: 'agent' as const };
+    const renamed = appReducer(state({ entries: { note } }), {
+      type: 'RENAME_ENTRY',
+      id: note.id,
+      name: 'My chosen title',
+    });
+
+    expect(renamed.entries.note).toMatchObject({
+      name: 'My chosen title',
+      titleSource: 'manual',
+    });
+    expect(renamed.entries.note.titleBasis).toBeUndefined();
   });
 });

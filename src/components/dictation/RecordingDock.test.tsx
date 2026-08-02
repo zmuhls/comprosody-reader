@@ -8,9 +8,12 @@ vi.mock('./VoiceConfigToggles', () => ({ VoiceConfigToggles: () => null }));
 vi.mock('./Waveform', () => ({ Waveform: () => null }));
 
 const baseProps = {
+  backgroundLimitMs: 120_000,
+  backgroundNotice: '',
   drawWaveform: vi.fn(),
   isRecording: false,
   isTranscribing: false,
+  onBackgroundLimitChange: vi.fn(),
   onProviderChange: vi.fn(),
   onStart: vi.fn(),
   onStop: vi.fn(),
@@ -24,6 +27,11 @@ describe('RecordingDock', () => {
 
     expect(
       view.getByRole('combobox', { name: 'Transcription provider' }).hasAttribute(
+        'disabled',
+      ),
+    ).toBe(true);
+    expect(
+      view.getByRole('combobox', { name: 'Background recording limit' }).hasAttribute(
         'disabled',
       ),
     ).toBe(true);

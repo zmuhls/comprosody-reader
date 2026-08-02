@@ -1,17 +1,21 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useMemo } from 'react';
+import { selectMediaRecorderMimeType } from '../lib/mediaRecorder';
 
 export function useMediaRecorder() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const mimeTypeRef = useRef('application/octet-stream');
 
   const start = useCallback((stream: MediaStream) => {
     chunksRef.current = [];
 
-    const recorder = new MediaRecorder(stream, {
-      mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm',
-    });
+    const selectedMimeType = selectMediaRecorderMimeType(
+      MediaRecorder.isTypeSupported.bind(MediaRecorder),
+    );
+    const recorder = selectedMimeType
+      ? new MediaRecorder(stream, { mimeType: selectedMimeType })
+      : new MediaRecorder(stream);
+    mimeTypeRef.current = recorder.mimeType || selectedMimeType || 'application/octet-stream';
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -25,12 +29,12 @@ export function useMediaRecorder() {
     return new Promise((resolve) => {
       const recorder = recorderRef.current;
       if (!recorder || recorder.state === 'inactive') {
-        resolve(new Blob(chunksRef.current, { type: 'audio/webm' }));
+        resolve(new Blob(chunksRef.current, { type: mimeTypeRef.current }));
         return;
       }
 
       recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
         recorderRef.current = null;
         chunksRef.current = [];
         resolve(blob);
@@ -38,6 +42,16 @@ export function useMediaRecorder() {
 
       recorder.stop();
     });
+  }, []);
+
+  const checkpoint = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== 'recording') return;
+    try {
+      recorder.requestData();
+    } catch {
+      // Some WebKit builds reject requestData while the page is transitioning.
+    }
   }, []);
 
   const cancel = useCallback(() => {
@@ -55,5 +69,8 @@ export function useMediaRecorder() {
     }
   }, []);
 
-  return { cancel, start, stop };
+  return useMemo(
+    () => ({ cancel, checkpoint, start, stop }),
+    [cancel, checkpoint, start, stop],
+  );
 }
