@@ -1,5 +1,5 @@
 import { buildRefineContext, REFINE_CONTEXT_CAP } from './refineContext';
-import { buildSystemPrompt } from './prompts';
+import { buildSelectionPrompt, buildSystemPrompt } from './prompts';
 import { defaultProsody, defaultVoiceConfig } from '../types/audio';
 import type { Entry, Directory } from '../types/editor';
 import type { RefinementSettings } from '../types/llm';
@@ -116,5 +116,27 @@ describe('buildSystemPrompt context parameter', () => {
     expect(withContext).toContain('SURROUNDING WORK');
     const lastLine = withContext.trimEnd().split('\n').at(-1);
     expect(lastLine).toContain('Return only the refined text');
+  });
+
+  it('reaches the selection prompt system message through the shared builder', () => {
+    const context =
+      'SURROUNDING WORK (guidance, not text to reproduce):\nThis passage is chapter 1 of 2 in "Field Book".';
+    const { system, user } = buildSelectionPrompt(
+      settings,
+      defaultProsody,
+      defaultVoiceConfig,
+      'before text',
+      'selected text',
+      'after text',
+      context
+    );
+    expect(system).toContain('SURROUNDING WORK');
+    expect(system).toBe(
+      buildSystemPrompt(settings, defaultProsody, defaultVoiceConfig, context)
+    );
+    // The context block stays in system; the user message keeps only the
+    // selection markers and its own scope constraint.
+    expect(user).not.toContain('SURROUNDING WORK');
+    expect(user).toContain('[START]selected text[END]');
   });
 });

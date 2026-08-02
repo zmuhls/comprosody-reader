@@ -36,6 +36,7 @@ function TakeRow({ take, index, totalCount, log }: TakeRowProps) {
   const rowRef = useRef<HTMLDivElement>(null);
   const stateRef = useRef(state);
   const hydratingRef = useRef(false);
+  const aliveRef = useRef(true);
 
   useEffect(() => {
     stateRef.current = state;
@@ -50,6 +51,9 @@ function TakeRow({ take, index, totalCount, log }: TakeRowProps) {
       setState({ phase: 'loading', loaded, total });
     })
       .then((blob) => {
+        // A URL minted after unmount could never be revoked — the unmount
+        // cleanup only sees 'loading', so it would leak until page reload.
+        if (!aliveRef.current) return;
         const elapsed = Math.max(1, Math.round(performance.now() - startedAt));
         setState({ phase: 'ready', url: URL.createObjectURL(blob) });
         log(
@@ -104,6 +108,7 @@ function TakeRow({ take, index, totalCount, log }: TakeRowProps) {
   // Revoke on unmount (entry switch, page collapse).
   useEffect(() => {
     return () => {
+      aliveRef.current = false;
       const current = stateRef.current;
       if (current.phase === 'ready') URL.revokeObjectURL(current.url);
     };
