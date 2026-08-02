@@ -37,7 +37,7 @@ export function Sidebar({ open, onClose }: Props) {
 
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-40 flex h-screen w-72 flex-shrink-0 flex-col border-r border-border bg-surface-raised backdrop-blur-md transition-transform duration-200 lg:static lg:z-auto lg:w-64 lg:translate-x-0 lg:bg-surface ${
+      className={`fixed inset-y-0 left-0 z-40 flex h-app w-72 flex-shrink-0 flex-col border-r border-border bg-surface-raised backdrop-blur-md transition-transform duration-200 lg:static lg:z-auto lg:w-64 lg:translate-x-0 lg:bg-surface ${
         open ? 'translate-x-0' : '-translate-x-full'
       }`}
     >
