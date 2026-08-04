@@ -24,8 +24,10 @@
   --color-success: #627767;
   --color-energy: #8e4437;
   --color-recording: #9b4338;
-  --font-brand: "EB Garamond", Georgia, serif;
-  --font-writing: "Crimson Pro", Georgia, serif;
+  --font-brand: "Iowan Old Style", "Palatino Linotype", "Book Antiqua",
+    Palatino, Georgia, serif;
+  --font-writing: "Iowan Old Style", "Palatino Linotype", "Book Antiqua",
+    Palatino, Georgia, serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
