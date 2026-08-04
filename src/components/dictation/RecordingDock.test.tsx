@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { defaultProsody } from '../../types/audio';
 import { RecordingDock } from './RecordingDock';
 
@@ -67,5 +67,26 @@ describe('RecordingDock', () => {
     expect(document.getElementById(descriptionId!)?.textContent).toContain(
       'iOS may pause the page sooner',
     );
+  });
+
+  it('opens recording options before recording and returns focus when they close', async () => {
+    const view = render(<RecordingDock {...baseProps} />);
+    const trigger = view.getByRole('button', { name: 'Recording options' });
+
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute('aria-expanded')).toBe('true');
+
+    const provider = view.getByRole('combobox', { name: 'Transcription provider' });
+    const backgroundLimit = view.getByRole('combobox', {
+      name: 'Background recording limit',
+    });
+    expect(provider.hasAttribute('disabled')).toBe(false);
+    expect(backgroundLimit.hasAttribute('disabled')).toBe(false);
+    await waitFor(() => expect(document.activeElement).toBe(provider));
+
+    fireEvent.click(view.getByRole('button', { name: 'Close recording options' }));
+    expect(trigger.getAttribute('aria-expanded')).toBe('false');
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });

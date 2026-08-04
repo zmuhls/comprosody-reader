@@ -21,4 +21,13 @@ describe('accessibility preference stylesheet contracts', () => {
       /\.speech-search,[\s\S]*?\.speech-voice-list\s*\{\s*background:\s*var\(--color-surface-raised\);/,
     );
   });
+
+  it('keeps pre-recording options directly available on touch layouts', () => {
+    expect(stylesheet).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?\.recording-options-trigger\s*\{[\s\S]*?display:\s*inline-flex;/,
+    );
+    expect(stylesheet).toMatch(
+      /\.recording-row\[data-options-open="true"\] \.recording-options-panel\s*\{\s*display:\s*grid;/,
+    );
+  });
 });
