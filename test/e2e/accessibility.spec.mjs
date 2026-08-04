@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import JSZip from 'jszip';
 
 const ACCESSIBILITY_TAGS = [
   'wcag2a',
@@ -22,10 +23,10 @@ function formatViolations(label, violations) {
   ].join('\n');
 }
 
-async function expectNoViolations(page, label) {
-  const results = await new AxeBuilder({ page })
-    .withTags(ACCESSIBILITY_TAGS)
-    .analyze();
+async function expectNoViolations(page, label, { legacyMode = false } = {}) {
+  const audit = new AxeBuilder({ page }).withTags(ACCESSIBILITY_TAGS);
+  if (legacyMode) audit.setLegacyMode();
+  const results = await audit.analyze();
   expect(
     results.violations,
     formatViolations(label, results.violations),
@@ -152,12 +153,92 @@ async function createNote(page) {
   return body;
 }
 
+async function createAccessibleEpub() {
+  const zip = new JSZip();
+  zip.file('mimetype', 'application/epub+zip', { compression: 'STORE' });
+  zip.file('META-INF/container.xml', `<?xml version="1.0" encoding="UTF-8"?>
+    <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+      <rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles>
+    </container>`);
+  zip.file('OEBPS/content.opf', `<?xml version="1.0" encoding="UTF-8"?>
+    <package version="3.0" unique-identifier="book-id" xmlns="http://www.idpf.org/2007/opf">
+      <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <dc:identifier id="book-id">accessible-patterns</dc:identifier>
+        <dc:title>Accessible Reading Patterns</dc:title>
+        <dc:creator>Ada Reader</dc:creator>
+        <dc:language>en</dc:language>
+        <meta property="dcterms:modified">2026-08-04T00:00:00Z</meta>
+      </metadata>
+      <manifest>
+        <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+        <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+        <item id="chapter-two" href="chapter-two.xhtml" media-type="application/xhtml+xml"/>
+      </manifest>
+      <spine><itemref idref="chapter"/><itemref idref="chapter-two"/></spine>
+    </package>`);
+  zip.file('OEBPS/nav.xhtml', `<?xml version="1.0" encoding="UTF-8"?>
+    <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="en">
+      <head><title>Contents</title></head>
+      <body><nav epub:type="toc"><ol><li><a href="chapter.xhtml">A readable chapter</a></li><li><a href="chapter-two.xhtml">A second readable chapter</a></li></ol></nav></body>
+    </html>`);
+  zip.file('OEBPS/chapter.xhtml', `<?xml version="1.0" encoding="UTF-8"?>
+    <html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+      <head><title>A readable chapter</title></head>
+      <body>
+        <main>
+          <h1>A readable chapter</h1>
+          <p>Keyboard readers can enter this book, select its text, and turn pages without losing their place.</p>
+          <p>Responsive reading keeps source text legible while the note workspace remains available.</p>
+        </main>
+      </body>
+    </html>`);
+  zip.file('OEBPS/chapter-two.xhtml', `<?xml version="1.0" encoding="UTF-8"?>
+    <html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+      <head><title>A second readable chapter</title></head>
+      <body><main><h1>A second readable chapter</h1><p>Page turns remain available from an external keyboard.</p></main></body>
+    </html>`);
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+async function mockAccessibleLibrary(page) {
+  const epub = await createAccessibleEpub();
+  await page.route('**/api/catalog', (route) => route.fulfill({
+    json: [{
+      author: 'Ada Reader',
+      book: 'accessible-patterns',
+      sections: 1,
+      status: 'pass',
+      title: 'Accessible Reading Patterns',
+      words: 24,
+    }],
+  }));
+  await page.route('**/api/profile', (route) => route.fulfill({
+    json: { preferences: { theme: 'light' } },
+  }));
+  await page.route('**/api/annotations/accessible-patterns', (route) => {
+    if (route.request().method() === 'PUT') {
+      return route.fulfill({ json: { ok: true } });
+    }
+    return route.fulfill({ json: { annotations: [], progress: null } });
+  });
+  await page.route('**/books/accessible-patterns.epub', (route) => route.fulfill({
+    body: epub,
+    contentType: 'application/epub+zip',
+  }));
+}
+
 test('empty workspace and active editor satisfy automated accessibility checks', async ({ page }) => {
   await page.goto('./');
   await expect(page.getByText('A quiet place for spoken thought.')).toBeVisible();
+  await expect(
+    page.locator('#main-content').getByRole('heading', { level: 1 }),
+  ).toHaveText('A quiet place for spoken thought.');
   await expectNoViolations(page, 'empty workspace');
 
   await createNote(page);
+  await expect(
+    page.locator('#main-content').getByRole('heading', { level: 1 }),
+  ).toBeVisible();
   await expectNoViolations(page, 'active editor');
   await expectMinimumTargets(page, 'active editor');
 
@@ -171,6 +252,64 @@ test('empty workspace and active editor satisfy automated accessibility checks',
   await expect(page.getByRole('dialog')).toBeVisible();
   await expectNoViolations(page, 'refinement');
   await expectMinimumTargets(page, 'refinement');
+});
+
+test('integrated reader exposes labeled keyboard content and restores focus', async ({
+  page,
+}, testInfo) => {
+  await mockAccessibleLibrary(page);
+  await page.goto('./');
+  if (testInfo.project.name === 'webkit-phone') {
+    await page.getByRole('button', { name: 'Notes' }).click();
+  }
+  await page.getByRole('button', { name: /Accessible Reading Patterns/u }).click();
+  const reading = page.getByRole('region', { name: 'Reading Accessible Reading Patterns' });
+  await expect(reading).toBeVisible();
+  await expect(reading).toBeFocused();
+  await expect(reading).toHaveAttribute('aria-busy', 'false');
+
+  const frame = page.locator('.epub-viewer iframe');
+  await expect(frame).toHaveAttribute(
+    'title',
+    'Accessible Reading Patterns — reading content',
+  );
+  const bookBody = page.frameLocator('.epub-viewer iframe').locator('body');
+  await expect(bookBody).toHaveAttribute('tabindex', '0');
+  await expect(bookBody).toHaveAttribute(
+    'aria-label',
+    'Reading content for Accessible Reading Patterns',
+  );
+  await expect(
+    page.frameLocator('.epub-viewer iframe').getByRole('heading', {
+      level: 1,
+      name: 'A readable chapter',
+    }),
+  ).toBeVisible();
+  await expectNoViolations(page, 'integrated reader', { legacyMode: true });
+  await expectNoHorizontalOverflow(page, 'integrated reader');
+  await expectMinimumTargets(
+    page,
+    'integrated reader',
+    testInfo.project.name === 'webkit-phone' ? 44 : 24,
+  );
+
+  if (testInfo.project.name === 'webkit-phone') {
+    await page.getByRole('button', { name: 'Next page' }).click();
+  } else {
+    await bookBody.focus();
+    await expect(bookBody).toBeFocused();
+    await bookBody.press('ArrowRight');
+  }
+  await expect(
+    page.frameLocator('.epub-viewer iframe').getByRole('heading', {
+      level: 1,
+      name: 'A second readable chapter',
+    }),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Close book' }).click();
+  await expect(reading).toHaveCount(0);
+  await expect(page.locator('#main-content')).toBeFocused();
 });
 
 test('note directory satisfies automated accessibility checks', async ({ page }, testInfo) => {
@@ -274,6 +413,21 @@ test('320px reflow and text spacing preserve the writing workspace', async ({ pa
   await expectNoHorizontalOverflow(page, '320px text spacing');
   await expectMinimumTargets(page, '320px editor', 44);
   await expectWithinViewport(page, '.interaction-dock', '320px recording dock');
+  const mobileType = await page.evaluate(() => {
+    const pixels = (selector) => Number.parseFloat(
+      getComputedStyle(document.querySelector(selector)).fontSize,
+    );
+    return {
+      date: pixels('.document-date'),
+      prose: pixels('.document-prose'),
+      recordingStatus: pixels('.recording-state-text'),
+      titleStatus: pixels('.automatic-title-status'),
+    };
+  });
+  expect(mobileType.date).toBeGreaterThanOrEqual(14);
+  expect(mobileType.prose).toBeGreaterThanOrEqual(18);
+  expect(mobileType.recordingStatus).toBeGreaterThanOrEqual(12);
+  expect(mobileType.titleStatus).toBeGreaterThanOrEqual(12);
   const microphone = page.getByRole('button', { name: 'Start recording' });
   await expect(microphone).toBeVisible();
   const microphoneBox = await microphone.boundingBox();
@@ -284,6 +438,9 @@ test('320px reflow and text spacing preserve the writing workspace', async ({ pa
   await trigger.click();
   const sidebar = page.getByRole('dialog', { name: 'Note directory' });
   await expect(sidebar).toHaveClass(/is-open/u);
+  const directoryType = await page.locator('.tree-row').first().evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize));
+  expect(directoryType).toBeGreaterThanOrEqual(14);
   await expect(page.locator('.workspace-stage')).toHaveAttribute('inert', '');
   await expectWithinViewport(page, '.sidebar', '320px note directory');
   await expectNoHorizontalOverflow(page, '320px note directory');

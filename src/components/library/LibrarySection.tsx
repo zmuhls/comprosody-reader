@@ -19,24 +19,30 @@ export function LibrarySection({
   } = useLibrary();
 
   return (
-    <section aria-labelledby="library-section-label" className="library-section">
+    <section
+      aria-busy={isLoading}
+      aria-labelledby="library-section-label"
+      className="library-section"
+    >
       <div className="sidebar-section-heading">
-        <span id="library-section-label">Library</span>
+        <h2 id="library-section-label">Library</h2>
         <a href={readingShelfUrl()} title="Open the full reading shelf">
           Shelf
         </a>
       </div>
 
       {isLoading ? (
-        <p className="library-status">Opening shelf…</p>
+        <p aria-live="polite" className="library-status" role="status">
+          Opening shelf…
+        </p>
       ) : error ? (
         <div className="library-status">
-          <p>{error}</p>
+          <p role="alert">{error}</p>
           <button onClick={() => void refresh()} type="button">
             Retry
           </button>
         </div>
-      ) : (
+      ) : catalog.length > 0 ? (
         <div className="library-list">
           {catalog.map((publication) => (
             <button
@@ -61,6 +67,8 @@ export function LibrarySection({
             </button>
           ))}
         </div>
+      ) : (
+        <p className="library-status" role="status">The shelf is empty.</p>
       )}
     </section>
   );

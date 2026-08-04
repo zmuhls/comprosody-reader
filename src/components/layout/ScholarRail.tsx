@@ -9,7 +9,6 @@ export function ScholarRail({ inert = false }: { inert?: boolean }) {
           aria-label="Scholar search is planned for a later release"
           className="scholar-rail"
           inert={inert ? true : undefined}
-          tabIndex={0}
         >
           <Icon name="search" size={15} />
         </aside>

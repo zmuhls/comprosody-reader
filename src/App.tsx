@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AppProvider } from './context/AppContext';
 import { RecordingProvider } from './context/RecordingContext';
 import { Sidebar } from './components/layout/Sidebar';
@@ -33,6 +33,7 @@ function AppInner() {
       view: 'reader',
     });
   const { activePublication } = useLibrary();
+  const previousPublicationIdRef = useRef<string | null>(null);
 
   useEffect(() => installVisualViewportSync(), []);
   useEffect(() => {
@@ -48,6 +49,18 @@ function AppInner() {
     mobileWorkspaceSelection.publicationId === activePublicationId
       ? mobileWorkspaceSelection.view
       : 'reader';
+
+  useEffect(() => {
+    const previousPublicationId = previousPublicationIdRef.current;
+    previousPublicationIdRef.current = activePublicationId;
+    if (!activePublicationId && !previousPublicationId) return;
+    const targetId = activePublicationId && mobileWorkspaceView === 'reader'
+      ? 'reading-content'
+      : 'main-content';
+    window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.focus({ preventScroll: true });
+    });
+  }, [activePublicationId, mobileWorkspaceView]);
 
   const selectMobileWorkspaceView = (view: MobileWorkspaceView) => {
     setMobileWorkspaceSelection({
@@ -114,6 +127,7 @@ function AppInner() {
                   <Icon name="menu" size={18} />
                 </button>
                 <button
+                  aria-controls="reading-content"
                   aria-pressed={mobileWorkspaceView === 'reader'}
                   data-active={mobileWorkspaceView === 'reader'}
                   onClick={() => selectMobileWorkspaceView('reader')}
@@ -122,6 +136,7 @@ function AppInner() {
                   Reader
                 </button>
                 <button
+                  aria-controls="main-content"
                   aria-pressed={mobileWorkspaceView === 'note'}
                   data-active={mobileWorkspaceView === 'note'}
                   onClick={() => selectMobileWorkspaceView('note')}

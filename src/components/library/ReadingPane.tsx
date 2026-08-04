@@ -42,6 +42,7 @@ interface PersistedReadingState {
 type SaveState = 'idle' | 'saving' | 'saved' | 'offline' | 'error';
 
 const OUTBOX_KEY = 'cadence:reading-outbox:v1';
+const keyboardReadyReaderBodies = new WeakSet<HTMLElement>();
 
 function readOutbox(): Record<string, PersistedReadingState> {
   try {
@@ -99,6 +100,58 @@ function selectionContext(contents: Contents, exact: string): {
         .slice(index + normalizedExact.length, index + normalizedExact.length + 48)
         .trim() || undefined,
   };
+}
+
+function readerKeyAction(
+  event: KeyboardEvent,
+  document: Document,
+): 'next' | 'prev' | null {
+  if (
+    event.defaultPrevented
+    || event.altKey
+    || event.ctrlKey
+    || event.metaKey
+    || event.shiftKey
+    || event.isComposing
+  ) return null;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest('a, button, input, select, textarea, [contenteditable="true"]')) {
+    return null;
+  }
+  const selection = document.getSelection();
+  if (selection && !selection.isCollapsed && selection.toString()) return null;
+  if (event.key === 'PageDown') return 'next';
+  if (event.key === 'PageUp') return 'prev';
+  const direction = document.defaultView?.getComputedStyle(document.documentElement).direction;
+  if (event.key === (direction === 'rtl' ? 'ArrowLeft' : 'ArrowRight')) return 'next';
+  if (event.key === (direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft')) return 'prev';
+  return null;
+}
+
+function prepareReaderDocument(
+  contentDocument: Document,
+  title: string,
+  rendition: Rendition,
+): void {
+  if (!contentDocument.documentElement.lang) {
+    contentDocument.documentElement.lang = document.documentElement.lang || 'en';
+  }
+  const body = contentDocument.body;
+  body?.setAttribute('tabindex', '0');
+  body?.setAttribute('aria-label', `Reading content for ${title}`);
+  contentDocument.defaultView?.frameElement?.setAttribute(
+    'title',
+    `${title} — reading content`,
+  );
+  if (!body || keyboardReadyReaderBodies.has(body)) return;
+  keyboardReadyReaderBodies.add(body);
+  body.addEventListener('keydown', (event) => {
+    const action = readerKeyAction(event, contentDocument);
+    if (!action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void rendition[action]();
+  }, { capture: true });
 }
 
 export function ReadingPane() {
@@ -285,6 +338,25 @@ function PublicationReadingPane({
           '::selection': { background: readerColors.selection },
         });
 
+        currentRendition.hooks.content.register((contents: Contents) => {
+          prepareReaderDocument(
+            contents.document,
+            activePublication.title,
+            currentRendition!,
+          );
+        });
+        currentRendition.on('rendered', (
+          _section: unknown,
+          view: { document?: Document },
+        ) => {
+          if (!view?.document) return;
+          prepareReaderDocument(
+            view.document,
+            activePublication.title,
+            currentRendition!,
+          );
+        });
+
         currentRendition.on(
           'selected',
           (cfiRange: string, contents: Contents) => {
@@ -358,6 +430,7 @@ function PublicationReadingPane({
     };
   }, [
     activePublication.id,
+    activePublication.title,
     commitSnapshot,
     flushSave,
     highlightStyle,
@@ -445,6 +518,7 @@ function PublicationReadingPane({
 
   return (
     <section
+      aria-busy={isOpening}
       aria-label={`Reading ${activePublication.title}`}
       className="reading-pane"
       id="reading-content"
@@ -489,10 +563,12 @@ function PublicationReadingPane({
 
       <div className="reading-canvas">
         {isOpening ? (
-          <p className="reader-message">Typesetting pages…</p>
+          <p aria-live="polite" className="reader-message" role="status">
+            Typesetting pages…
+          </p>
         ) : null}
         {readerError ? (
-          <p className="reader-message reader-error">{readerError}</p>
+          <p className="reader-message reader-error" role="alert">{readerError}</p>
         ) : null}
         <div className="epub-viewer" ref={viewerRef} />
         {pendingSelection ? (

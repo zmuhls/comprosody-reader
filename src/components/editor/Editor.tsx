@@ -529,7 +529,12 @@ export const Editor = memo(function Editor({
 
   if (!activeEntry) {
     return (
-      <main className="editor-empty-state" id="main-content" tabIndex={-1}>
+      <main
+        aria-label="Note workspace"
+        className="editor-empty-state"
+        id="main-content"
+        tabIndex={-1}
+      >
         <button
           className="mobile-menu-button"
           onClick={(event) => onOpenSidebar(event.currentTarget)}
@@ -539,7 +544,7 @@ export const Editor = memo(function Editor({
           <span>Notes</span>
         </button>
         <div>
-          <p>A quiet place for spoken thought.</p>
+          <h1>A quiet place for spoken thought.</h1>
           <button onClick={() => createEntry(null, 'note')} type="button">
             <Icon name="plus" size={15} />
             New note
@@ -714,25 +719,32 @@ export const Editor = memo(function Editor({
         </div>
       </div>
 
-      <main className="document-viewport" id="main-content" tabIndex={-1}>
+      <main
+        aria-label="Note workspace"
+        className="document-viewport"
+        id="main-content"
+        tabIndex={-1}
+      >
         <article className="document-page">
           <time className="document-date" dateTime={new Date(activeEntry.createdAt).toISOString()}>
             {documentDate(activeEntry.createdAt)}
           </time>
           <div className="document-title-group">
-            <DocumentTitle
-              key={activeEntry.id}
-              entry={activeEntry}
-              onCommit={(nextTitle) =>
-                dispatch({
-                  type: 'RENAME_ENTRY',
-                  id: activeEntry.id,
-                  name: nextTitle,
-                })
-              }
-              onEditingChange={handleTitleEditingChange}
-              onEnterBody={() => editor?.commands.focus('start')}
-            />
+            <h1 className="document-title-heading">
+              <DocumentTitle
+                key={activeEntry.id}
+                entry={activeEntry}
+                onCommit={(nextTitle) =>
+                  dispatch({
+                    type: 'RENAME_ENTRY',
+                    id: activeEntry.id,
+                    name: nextTitle,
+                  })
+                }
+                onEditingChange={handleTitleEditingChange}
+                onEnterBody={() => editor?.commands.focus('start')}
+              />
+            </h1>
             <span
               aria-live="polite"
               className="automatic-title-status"

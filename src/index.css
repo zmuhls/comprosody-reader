@@ -344,6 +344,11 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   text-transform: uppercase;
 }
 
+.sidebar-section-heading h2 {
+  margin: 0;
+  font: inherit;
+}
+
 .sidebar-section-heading a {
   display: inline-flex;
   min-width: 44px;
@@ -969,6 +974,13 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   cursor: wait;
 }
 
+.reading-toolbar > .icon-button {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+}
+
 .reading-title {
   display: grid;
   min-width: 0;
@@ -1007,7 +1019,8 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 
 .close-book {
   display: inline-flex;
-  min-height: 32px;
+  min-width: 44px;
+  min-height: 44px;
   align-items: center;
   gap: 5px;
   border: 0;
@@ -1296,6 +1309,11 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 
 .document-title-group {
   margin: 0 0 26px;
+}
+
+.document-title-heading {
+  margin: 0;
+  font: inherit;
 }
 
 .document-title-group .document-title {
@@ -2846,10 +2864,12 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   gap: 12px;
 }
 
-.editor-empty-state p {
+.editor-empty-state p,
+.editor-empty-state h1 {
   margin: 0;
   font-family: var(--font-document);
   font-size: 16px;
+  font-weight: 400;
 }
 
 .editor-empty-state > div button,
@@ -3089,8 +3109,16 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 
   .reading-toolbar {
-    grid-template-columns: 40px minmax(0, 1fr) 40px 28px;
+    grid-template-columns: 48px minmax(0, 1fr) 48px 48px;
     padding: 0 8px;
+  }
+
+  .reading-toolbar > .icon-button,
+  .reading-toolbar > .close-book {
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
   }
 
   .reading-title span {
@@ -3368,7 +3396,59 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 
   .recording-state-text {
     bottom: max(8px, env(safe-area-inset-bottom));
-    font-size: 10px;
+    font-size: 12px;
+  }
+
+  .sidebar-section-heading {
+    min-height: 44px;
+    font-size: 12px;
+  }
+
+  .sidebar-section-heading a {
+    min-height: 44px;
+    font-size: 12px;
+    line-height: 44px;
+    opacity: 1;
+  }
+
+  .library-row strong,
+  .tree-row {
+    font-size: 14px;
+  }
+
+  .library-row small,
+  .library-status,
+  .tree-move-banner,
+  .tree-root-target,
+  .tree-move-status {
+    font-size: 12px;
+  }
+
+  .tree-row-directory {
+    font-size: 15px;
+  }
+
+  .editor-topbar .icon-button svg,
+  .mobile-workspace-switch svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .document-date {
+    font-size: 14px;
+  }
+
+  .automatic-title-status {
+    min-height: 20px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .info-popover-trigger {
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
   }
 }
 
