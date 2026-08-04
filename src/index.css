@@ -2053,6 +2053,12 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   transform: translateY(0);
 }
 
+.interaction-dock:has(.recording-row[data-options-open="true"]) .refinement-composer {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
 .refinement-input-shell {
   display: flex;
   height: 40px;
@@ -2115,7 +2121,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   border-bottom: 1px solid transparent;
   padding: 5px 0;
   background: transparent;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: 10px;
   cursor: pointer;
   transition: color var(--motion-fast) ease;
@@ -3475,7 +3481,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   .recording-options-panel > strong {
     display: block;
     color: var(--color-text-primary);
-    font-size: 13px;
+    font-size: 16px;
     font-weight: 600;
   }
 
@@ -3490,6 +3496,8 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
     border: 1px solid var(--color-border);
     border-radius: 5px;
     padding: 0 12px;
+    font-size: 14px;
+    line-height: 1.4;
     opacity: 1;
     visibility: visible;
   }
@@ -3503,6 +3511,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
     border-radius: 5px;
     background: var(--color-surface-overlay);
     color: var(--color-text-secondary);
+    font-size: 15px;
     cursor: pointer;
   }
 

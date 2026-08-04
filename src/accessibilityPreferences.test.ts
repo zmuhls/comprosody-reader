@@ -29,5 +29,14 @@ describe('accessibility preference stylesheet contracts', () => {
     expect(stylesheet).toMatch(
       /\.recording-row\[data-options-open="true"\] \.recording-options-panel\s*\{\s*display:\s*grid;/,
     );
+    expect(stylesheet).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?\.recording-options-panel \.provider-trigger,[\s\S]*?font-size:\s*14px;/,
+    );
+    expect(stylesheet).toMatch(
+      /@media \(max-width: 900px\)[\s\S]*?\.recording-options-panel > strong\s*\{[\s\S]*?font-size:\s*16px;/,
+    );
+    expect(stylesheet).toMatch(
+      /\.interaction-dock:has\(\.recording-row\[data-options-open="true"\]\) \.refinement-composer\s*\{[\s\S]*?visibility:\s*hidden;/,
+    );
   });
 });
