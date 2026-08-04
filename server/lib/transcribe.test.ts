@@ -1,51 +1,82 @@
-import { audioFormatFromContentType, buildVocabularyPrompt } from './transcribe.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  UnsupportedTranscriptionProviderError,
+  resolveTranscriptionProvider,
+} from './transcribe.js';
+import {
+  createFasterWhisperProvider,
+  fasterWhisperProvider,
+} from './transcription/fasterWhisperProvider.js';
+import { UnsupportedTranscriptionModelError } from './transcription/types.js';
 
-describe('buildVocabularyPrompt', () => {
-  it('lists every term', () => {
-    const prompt = buildVocabularyPrompt(['comprosody', 'zmuhls']);
-    expect(prompt).toContain('comprosody');
-    expect(prompt).toContain('zmuhls');
-  });
+const originalDefaultProvider = process.env.TRANSCRIPTION_PROVIDER;
 
-  // Without this hedge the hint would corrupt transcripts instead of
-  // correcting them, forcing taught words onto audio that never contained them.
-  it('instructs the model not to force terms onto unsupporting audio', () => {
-    expect(buildVocabularyPrompt(['comprosody'])).toContain('Do not force');
-  });
+afterEach(() => {
+  if (originalDefaultProvider === undefined) {
+    delete process.env.TRANSCRIPTION_PROVIDER;
+  } else {
+    process.env.TRANSCRIPTION_PROVIDER = originalDefaultProvider;
+  }
 });
 
-describe('audioFormatFromContentType', () => {
-  it('maps webm content types to webm', () => {
-    expect(audioFormatFromContentType('audio/webm')).toBe('webm');
-    expect(audioFormatFromContentType('audio/webm;codecs=opus')).toBe('webm');
+describe('transcription provider selection', () => {
+  it('keeps local faster-whisper as the default', () => {
+    delete process.env.TRANSCRIPTION_PROVIDER;
+    expect(resolveTranscriptionProvider()).toBe('local');
   });
 
-  it('maps mp4 and m4a content types to mp4', () => {
-    expect(audioFormatFromContentType('audio/mp4')).toBe('mp4');
-    expect(audioFormatFromContentType('audio/mp4;codecs=mp4a.40.2')).toBe('mp4');
-    expect(audioFormatFromContentType('audio/x-m4a')).toBe('mp4');
+  it('supports explicit provider names and useful aliases', () => {
+    expect(resolveTranscriptionProvider('local')).toBe('local');
+    expect(resolveTranscriptionProvider('faster-whisper')).toBe('local');
+    expect(resolveTranscriptionProvider('elevenlabs')).toBe('elevenlabs');
+    expect(resolveTranscriptionProvider('scribe')).toBe('elevenlabs');
   });
 
-  it('maps ogg content types to ogg', () => {
-    expect(audioFormatFromContentType('audio/ogg')).toBe('ogg');
-    expect(audioFormatFromContentType('audio/ogg;codecs=opus')).toBe('ogg');
+  it('uses the environment default when the request does not select one', () => {
+    process.env.TRANSCRIPTION_PROVIDER = 'elevenlabs';
+    expect(resolveTranscriptionProvider()).toBe('elevenlabs');
   });
 
-  it('maps wav content types to wav', () => {
-    expect(audioFormatFromContentType('audio/wav')).toBe('wav');
-    expect(audioFormatFromContentType('audio/x-wav')).toBe('wav');
-    expect(audioFormatFromContentType('audio/wave')).toBe('wav');
+  it('rejects an unknown provider', () => {
+    expect(() => resolveTranscriptionProvider('unknown')).toThrow(
+      UnsupportedTranscriptionProviderError
+    );
   });
 
-  it('defaults to webm for missing or unknown content types', () => {
-    expect(audioFormatFromContentType(undefined)).toBe('webm');
-    expect(audioFormatFromContentType('')).toBe('webm');
-    expect(audioFormatFromContentType('application/octet-stream')).toBe('webm');
-    expect(audioFormatFromContentType('audio/mpeg')).toBe('webm');
+  it('rejects an invalid local model before starting the worker', async () => {
+    await expect(
+      fasterWhisperProvider.transcribe({
+        audioBuffer: Buffer.from('audio'),
+        model: 'not-a-whisper-model',
+      })
+    ).rejects.toBeInstanceOf(UnsupportedTranscriptionModelError);
   });
 
-  it('is case-insensitive', () => {
-    expect(audioFormatFromContentType('Audio/MP4')).toBe('mp4');
-    expect(audioFormatFromContentType('AUDIO/OGG; CODECS=OPUS')).toBe('ogg');
-  });
+  it.each(['large-v3-turbo', 'turbo'])(
+    'supports the local %s model and forwards joined hotwords',
+    async (model) => {
+      const result = {
+        transcript: 'A transcript',
+        words: [],
+        language: 'en',
+        duration: 1,
+      };
+      const workerTranscribe = vi.fn(async () => result);
+      const provider = createFasterWhisperProvider(workerTranscribe);
+      const audioBuffer = Buffer.from('audio');
+
+      await expect(
+        provider.transcribe({
+          audioBuffer,
+          model,
+          keyterms: ['Comprosody', 'prosodic signature'],
+        })
+      ).resolves.toEqual(result);
+      expect(workerTranscribe).toHaveBeenCalledWith(
+        audioBuffer,
+        model,
+        'Comprosody, prosodic signature'
+      );
+    }
+  );
 });

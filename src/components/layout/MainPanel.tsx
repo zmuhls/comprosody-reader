@@ -1,403 +1,579 @@
-import { useRef, useCallback, useEffect, useMemo, useState } from 'react';
-import { useApp, newEntry } from '../../context/AppContext';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { useApp } from '../../context/AppContext';
 import { useRecording } from '../../context/RecordingContext';
-import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 import { useAudioAnalyser } from '../../hooks/useAudioAnalyser';
 import { useMediaRecorder } from '../../hooks/useMediaRecorder';
+import { useRealtimeTranscription } from '../../hooks/useRealtimeTranscription';
 import { useTranscription } from '../../hooks/useTranscription';
 import { useProsody } from '../../hooks/useProsody';
-import { deriveEntryName, countWords } from '../../lib/entries';
-import { saveRecording, attachTranscript } from '../../lib/audioStore';
-import { applyLexicon, rankForHint } from '../../lib/lexicon';
-import { LEXICON_HINT_CAP, LEXICON_TERM_MAX_LEN } from '../../constants';
-import type { AppliedSubstitution } from '../../types/lexicon';
-import { RecordingFooter } from '../dictation/RecordingFooter';
-import { AutoCorrectionNotice } from '../editor/AutoCorrectionNotice';
+import { useRefinement } from '../../hooks/useRefinement';
+import {
+  appendProsodySnapshot,
+  appendRecordingTranscript,
+} from '../../lib/recordingDocument';
+import { completeTranscriptProsody } from '../../lib/comprosody';
+import { selectTranscriptionHints } from '../../lib/voiceProfile';
+import { SESSION_LOGOUT_INTENT_EVENT } from '../../lib/session';
+import { attachTranscript, saveRecording } from '../../lib/audioStore';
+import type { TranscriptionProviderId } from '../../types/transcription';
 import { Editor } from '../editor/Editor';
-
-interface FailedTake {
-  blob: Blob;
-  entryId: string;
-  recordedAt: number;
-  liveTranscript: string;
-}
+import {
+  BACKGROUND_RECORDING_LIMIT_KEY,
+  DEFAULT_BACKGROUND_RECORDING_LIMIT_MS,
+  formatBackgroundRecordingLimit,
+  normalizeBackgroundRecordingLimit,
+} from '../../lib/backgroundRecording';
 
 interface MainPanelProps {
-  onToggleSidebar: () => void;
+  onOpenSidebar: (returnFocusTarget?: HTMLElement) => void;
 }
 
-export function MainPanel({ onToggleSidebar }: MainPanelProps) {
-  const { state, dispatch } = useApp();
-  const { state: recState, dispatch: recDispatch } = useRecording();
-  const speech = useSpeechRecognition();
+const PROVIDER_STORAGE_KEY = 'cadence:transcription-provider';
+
+function initialBackgroundRecordingLimit(): number {
+  try {
+    return normalizeBackgroundRecordingLimit(
+      localStorage.getItem(BACKGROUND_RECORDING_LIMIT_KEY),
+    );
+  } catch {
+    return DEFAULT_BACKGROUND_RECORDING_LIMIT_MS;
+  }
+}
+
+function stopMediaStream(stream: MediaStream | null): void {
+  stream?.getTracks().forEach((track) => {
+    track.onended = null;
+    track.stop();
+  });
+}
+
+interface RecordingTarget {
+  entryId: string;
+  epoch: number;
+  provider: TranscriptionProviderId;
+  keyterms: readonly string[];
+}
+
+function initialProvider(): TranscriptionProviderId {
+  try {
+    return localStorage.getItem(PROVIDER_STORAGE_KEY) === 'elevenlabs'
+      ? 'elevenlabs'
+      : 'local';
+  } catch {
+    return 'local';
+  }
+}
+
+export function MainPanel({ onOpenSidebar }: MainPanelProps) {
+  const { state, dispatch, voiceProfile } = useApp();
+  const { state: recordingState, dispatch: recordingDispatch } = useRecording();
+  const [provider, setProvider] = useState<TranscriptionProviderId>(initialProvider);
+  const [backgroundLimitMs, setBackgroundLimitMs] = useState(
+    initialBackgroundRecordingLimit,
+  );
+  const [backgroundNotice, setBackgroundNotice] = useState('');
   const audio = useAudioAnalyser();
   const recorder = useMediaRecorder();
-  const { isTranscribing, transcriptionError, clearTranscriptionError, transcribe } =
-    useTranscription();
+  const realtime = useRealtimeTranscription();
+  const realtimeError = realtime.liveError;
+  const realtimeStatus = realtime.status;
+  const surfaceRealtimeError = realtime.surfaceError;
   const prosody = useProsody(audio.getTimeDomainData);
-  const [recordingError, setRecordingError] = useState<string | null>(null);
-  const [failedTake, setFailedTake] = useState<FailedTake | null>(null);
-  // Tagged with the entry so a revert edits the transcript it actually changed.
-  const [applied, setApplied] = useState<{
-    entryId: string;
-    substitutions: AppliedSubstitution[];
-  } | null>(null);
+  const refinement = useRefinement();
 
-  const vocabulary = useMemo(
-    () => rankForHint(state.lexicon, LEXICON_HINT_CAP, LEXICON_TERM_MAX_LEN),
-    [state.lexicon]
-  );
+  const keyterms = useMemo(() => {
+    const hints = selectTranscriptionHints(voiceProfile, {
+      maxTerms: 60,
+      maxPhrases: 40,
+      minTermCount: 2,
+      minPhraseCount: 2,
+    });
+    return [...hints.terms, ...hints.phrases];
+  }, [voiceProfile]);
+
+  const {
+    cancel: cancelTranscription,
+    isTranscribing,
+    transcribe,
+  } = useTranscription({
+    provider,
+    keyterms,
+  });
 
   const streamRef = useRef<MediaStream | null>(null);
+  const recordingTargetRef = useRef<RecordingTarget | null>(null);
+  const privateWorkEpochRef = useRef(0);
   const stateRef = useRef(state);
-  const recordingEntryIdRef = useRef<string | null>(null);
+  const handleStopRef = useRef<() => Promise<void>>(async () => undefined);
+  const stopInFlightRef = useRef(false);
+  const backgroundedAtRef = useRef<number | null>(null);
+  const backgroundStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
     : null;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     stateRef.current = state;
   }, [state]);
 
   useEffect(() => {
-    if (!activeEntry || recState.isRecording) return;
+    try {
+      localStorage.setItem(PROVIDER_STORAGE_KEY, provider);
+    } catch {
+      // Provider selection remains in memory if storage is unavailable.
+    }
+  }, [provider]);
 
-    recDispatch({
-      type: 'SET_VOICE_CONFIG',
-      config: activeEntry.voiceConfig,
-    });
-    recDispatch({
-      type: 'FINALIZE_PROSODY',
-      prosody: activeEntry.prosody,
-    });
-  }, [activeEntry, recDispatch, recState.isRecording]);
+  useEffect(() => {
+    const target = recordingTargetRef.current;
+    if (target && !state.entries[target.entryId]) {
+      recordingTargetRef.current = null;
+    }
+  }, [state.entries]);
 
-  const appendTranscript = useCallback(
-    (entryId: string, transcript: string) => {
-      const entry = stateRef.current.entries[entryId];
-      if (!entry || !transcript.trim()) return;
+  useEffect(() => {
+    if (realtimeStatus === 'degraded' && realtimeError) {
+      surfaceRealtimeError();
+    }
+  }, [realtimeError, realtimeStatus, surfaceRealtimeError]);
 
-      const nextTranscript = entry.rawTranscript
-        ? `${entry.rawTranscript}\n\n${transcript.trim()}`
-        : transcript.trim();
+  useEffect(() => {
+    const stopPrivateWork = () => {
+      privateWorkEpochRef.current += 1;
+      recordingTargetRef.current = null;
+      recordingDispatch({ type: 'STOP_RECORDING' });
+      cancelTranscription();
+      recorder.cancel();
+      refinement.cancel();
+      void realtime.cancel();
+      audio.stop();
+      stopMediaStream(streamRef.current);
+      streamRef.current = null;
+    };
 
+    window.addEventListener(SESSION_LOGOUT_INTENT_EVENT, stopPrivateWork);
+    return () =>
+      window.removeEventListener(
+        SESSION_LOGOUT_INTENT_EVENT,
+        stopPrivateWork,
+      );
+  }, [
+    audio,
+    cancelTranscription,
+    recorder,
+    recordingDispatch,
+    realtime,
+    refinement,
+  ]);
+
+  const setRecordingError = useCallback(
+    (error: unknown) => {
       dispatch({
-        type: 'UPDATE_ENTRY',
-        id: entryId,
-        updates: {
-          rawTranscript: nextTranscript,
-          name:
-            entry.name === 'Untitled'
-              ? deriveEntryName(nextTranscript)
-              : entry.name,
+        type: 'SET_ERROR',
+        error: {
+          id: crypto.randomUUID(),
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Microphone access could not be started.',
+          type: 'transcription',
         },
       });
     },
-    [dispatch]
-  );
-
-  // Record what a take contributed, so later edits to the transcript can be
-  // diffed against it to isolate the user's corrections.
-  const recordTakeText = useCallback(
-    (entryId: string, recordedAt: number, text: string) => {
-      void attachTranscript(entryId, recordedAt, text).catch((err) => {
-        console.error('Failed to record take transcript:', err);
-      });
-    },
-    []
-  );
-
-  /**
-   * Run confirmed substitutions over a fresh transcript before it lands in the
-   * entry. The corrected text — not the model's raw output — becomes the take's
-   * baseline, so the pass is not re-proposed as a correction on the next diff.
-   */
-  const ingestTranscript = useCallback(
-    (entryId: string, recordedAt: number | null, transcript: string) => {
-      const result = applyLexicon(transcript, stateRef.current.lexicon);
-      appendTranscript(entryId, result.text);
-      if (recordedAt !== null) recordTakeText(entryId, recordedAt, result.text);
-      if (result.applied.length > 0) {
-        setApplied({ entryId, substitutions: result.applied });
-      }
-    },
-    [appendTranscript, recordTakeText]
-  );
-
-  const beginRecording = useCallback(
-    async (entryId: string) => {
-      setRecordingError(null);
-
-      // Rescue a pending failed take before its live transcript is lost —
-      // the audio itself is already persisted in IndexedDB.
-      if (failedTake) {
-        if (failedTake.liveTranscript) {
-          ingestTranscript(
-            failedTake.entryId,
-            failedTake.recordedAt,
-            failedTake.liveTranscript
-          );
-        }
-        setFailedTake(null);
-        clearTranscriptionError();
-      }
-
-      recordingEntryIdRef.current = entryId;
-
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        streamRef.current = stream;
-        await audio.start(stream);
-        recorder.start(stream);
-        recDispatch({ type: 'START_RECORDING', startedAt: Date.now() });
-        speech.start();
-      } catch (err) {
-        recordingEntryIdRef.current = null;
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach((track) => track.stop());
-          streamRef.current = null;
-        }
-        audio.stop();
-        const message =
-          err instanceof Error ? err.message : 'Unable to start recording.';
-        setRecordingError(message);
-      }
-    },
-    [
-      audio,
-      clearTranscriptionError,
-      failedTake,
-      ingestTranscript,
-      recDispatch,
-      recorder,
-      speech,
-    ]
+    [dispatch],
   );
 
   const handleStart = useCallback(async () => {
-    const entry = activeEntry ?? newEntry(null);
-    if (!activeEntry) {
-      dispatch({ type: 'CREATE_ENTRY', entry });
+    if (
+      !activeEntry ||
+      recordingTargetRef.current ||
+      recordingState.isRecording ||
+      isTranscribing
+    ) {
+      return;
     }
-    await beginRecording(entry.id);
-  }, [activeEntry, beginRecording, dispatch]);
 
-  // Vocal note: record into a fresh note from anywhere. A note taken while a
-  // writing entry is open pins to it, surfacing in that entry's notes panel.
-  const handleStartNote = useCallback(async () => {
-    const base = newEntry(activeEntry?.parentId ?? null, 'note');
-    const note =
-      activeEntry && activeEntry.kind === 'writing'
-        ? { ...base, attachedToId: activeEntry.id }
-        : base;
-    dispatch({ type: 'CREATE_ENTRY', entry: note });
-    await beginRecording(note.id);
-  }, [activeEntry, beginRecording, dispatch]);
+    const target: RecordingTarget = {
+      entryId: activeEntry.id,
+      epoch: privateWorkEpochRef.current,
+      provider,
+      keyterms: [...keyterms],
+    };
+    recordingTargetRef.current = target;
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      if (
+        recordingTargetRef.current !== target ||
+        !stateRef.current.entries[target.entryId]
+      ) {
+        stopMediaStream(stream);
+        return;
+      }
+
+      streamRef.current = stream;
+      stream.getTracks().forEach((track) => {
+        track.onended = () => {
+          if (recordingTargetRef.current !== target) return;
+          recorder.checkpoint();
+          setBackgroundNotice('Microphone interrupted · saving captured audio');
+          void handleStopRef.current();
+        };
+      });
+      recordingDispatch({ type: 'START_RECORDING', startedAt: Date.now() });
+      await audio.start(stream);
+      recorder.start(stream);
+      if (target.provider === 'elevenlabs') {
+        void realtime.start(stream, target.keyterms);
+      }
+    } catch (error) {
+      audio.stop();
+      stopMediaStream(streamRef.current);
+      streamRef.current = null;
+      if (recordingTargetRef.current === target) {
+        recordingTargetRef.current = null;
+      }
+      recordingDispatch({ type: 'STOP_RECORDING' });
+      setRecordingError(error);
+    }
+  }, [
+    activeEntry,
+    audio,
+    isTranscribing,
+    keyterms,
+    provider,
+    realtime,
+    recorder,
+    recordingDispatch,
+    recordingState.isRecording,
+    setRecordingError,
+  ]);
 
   const handleStop = useCallback(async () => {
-    const entryId = recordingEntryIdRef.current ?? state.activeEntryId;
-    const entry = entryId ? stateRef.current.entries[entryId] : null;
-    const session = recState.session;
+    if (!recordingState.isRecording || stopInFlightRef.current) return;
+    stopInFlightRef.current = true;
 
-    speech.stop();
-    recDispatch({ type: 'FINALIZE_PROSODY', prosody: { ...prosody } });
-    recDispatch({ type: 'STOP_RECORDING' });
-    const audioBlob = await recorder.stop();
-    audio.stop();
+    try {
+      const target = recordingTargetRef.current;
+      const stoppedAt = Date.now();
+      const recordingDurationMs = recordingState.session
+        ? Math.max(0, stoppedAt - recordingState.session.startedAt)
+        : 0;
+      const capturedProsody = { ...prosody };
+      const capturedVoiceConfig = { ...recordingState.voiceConfig };
+      recordingDispatch({ type: 'STOP_RECORDING' });
+      let audioBlob: Blob;
+      let realtimeTranscript = '';
+      let shouldUseBatch = target?.provider !== 'elevenlabs';
 
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-
-    const durationMs = session ? Date.now() - session.startedAt : 0;
-
-    // Persist the take to IndexedDB — non-fatal on quota or availability errors.
-    // Held so the transcript can be attached to the same record once it lands.
-    const takeSaved =
-      entry && session && audioBlob.size > 0
-        ? saveRecording(entry.id, audioBlob, {
-            recordedAt: session.startedAt,
-            durationMs,
-          }).catch((err) => {
-            console.error('Failed to persist recording:', err);
-          })
-        : null;
-
-    // Save prosody + voice config, and bump take stats when audio was captured
-    if (entry && session) {
-      dispatch({
-        type: 'UPDATE_ENTRY',
-        id: entry.id,
-        updates: {
-          prosody: { ...prosody },
-          voiceConfig: { ...recState.voiceConfig },
-          ...(audioBlob.size > 0
-            ? {
-                recordedDurationMs:
-                  (entry.recordedDurationMs ?? 0) + durationMs,
-                audioTakes: (entry.audioTakes ?? 0) + 1,
-              }
-            : {}),
-        },
-      });
-    }
-
-    // The take record must exist before its transcript can be attached.
-    if (takeSaved) await takeSaved;
-
-    // Send to the server for transcription; on failure hold the take for a
-    // user-chosen retry instead of silently appending the live transcript.
-    if (entry && audioBlob.size > 0) {
       try {
-        const result = await transcribe(audioBlob, vocabulary);
-        ingestTranscript(entry.id, session?.startedAt ?? null, result.transcript);
-      } catch {
-        setFailedTake({
-          blob: audioBlob,
-          entryId: entry.id,
-          recordedAt: session?.startedAt ?? Date.now(),
-          liveTranscript: speech.getFinalTranscript(),
-        });
+        audioBlob = await recorder.stop();
+        if (!target || target.epoch !== privateWorkEpochRef.current) {
+          if (target?.provider === 'elevenlabs') {
+            await realtime.cancel();
+          }
+          return;
+        }
+        if (target.provider === 'elevenlabs') {
+          try {
+            const realtimeResult = await realtime.stop();
+            if (target.epoch !== privateWorkEpochRef.current) return;
+            realtimeTranscript = realtimeResult.transcript;
+            shouldUseBatch = realtimeResult.shouldFallback;
+          } catch {
+            shouldUseBatch = true;
+          }
+        }
+      } catch (error) {
+        if (target && target.epoch !== privateWorkEpochRef.current) return;
+        if (target?.provider === 'elevenlabs') {
+          await realtime.cancel();
+        }
+        setRecordingError(error);
+        if (recordingTargetRef.current === target) {
+          recordingTargetRef.current = null;
+        }
+        return;
+      } finally {
+        audio.stop();
+        stopMediaStream(streamRef.current);
+        streamRef.current = null;
       }
-    } else if (entry) {
-      const fallbackText = speech.getFinalTranscript();
-      if (fallbackText) {
-        ingestTranscript(entry.id, null, fallbackText);
-      }
-    }
 
-    recordingEntryIdRef.current = null;
+      if (
+        !target ||
+        target.epoch !== privateWorkEpochRef.current ||
+        !stateRef.current.entries[target.entryId]
+      ) {
+        if (recordingTargetRef.current === target) {
+          recordingTargetRef.current = null;
+        }
+        return;
+      }
+
+      const recordedAt = recordingState.session?.startedAt ?? stoppedAt;
+      let takeSaved = false;
+      if (audioBlob.size > 0) {
+        try {
+          await saveRecording(target.entryId, audioBlob, {
+            recordedAt,
+            durationMs: recordingDurationMs,
+          });
+          takeSaved = true;
+          const entry = stateRef.current.entries[target.entryId];
+          if (entry) {
+            dispatch({
+              type: 'UPDATE_ENTRY',
+              id: target.entryId,
+              updates: {
+                recordedDurationMs:
+                  (entry.recordedDurationMs ?? 0) + recordingDurationMs,
+                audioTakes: (entry.audioTakes ?? 0) + 1,
+              },
+              recordHistory: false,
+            });
+          }
+        } catch (error) {
+          console.error('Failed to persist recording:', error);
+        }
+      }
+
+      let snapshotSaved = false;
+      const saveSnapshot = (
+        metrics: typeof capturedProsody,
+        entry = stateRef.current.entries[target.entryId],
+      ) => {
+        if (!entry) return;
+        dispatch({
+          type: 'UPDATE_ENTRY',
+          id: target.entryId,
+          updates: {
+            prosody: { ...metrics },
+            prosodyHistory: appendProsodySnapshot(
+              entry.prosodyHistory,
+              metrics,
+              stoppedAt,
+            ),
+            voiceConfig: capturedVoiceConfig,
+          },
+        });
+        recordingDispatch({ type: 'FINALIZE_PROSODY', prosody: metrics });
+        snapshotSaved = true;
+      };
+
+      try {
+        if (audioBlob.size === 0) {
+          saveSnapshot(capturedProsody);
+          return;
+        }
+
+        const result =
+          target.provider === 'elevenlabs' &&
+          !shouldUseBatch &&
+          realtimeTranscript
+            ? {
+                duration: recordingDurationMs / 1_000,
+                language: 'en',
+                transcript: realtimeTranscript,
+                words: [],
+              }
+            : await transcribe(audioBlob, {
+                provider: target.provider,
+                keyterms: target.keyterms,
+              });
+        if (target.epoch !== privateWorkEpochRef.current) return;
+        const transcript = result.transcript.trim();
+        if (!transcript) {
+          saveSnapshot(capturedProsody);
+          return;
+        }
+
+        const latestEntry = stateRef.current.entries[target.entryId];
+        if (!latestEntry) return;
+
+        if (takeSaved) {
+          void attachTranscript(target.entryId, recordedAt, transcript).catch(
+            (error) => console.error('Failed to attach take transcript:', error),
+          );
+        }
+
+        const appended = appendRecordingTranscript(latestEntry, transcript);
+        const correctedProsody = completeTranscriptProsody(
+          capturedProsody,
+          transcript,
+          recordingDurationMs,
+        );
+        dispatch({
+          type: 'UPDATE_ENTRY',
+          id: target.entryId,
+          updates: {
+            rawTranscript: appended.rawTranscript,
+            refinedText: appended.documentText,
+            prosody: correctedProsody,
+            prosodyHistory: appendProsodySnapshot(
+              latestEntry.prosodyHistory,
+              correctedProsody,
+              stoppedAt,
+            ),
+            voiceConfig: capturedVoiceConfig,
+          },
+        });
+        recordingDispatch({
+          type: 'FINALIZE_PROSODY',
+          prosody: correctedProsody,
+        });
+        snapshotSaved = true;
+
+        if (recordingTargetRef.current === target) {
+          recordingTargetRef.current = null;
+        }
+        if (stateRef.current.refinementSettings.autoRefine !== false) {
+          void refinement.refine({
+            entryId: target.entryId,
+            mode: 'faithful',
+            sourceText: appended.documentText,
+            autoTriggered: true,
+          });
+        }
+      } catch {
+        if (target.epoch !== privateWorkEpochRef.current) return;
+        // useTranscription reports the request error. The unverified speech is
+        // deliberately not inserted or reconstructed through a cloud fallback.
+        if (!snapshotSaved) saveSnapshot(capturedProsody);
+      } finally {
+        if (recordingTargetRef.current === target) {
+          recordingTargetRef.current = null;
+        }
+      }
+    } finally {
+      stopInFlightRef.current = false;
+    }
   }, [
     audio,
     dispatch,
-    ingestTranscript,
     prosody,
-    recDispatch,
-    recState.session,
-    recState.voiceConfig,
+    realtime,
     recorder,
-    speech,
-    state.activeEntryId,
+    recordingDispatch,
+    recordingState,
+    refinement,
+    setRecordingError,
     transcribe,
-    vocabulary,
   ]);
 
-  const handleRetryTranscription = useCallback(async () => {
-    const take = failedTake;
-    if (!take) return;
-
-    try {
-      const result = await transcribe(take.blob, vocabulary);
-      ingestTranscript(take.entryId, take.recordedAt, result.transcript);
-      setFailedTake(null);
-    } catch {
-      // transcriptionError is re-set by transcribe(); the take stays armed
-    }
-  }, [failedTake, ingestTranscript, transcribe, vocabulary]);
-
-  const handleUseLiveTranscript = useCallback(() => {
-    const take = failedTake;
-    if (!take) return;
-
-    if (take.liveTranscript) {
-      ingestTranscript(take.entryId, take.recordedAt, take.liveTranscript);
-    }
-    setFailedTake(null);
-    clearTranscriptionError();
-  }, [clearTranscriptionError, failedTake, ingestTranscript]);
-
-  /**
-   * Undo one substitution and demote the rule behind it. The demotion is the
-   * point: a rule the user reverts stops firing, which is what keeps a bad
-   * lexicon entry from rewriting every future transcript.
-   */
-  const handleRevertSubstitution = useCallback(
-    (substitution: AppliedSubstitution) => {
-      dispatch({ type: 'RECORD_LEXICON_MISFIRE', id: substitution.termId });
-
-      const entryId = applied?.entryId;
-      const entry = entryId ? stateRef.current.entries[entryId] : null;
-      if (entryId && entry) {
-        dispatch({
-          type: 'UPDATE_ENTRY',
-          id: entryId,
-          updates: {
-            rawTranscript: entry.rawTranscript
-              .split(substitution.canonical)
-              .join(substitution.heard),
-          },
-        });
-      }
-
-      setApplied((prev) => {
-        if (!prev) return null;
-        const rest = prev.substitutions.filter(
-          (s) => s.termId !== substitution.termId || s.heard !== substitution.heard
-        );
-        return rest.length > 0 ? { ...prev, substitutions: rest } : null;
-      });
-    },
-    [applied, dispatch]
-  );
+  useLayoutEffect(() => {
+    handleStopRef.current = handleStop;
+  }, [handleStop]);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.repeat) return;
-      if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.code !== 'Space') return;
-      e.preventDefault();
-      if (recState.isRecording) {
-        void handleStop();
-      } else if (!isTranscribing) {
-        void handleStart();
+    if (!recordingState.isRecording) {
+      if (backgroundStopTimerRef.current) {
+        clearTimeout(backgroundStopTimerRef.current);
+        backgroundStopTimerRef.current = null;
+      }
+      backgroundedAtRef.current = null;
+      return;
+    }
+
+    const startBackgroundGrace = () => {
+      if (backgroundedAtRef.current !== null) return;
+      backgroundedAtRef.current = Date.now();
+      recorder.checkpoint();
+      setBackgroundNotice(
+        `Recording while away · up to ${formatBackgroundRecordingLimit(backgroundLimitMs)}`,
+      );
+      backgroundStopTimerRef.current = setTimeout(() => {
+        backgroundStopTimerRef.current = null;
+        backgroundedAtRef.current = null;
+        setBackgroundNotice('Away limit reached · finalizing recording');
+        void handleStopRef.current();
+      }, backgroundLimitMs);
+    };
+
+    const finishBackgroundGrace = () => {
+      if (backgroundedAtRef.current === null) return;
+      const elapsed = Date.now() - backgroundedAtRef.current;
+      backgroundedAtRef.current = null;
+      if (backgroundStopTimerRef.current) {
+        clearTimeout(backgroundStopTimerRef.current);
+        backgroundStopTimerRef.current = null;
+      }
+      setBackgroundNotice(
+        elapsed >= backgroundLimitMs
+          ? 'Away limit reached · finalizing recording'
+          : 'Returned · finalizing background recording',
+      );
+      void handleStopRef.current();
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') startBackgroundGrace();
+      else finishBackgroundGrace();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('pagehide', startBackgroundGrace);
+    window.addEventListener('pageshow', finishBackgroundGrace);
+    if (document.visibilityState === 'hidden') startBackgroundGrace();
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('pagehide', startBackgroundGrace);
+      window.removeEventListener('pageshow', finishBackgroundGrace);
+      if (backgroundStopTimerRef.current) {
+        clearTimeout(backgroundStopTimerRef.current);
+        backgroundStopTimerRef.current = null;
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [handleStart, handleStop, isTranscribing, recState.isRecording]);
+  }, [backgroundLimitMs, recorder, recordingState.isRecording]);
 
-  const liveWordCount = recState.session
-    ? countWords(
-        `${recState.session.finalTranscript} ${recState.session.interimTranscript}`
-      )
-    : 0;
+  useEffect(() => {
+    if (recordingState.isRecording || isTranscribing || realtime.status === 'finalizing') return;
+    if (!backgroundNotice) return;
+    const timer = setTimeout(() => setBackgroundNotice(''), 2_000);
+    return () => clearTimeout(timer);
+  }, [backgroundNotice, isTranscribing, realtime.status, recordingState.isRecording]);
+
+  const updateBackgroundLimit = useCallback((milliseconds: number) => {
+    const normalized = normalizeBackgroundRecordingLimit(milliseconds);
+    setBackgroundLimitMs(normalized);
+    try {
+      localStorage.setItem(BACKGROUND_RECORDING_LIMIT_KEY, String(normalized));
+    } catch {
+      // The selected limit remains active for this session.
+    }
+  }, []);
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col">
+    <div className="main-panel">
       <Editor
-        interimTranscript={speech.interimTranscript}
-        isRecording={recState.isRecording}
-        onToggleSidebar={onToggleSidebar}
-      />
-
-      <AutoCorrectionNotice
-        applied={
-          applied && applied.entryId === state.activeEntryId
-            ? applied.substitutions
-            : []
-        }
-        onRevert={handleRevertSubstitution}
-        onDismiss={() => setApplied(null)}
-      />
-
-      <RecordingFooter
-        activeEntryName={activeEntry?.name ?? null}
-        isRecording={recState.isRecording}
-        isTranscribing={isTranscribing}
-        isSpeechSupported={speech.isSupported}
-        recordingError={recordingError}
-        transcriptionError={transcriptionError}
-        canRetryTranscription={failedTake !== null}
-        prosody={prosody}
-        sessionStartedAt={recState.session?.startedAt ?? null}
-        liveWordCount={liveWordCount}
+        backgroundLimitMs={backgroundLimitMs}
+        backgroundNotice={backgroundNotice}
+        key={state.activeEntryId ?? 'no-active-entry'}
         drawWaveform={audio.drawWaveform}
+        interimTranscript={realtime.liveTranscript}
+        isRecording={recordingState.isRecording}
+        isTranscribing={
+          isTranscribing || realtime.status === 'finalizing'
+        }
+        onBackgroundLimitChange={updateBackgroundLimit}
+        onOpenSidebar={onOpenSidebar}
+        onProviderChange={setProvider}
         onStart={handleStart}
-        onStartNote={handleStartNote}
         onStop={handleStop}
-        onRetryTranscription={handleRetryTranscription}
-        onUseLiveTranscript={handleUseLiveTranscript}
+        prosody={prosody}
+        provider={provider}
+        refinement={refinement}
+        startedAt={recordingState.session?.startedAt}
       />
     </div>
   );

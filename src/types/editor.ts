@@ -6,6 +6,8 @@ export type EntryKind = 'writing' | 'note';
 export interface Entry {
   id: string;
   name: string;
+  titleSource?: 'manual' | 'agent' | 'fallback';
+  titleBasis?: string;
   parentId: string | null;
   kind: EntryKind;
   /** Position within a book; inert inside folders (which sort by name). */
@@ -17,6 +19,10 @@ export interface Entry {
   rawTranscript: string;
   refinedText: string;
   prosody: ProsodyDiagnostics;
+  prosodyHistory?: Array<{
+    capturedAt: number;
+    metrics: ProsodyDiagnostics;
+  }>;
   voiceConfig: VoiceConfig;
   createdAt: number;
   updatedAt: number;

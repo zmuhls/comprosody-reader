@@ -42,6 +42,13 @@ export function useStorage() {
     [dispatch]
   );
 
+  const moveEntry = useCallback(
+    (id: string, parentId: string | null) => {
+      dispatch({ type: 'MOVE_NODE', nodeType: 'entry', id, newParentId: parentId });
+    },
+    [dispatch]
+  );
+
   const createDirectory = useCallback(
     (
       parentId: string | null,
@@ -110,6 +117,18 @@ export function useStorage() {
     [dispatch, state.directories, state.entries]
   );
 
+  const moveDirectory = useCallback(
+    (id: string, parentId: string | null) => {
+      dispatch({
+        type: 'MOVE_NODE',
+        nodeType: 'directory',
+        id,
+        newParentId: parentId,
+      });
+    },
+    [dispatch]
+  );
+
   return {
     entries: state.entries,
     directories: state.directories,
@@ -120,8 +139,10 @@ export function useStorage() {
     updateEntry,
     deleteEntry,
     renameEntry,
+    moveEntry,
     createDirectory,
     renameDirectory,
+    moveDirectory,
     deleteDirectory,
     moveNode,
     reorderEntry,

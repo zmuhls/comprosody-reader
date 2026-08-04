@@ -1,582 +1,848 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import { useApp, newEntry } from '../../context/AppContext';
-import { useRefinement } from '../../hooks/useRefinement';
-import { getPagingSiblings, useSwipePaging } from '../../hooks/useSwipePaging';
-import { countParagraphs, countWords, deriveEntryName } from '../../lib/entries';
-import { formatDuration, formatUpdatedAt } from '../../lib/time';
-import { copyEntryToClipboard, downloadEntry } from '../../lib/export';
-import type { Directory } from '../../types/editor';
-import type { Variant } from '../../types/llm';
-import { TranscriptView } from './TranscriptView';
-import { Toolbar } from './Toolbar';
-import { PassesBar } from './PassesBar';
-import { VariantDiffView } from './VariantDiffView';
-import { DiffView } from './DiffView';
-import { MarginNotes } from './MarginNotes';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import { EditorContent, useEditor } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
+import { Markdown } from '@tiptap/markdown';
+import { Dialog, DropdownMenu, Tooltip } from 'radix-ui';
+import { useApp } from '../../context/AppContext';
+import { useStorage } from '../../hooks/useStorage';
+import type { ProsodyDiagnostics } from '../../types/audio';
+import type { TranscriptionProviderId } from '../../types/transcription';
+import {
+  isDocumentRevisionCurrent,
+  type RefinementController,
+} from '../../hooks/useRefinement';
+import { Icon } from '../ui/Icon';
+import { RecordingDock } from '../dictation/RecordingDock';
+import { RefinementComposer } from './Toolbar';
+import { VariantCards } from './VariantCards';
+import { RefinementSidecar } from './RefinementSidecar';
+import type { Entry } from '../../types/editor';
+import { LinkedPassages } from '../library/LinkedPassages';
+import { SpeechControl } from '../speech/SpeechControl';
+import { useAutomaticNoteTitle } from '../../hooks/useAutomaticNoteTitle';
+import { AudioTakes } from './AudioTakes';
 
 interface Props {
+  backgroundLimitMs: number;
+  backgroundNotice: string;
+  drawWaveform: (canvas: HTMLCanvasElement, color?: string) => void;
   interimTranscript: string;
   isRecording: boolean;
-  onToggleSidebar: () => void;
+  isTranscribing: boolean;
+  onOpenSidebar: (returnFocusTarget?: HTMLElement) => void;
+  onBackgroundLimitChange: (milliseconds: number) => void;
+  onProviderChange: (provider: TranscriptionProviderId) => void;
+  onStart: () => void;
+  onStop: () => void;
+  prosody: ProsodyDiagnostics;
+  provider: TranscriptionProviderId;
+  refinement: RefinementController;
+  startedAt?: number;
 }
 
-function HamburgerButton({ onClick }: { onClick: () => void }) {
+function documentDate(timestamp: number): string {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(new Date(timestamp));
+}
+
+function safeFilename(name: string): string {
+  const normalized = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  return normalized || 'untitled-note';
+}
+
+export function DocumentTitle({
+  entry,
+  onCommit,
+  onEditingChange,
+  onEnterBody,
+}: {
+  entry: Entry;
+  onCommit: (title: string) => void;
+  onEditingChange?: (editing: boolean) => void;
+  onEnterBody: () => void;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState({
+    baseName: entry.name,
+    value: entry.name,
+  });
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const displayRef = useRef<HTMLButtonElement | null>(null);
+  const lastTouchAtRef = useRef(Number.NEGATIVE_INFINITY);
+  const value = isEditing ? draft.value : entry.name;
+
+  useEffect(() => () => onEditingChange?.(false), [onEditingChange]);
+
+  useEffect(() => {
+    if (!isEditing) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [isEditing]);
+
+  const beginEditing = () => {
+    setDraft({ baseName: entry.name, value: entry.name });
+    onEditingChange?.(true);
+    setIsEditing(true);
+  };
+
+  const commit = (enterBody = false) => {
+    const nextTitle = value.trim() || 'Untitled';
+    setDraft({ baseName: entry.name, value: nextTitle });
+    if (nextTitle !== entry.name) onCommit(nextTitle);
+    setIsEditing(false);
+    onEditingChange?.(false);
+    if (enterBody) onEnterBody();
+  };
+
+  if (!isEditing) {
+    return (
+      <button
+        aria-label={`Rename note title: ${entry.name}`}
+        className="document-title document-title-display"
+        onClick={(event) => {
+          if (event.detail === 0) beginEditing();
+        }}
+        onDoubleClick={beginEditing}
+        onKeyDown={(event) => {
+          if (!['Enter', ' ', 'F2'].includes(event.key)) return;
+          event.preventDefault();
+          beginEditing();
+        }}
+        onPointerUp={(event) => {
+          if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
+          const now = performance.now();
+          if (now - lastTouchAtRef.current <= 460) {
+            event.preventDefault();
+            beginEditing();
+            lastTouchAtRef.current = Number.NEGATIVE_INFINITY;
+          } else {
+            lastTouchAtRef.current = now;
+          }
+        }}
+        title="Double-click or double-tap to rename"
+        type="button"
+        ref={displayRef}
+      >
+        {entry.name}
+      </button>
+    );
+  }
+
   return (
-    <button
-      onClick={onClick}
-      className="flex h-10 w-10 shrink-0 items-center justify-center border border-border text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary lg:hidden"
-      aria-label="open library"
-    >
-      ≡
-    </button>
+    <input
+      aria-label="Note title"
+      className="document-title document-title-input"
+      onBlur={() => commit()}
+      onChange={(event) =>
+        setDraft({ baseName: entry.name, value: event.target.value })
+      }
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          commit(true);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          setDraft({ baseName: entry.name, value: entry.name });
+          setIsEditing(false);
+          onEditingChange?.(false);
+          window.requestAnimationFrame(() => displayRef.current?.focus());
+        }
+      }}
+      ref={inputRef}
+      value={value}
+    />
   );
 }
 
-/** Nearest enclosing book, walking up from a containing directory id. */
-function findBookAncestor(
-  directories: Record<string, Directory>,
-  startId: string | null
-): string | null {
-  let cursor = startId;
-  while (cursor !== null) {
-    const dir = directories[cursor];
-    if (!dir) return null;
-    if (dir.kind === 'book') return dir.id;
-    cursor = dir.parentId;
-  }
-  return null;
+export function SourceTranscriptDrawer({
+  audioTakes,
+  entryId,
+  interimTranscript,
+  isOpen,
+  onClose,
+  rawTranscript,
+}: {
+  audioTakes?: number;
+  entryId: string;
+  interimTranscript: string;
+  isOpen: boolean;
+  onClose: () => void;
+  rawTranscript: string;
+}) {
+  if (!isOpen) return null;
+
+  return (
+    <aside
+      aria-label="Source transcript"
+      className="source-drawer is-open"
+      id="source-transcript-drawer"
+    >
+      <div className="source-drawer-header">
+        <div>
+          <strong>Source transcript</strong>
+          <span>Unrefined speech record</span>
+        </div>
+        <button
+          aria-label="Close source transcript"
+          className="icon-button"
+          onClick={onClose}
+          type="button"
+        >
+          <Icon name="x" size={15} />
+        </button>
+      </div>
+      <div className="source-transcript-copy">
+        {rawTranscript || 'No transcript has been recorded yet.'}
+        {interimTranscript ? ` ${interimTranscript}` : ''}
+      </div>
+      <AudioTakes entryId={entryId} audioTakes={audioTakes} />
+    </aside>
+  );
 }
 
-export function Editor({ interimTranscript, isRecording, onToggleSidebar }: Props) {
-  const { state, dispatch } = useApp();
+export const Editor = memo(function Editor({
+  backgroundLimitMs,
+  backgroundNotice,
+  drawWaveform,
+  interimTranscript,
+  isRecording,
+  isTranscribing,
+  onOpenSidebar,
+  onBackgroundLimitChange,
+  onProviderChange,
+  onStart,
+  onStop,
+  prosody,
+  provider,
+  refinement,
+  startedAt,
+}: Props) {
   const {
-    isRefining,
-    refinementError,
-    refine,
-    refineSelection,
-    variants,
-    variantErrors,
-    isGeneratingVariants,
-    generateVariants,
-    acceptVariant,
-    retryVariant,
-    dismissVariants,
-  } = useRefinement();
-  const refinedRef = useRef<HTMLTextAreaElement>(null);
+    state,
+    dispatch,
+    storageReady,
+    titleEditingEntryId,
+    setTitleEditingEntryId,
+  } = useApp();
+  const { createEntry } = useStorage();
+  const [isSourceOpen, setIsSourceOpen] = useState(false);
+  const [isRefinementOpen, setIsRefinementOpen] = useState(false);
+  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
+    window.matchMedia('(max-width: 900px)').matches,
+  );
   const [hasSelection, setHasSelection] = useState(false);
-  // Keyed by entry id so switching entries implicitly resets these flags.
-  const [diffEntryId, setDiffEntryId] = useState<string | null>(null);
-  const [copiedEntryId, setCopiedEntryId] = useState<string | null>(null);
-  const [highlightedPass, setHighlightedPass] = useState<{
-    entryId: string;
-    label: Variant['label'];
-  } | null>(null);
-  const [notesEntryId, setNotesEntryId] = useState<string | null>(null);
-  const copiedTimerRef = useRef<number | null>(null);
+  const [hasPendingUpdate, setHasPendingUpdate] = useState(false);
+  const activeEntryIdRef = useRef<string | null>(state.activeEntryId);
+  const pendingUpdateRef = useRef<{ id: string; markdown: string } | null>(null);
+  const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLocalMarkdownRef = useRef('');
+  const lastEntryIdRef = useRef<string | null>(null);
 
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
     : null;
-
-  const showDiff = !!activeEntry && diffEntryId === activeEntry.id;
-  const copied = !!activeEntry && copiedEntryId === activeEntry.id;
-
-  const hasTranscript = !!activeEntry && countWords(activeEntry.rawTranscript) > 0;
-  const hasRefinedText = !!activeEntry && activeEntry.refinedText.trim().length > 0;
-  const hasContent = hasTranscript || hasRefinedText;
-  const canRefine = hasTranscript && !isRefining && !isGeneratingVariants;
-  const canUndo = (activeEntry?.draftHistory?.length ?? 0) > 0;
-
-  const handleRefineSelection = useCallback(() => {
-    const textarea = refinedRef.current;
-    if (!textarea) return;
-    const { selectionStart, selectionEnd } = textarea;
-    if (selectionStart === selectionEnd) return;
-    refineSelection(selectionStart, selectionEnd);
-  }, [refineSelection]);
-
-  const handleSelectionChange = useCallback(() => {
-    const textarea = refinedRef.current;
-    if (!textarea) return;
-    setHasSelection(textarea.selectionStart !== textarea.selectionEnd);
-  }, []);
-
-  const handleSeedDraft = useCallback(() => {
-    if (!activeEntry) return;
-    dispatch({
-      type: 'UPDATE_ENTRY',
-      id: activeEntry.id,
-      updates: {
-        refinedText:
-          activeEntry.refinedText.trim() === activeEntry.rawTranscript.trim()
-            ? ''
-            : activeEntry.rawTranscript,
-      },
+  const automaticTitleStatus = useAutomaticNoteTitle(
+    activeEntry,
+    Boolean(activeEntry && titleEditingEntryId === activeEntry.id),
+  );
+  const handleTitleEditingChange = useCallback((editing: boolean) => {
+    const entryId = activeEntryIdRef.current;
+    setTitleEditingEntryId((current) => {
+      if (editing) return entryId;
+      return current === entryId ? null : current;
     });
-  }, [activeEntry, dispatch]);
-
-  const handleUndo = useCallback(() => {
-    if (!activeEntry) return;
-    const history = activeEntry.draftHistory ?? [];
-    if (history.length === 0) return;
-    dispatch({
-      type: 'UPDATE_ENTRY',
-      id: activeEntry.id,
-      updates: {
-        refinedText: history[history.length - 1],
-        draftHistory: history.slice(0, -1),
-      },
-    });
-  }, [activeEntry, dispatch]);
-
-  const handleCopy = useCallback(() => {
-    if (!activeEntry) return;
-    const entryId = activeEntry.id;
-    copyEntryToClipboard(activeEntry)
-      .then(() => {
-        setCopiedEntryId(entryId);
-        if (copiedTimerRef.current !== null) {
-          window.clearTimeout(copiedTimerRef.current);
-        }
-        copiedTimerRef.current = window.setTimeout(
-          () => setCopiedEntryId(null),
-          1600
-        );
-      })
-      .catch((err) => {
-        console.error('Copy failed:', err);
-      });
-  }, [activeEntry]);
-
-  const handleExport = useCallback(() => {
-    if (!activeEntry) return;
-    downloadEntry(activeEntry);
-  }, [activeEntry]);
-
-  const handleToggleDiff = useCallback(() => {
-    if (!activeEntry) return;
-    const entryId = activeEntry.id;
-    setDiffEntryId((current) => (current === entryId ? null : entryId));
-    setHasSelection(false);
-  }, [activeEntry]);
+  }, [setTitleEditingEntryId]);
 
   useEffect(() => {
-    return () => {
-      if (copiedTimerRef.current !== null) {
-        window.clearTimeout(copiedTimerRef.current);
-      }
-    };
+    activeEntryIdRef.current = state.activeEntryId;
+  }, [state.activeEntryId]);
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 900px)');
+    const update = () => setIsNarrowViewport(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
   }, []);
 
-  // Swipe (touch) and bracket keys page between sibling chapters/entries.
-  const rootRef = useRef<HTMLDivElement>(null);
-  const goToSibling = useCallback(
-    (direction: 'prev' | 'next') => {
-      const currentId = state.activeEntryId;
-      if (!currentId) return;
-      const { prev, next } = getPagingSiblings(
-        currentId,
-        state.entries,
-        state.directories
-      );
-      const target = direction === 'prev' ? prev : next;
-      if (target) dispatch({ type: 'SET_ACTIVE_ENTRY', id: target });
-    },
-    [state.activeEntryId, state.entries, state.directories, dispatch]
-  );
+  const flushPendingUpdate = useCallback((updateStatus = true) => {
+    if (updateTimerRef.current) {
+      clearTimeout(updateTimerRef.current);
+      updateTimerRef.current = null;
+    }
+    const pending = pendingUpdateRef.current;
+    pendingUpdateRef.current = null;
+    if (!pending) return;
+    dispatch({
+      type: 'UPDATE_ENTRY',
+      id: pending.id,
+      updates: { refinedText: pending.markdown },
+      recordHistory: false,
+    });
+    if (updateStatus) setHasPendingUpdate(false);
+  }, [dispatch]);
 
-  useSwipePaging(rootRef, {
-    onPrev: () => goToSibling('prev'),
-    onNext: () => goToSibling('next'),
-    enabled: !!state.activeEntryId && !isRecording,
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3, 4] },
+      }),
+      Placeholder.configure({
+        placeholder: 'Begin writing, or press the microphone and begin speaking…',
+      }),
+      Markdown.configure({
+        markedOptions: { gfm: true, breaks: false },
+      }),
+    ],
+    content: activeEntry?.refinedText || activeEntry?.rawTranscript || '',
+    contentType: 'markdown',
+    editorProps: {
+      attributes: {
+        'aria-label': 'Note body',
+        'aria-multiline': 'true',
+        class: 'document-prose',
+        role: 'textbox',
+        spellcheck: 'true',
+      },
+    },
+    onSelectionUpdate: ({ editor: currentEditor }) => {
+      setHasSelection(!currentEditor.state.selection.empty);
+    },
+    onUpdate: ({ editor: currentEditor }) => {
+      const entryId = activeEntryIdRef.current;
+      if (!entryId) return;
+      const markdown = currentEditor.getMarkdown();
+      lastLocalMarkdownRef.current = markdown;
+      pendingUpdateRef.current = { id: entryId, markdown };
+      setHasPendingUpdate(true);
+      if (updateTimerRef.current) clearTimeout(updateTimerRef.current);
+      updateTimerRef.current = setTimeout(flushPendingUpdate, 350);
+    },
   });
 
   useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'INPUT' ||
-          target.tagName === 'TEXTAREA' ||
-          target.tagName === 'SELECT' ||
-          target.isContentEditable)
-      ) {
-        return;
-      }
-      if (event.key === '[') {
-        event.preventDefault();
-        goToSibling('prev');
-      } else if (event.key === ']') {
-        event.preventDefault();
-        goToSibling('next');
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [goToSibling]);
+    return () => flushPendingUpdate(false);
+  }, [flushPendingUpdate]);
 
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.repeat) return;
-      if (!(event.metaKey || event.ctrlKey)) return;
-      if (event.key === 'Enter' && !event.shiftKey && !event.altKey) {
-        if (!canRefine) return;
-        event.preventDefault();
-        refine();
-      } else if (event.shiftKey && event.key.toLowerCase() === 'c') {
-        if (!hasContent) return;
-        event.preventDefault();
-        handleCopy();
+    if (!editor || !activeEntry) return;
+    const incoming = activeEntry.refinedText || activeEntry.rawTranscript || '';
+    const switchedEntry = lastEntryIdRef.current !== activeEntry.id;
+    const isExternalUpdate = incoming !== lastLocalMarkdownRef.current;
+
+    if (switchedEntry || isExternalUpdate) {
+      editor.commands.setContent(incoming, {
+        contentType: 'markdown',
+        emitUpdate: false,
+      });
+      lastLocalMarkdownRef.current = incoming;
+      lastEntryIdRef.current = activeEntry.id;
+    }
+  }, [activeEntry, editor]);
+
+  const exportMarkdown = useCallback(() => {
+    if (!activeEntry || !editor) return;
+    const body = editor.getMarkdown().trim();
+    const markdown = `# ${activeEntry.name}\n\n${body}\n`;
+    const url = URL.createObjectURL(
+      new Blob([markdown], { type: 'text/markdown;charset=utf-8' }),
+    );
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${safeFilename(activeEntry.name)}.md`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }, [activeEntry, editor]);
+
+  const applyInstruction = useCallback(
+    async (instruction: string): Promise<boolean> => {
+      if (!editor || !activeEntry) return false;
+      setIsRefinementOpen(true);
+      flushPendingUpdate();
+      const { from, to, empty } = editor.state.selection;
+
+      if (!empty) {
+        const documentText = editor.getMarkdown();
+        const selection = editor.state.doc.textBetween(from, to, '\n');
+        const contextBefore = editor.state.doc.textBetween(
+          Math.max(0, from - 320),
+          from,
+          '\n',
+        );
+        const contextAfter = editor.state.doc.textBetween(
+          to,
+          Math.min(editor.state.doc.content.size, to + 320),
+          '\n',
+        );
+        const result = await refinement.refineSelection({
+          selection,
+          contextBefore,
+          contextAfter,
+          documentText,
+          from,
+          instruction,
+          to,
+        });
+        return Boolean(result);
       }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [canRefine, hasContent, refine, handleCopy]);
+
+      const result = await refinement.refine({
+        mode: 'faithful',
+        instruction,
+        sourceText: editor.getMarkdown(),
+      });
+      return Boolean(result);
+    },
+    [activeEntry, editor, flushPendingUpdate, refinement],
+  );
+
+  const acceptRefinement = useCallback((): boolean => {
+    flushPendingUpdate();
+    return refinement.acceptProposal((candidate) => {
+      if (
+        !editor ||
+        editor.isDestroyed ||
+        !activeEntry ||
+        activeEntryIdRef.current !== candidate.entryId
+      ) {
+        return false;
+      }
+
+      const persistAcceptedMarkdown = (markdown: string) => {
+        if (updateTimerRef.current) {
+          clearTimeout(updateTimerRef.current);
+          updateTimerRef.current = null;
+        }
+        pendingUpdateRef.current = null;
+        lastLocalMarkdownRef.current = markdown;
+        setHasPendingUpdate(false);
+        dispatch({
+          type: 'UPDATE_ENTRY',
+          id: candidate.entryId,
+          updates: { refinedText: markdown },
+          recordHistory: true,
+        });
+      };
+
+      const target = candidate.selectionTarget;
+      if (target) {
+        if (
+          editor.getMarkdown() !== target.documentText ||
+          target.from < 0 ||
+          target.to <= target.from
+        ) {
+          return false;
+        }
+        const applied = editor
+          .chain()
+          .focus()
+          .insertContentAt(
+            { from: target.from, to: target.to },
+            candidate.text,
+            { contentType: 'markdown' },
+          )
+          .run();
+        if (applied) persistAcceptedMarkdown(editor.getMarkdown());
+        return applied;
+      }
+
+      const currentMarkdown = editor.getMarkdown();
+      if (
+        !isDocumentRevisionCurrent(
+          candidate.startedRevision,
+          {
+            rawTranscript: activeEntry.rawTranscript,
+            refinedText: currentMarkdown,
+          },
+          candidate.sourceText,
+        )
+      ) {
+        return false;
+      }
+
+      const applied = editor.commands.setContent(candidate.text, {
+        contentType: 'markdown',
+        emitUpdate: false,
+      });
+      if (applied) persistAcceptedMarkdown(candidate.text);
+      return applied;
+    });
+  }, [
+    activeEntry,
+    dispatch,
+    editor,
+    flushPendingUpdate,
+    refinement,
+  ]);
+
+  const retryRefinement = useCallback(
+    async (guidance: string): Promise<boolean> => {
+      const proposal = refinement.proposal;
+      if (!editor || editor.isDestroyed || !activeEntry || !proposal) {
+        return false;
+      }
+
+      const documentText = editor.getMarkdown();
+      flushPendingUpdate();
+      const { from, to, empty } = editor.state.selection;
+      const selection = proposal.selectionTarget && !empty
+        ? {
+            selection: editor.state.doc.textBetween(from, to, '\n'),
+            contextBefore: editor.state.doc.textBetween(
+              Math.max(0, from - 320),
+              from,
+              '\n',
+            ),
+            contextAfter: editor.state.doc.textBetween(
+              to,
+              Math.min(editor.state.doc.content.size, to + 320),
+              '\n',
+            ),
+            documentText,
+            from,
+            to,
+          }
+        : undefined;
+
+      const result = await refinement.retryProposal(guidance, {
+        documentText,
+        selection,
+      });
+      return Boolean(result);
+    },
+    [activeEntry, editor, flushPendingUpdate, refinement],
+  );
 
   if (!activeEntry) {
-    const startEntry = (kind: 'writing' | 'note') => {
-      dispatch({ type: 'CREATE_ENTRY', entry: newEntry(null, kind) });
-    };
     return (
-      <div className="relative flex flex-1 items-center justify-center">
-        <div className="absolute left-4 top-4">
-          <HamburgerButton onClick={onToggleSidebar} />
+      <main className="editor-empty-state" id="main-content" tabIndex={-1}>
+        <button
+          className="mobile-menu-button"
+          onClick={(event) => onOpenSidebar(event.currentTarget)}
+          type="button"
+        >
+          <Icon name="menu" size={17} />
+          <span>Notes</span>
+        </button>
+        <div>
+          <p>A quiet place for spoken thought.</p>
+          <button onClick={() => createEntry(null, 'note')} type="button">
+            <Icon name="plus" size={15} />
+            New note
+          </button>
         </div>
-        <div className="px-8 text-center">
-          <h1 className="font-brand text-5xl italic text-text-primary">
-            Comprosody
-          </h1>
-          <p className="mt-4 text-[10px] uppercase leading-loose tracking-[0.4em] text-text-muted">
-            agentic reader
-            <br />
-            vocal composer
-          </p>
-          <div className="mt-12 space-y-2 text-[11px] uppercase tracking-[0.2em] text-text-secondary">
-            <p>
-              <span className="text-text-primary">record</span>
-              <span className="mx-2 text-text-muted/40">—</span>voice to
-              transcript
-            </p>
-            <p>
-              <span className="text-text-primary">refine</span>
-              <span className="mx-2 text-text-muted/40">—</span>passes shape
-              the draft
-            </p>
-            <p>
-              <span className="text-text-primary">compose</span>
-              <span className="mx-2 text-text-muted/40">—</span>books ·
-              chapters · notes
-            </p>
-          </div>
-          <div className="mt-12 flex items-center justify-center gap-2">
-            <button
-              onClick={() => startEntry('writing')}
-              className="border border-border px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
-            >
-              + entry
-            </button>
-            <button
-              onClick={() => startEntry('note')}
-              className="border border-border px-4 py-2 text-[11px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
-            >
-              + note
-            </button>
-          </div>
-        </div>
-      </div>
+      </main>
     );
   }
 
-  const transcriptWordCount = countWords(activeEntry.rawTranscript);
-  const draftWordCount = countWords(activeEntry.refinedText);
-  const draftParagraphs = countParagraphs(activeEntry.refinedText);
-  const recordedDurationMs = activeEntry.recordedDurationMs ?? 0;
-  const canDiff = hasTranscript && hasRefinedText;
-
-  const highlightedVariant =
-    highlightedPass && highlightedPass.entryId === activeEntry.id
-      ? (variants.find((v) => v.label === highlightedPass.label) ?? null)
-      : null;
-  const bookAncestorId = findBookAncestor(state.directories, activeEntry.parentId);
-
-  // Location breadcrumb: ancestor chain plus chapter position inside a book.
-  const crumbs: string[] = [];
-  {
-    let cursor = activeEntry.parentId;
-    while (cursor !== null) {
-      const dir = state.directories[cursor];
-      if (!dir) break;
-      crumbs.unshift(dir.name);
-      cursor = dir.parentId;
-    }
-  }
-  const parentDir = activeEntry.parentId
-    ? state.directories[activeEntry.parentId]
-    : null;
-  let chapterMarker: string | null = null;
-  if (parentDir?.kind === 'book' && activeEntry.kind === 'writing') {
-    const chapters = Object.values(state.entries)
-      .filter(
-        (e) =>
-          e.parentId === activeEntry.parentId &&
-          e.kind === 'writing' &&
-          e.attachedToId === undefined
-      )
-      .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
-    const position = chapters.findIndex((e) => e.id === activeEntry.id);
-    if (position !== -1) {
-      chapterMarker = `ch ${position + 1} of ${chapters.length}`;
-    }
-  }
-
-  const attachedNoteCount = Object.values(state.entries).filter(
-    (e) => e.attachedToId === activeEntry.id
-  ).length;
-  const showNotes = notesEntryId === activeEntry.id;
-
-  const handleHighlightPass = (label: Variant['label'] | null) => {
-    setHighlightedPass(label ? { entryId: activeEntry.id, label } : null);
-  };
-
-  const handleAcceptPass = () => {
-    if (!highlightedVariant) return;
-    acceptVariant(highlightedVariant);
-    setHighlightedPass(null);
-  };
-
-  const handlePassToNote = () => {
-    if (!highlightedVariant) return;
-    const note = {
-      ...newEntry(activeEntry.parentId, 'note'),
-      name: `${highlightedVariant.label} pass — ${activeEntry.name}`.slice(0, 60),
-      refinedText: highlightedVariant.text,
-      attachedToId: activeEntry.id,
-    };
-    dispatch({ type: 'CREATE_ENTRY', entry: note });
-    // Routing sends text away; the writer stays where they were.
-    dispatch({ type: 'SET_ACTIVE_ENTRY', id: activeEntry.id });
-  };
-
-  const handlePassToChapter = () => {
-    if (!highlightedVariant) return;
-    // Membership can change while passes are open — re-check at click time.
-    const bookId = findBookAncestor(state.directories, activeEntry.parentId);
-    if (!bookId) return;
-    const chapter = {
-      ...newEntry(bookId, 'writing'),
-      name: deriveEntryName(highlightedVariant.text),
-      refinedText: highlightedVariant.text,
-    };
-    dispatch({ type: 'CREATE_ENTRY', entry: chapter });
-    dispatch({ type: 'SET_ACTIVE_ENTRY', id: activeEntry.id });
-  };
-
-  const handleDismissPasses = () => {
-    dismissVariants();
-    setHighlightedPass(null);
-  };
-
-  const paging = getPagingSiblings(activeEntry.id, state.entries, state.directories);
+  const parentName = activeEntry.parentId
+    ? state.directories[activeEntry.parentId]?.name ?? 'Notes'
+    : 'Notes';
 
   return (
-    <div ref={rootRef} className="relative flex min-h-0 flex-1 flex-col">
-      <div className="border-b border-border bg-surface/90 px-4 py-4 sm:px-5 sm:py-5 short:hidden">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <HamburgerButton onClick={onToggleSidebar} />
-            <div className="min-w-0 flex-1">
-            <div
-              className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.32em] text-text-muted"
-              aria-live="polite"
-            >
-              {activeEntry.kind === 'note' && <span>note</span>}
-              {(crumbs.length > 0 || chapterMarker) && (
-                <span className="tracking-[0.18em] text-text-muted/80">
-                  {crumbs.join(' / ')}
-                  {chapterMarker ? `${crumbs.length > 0 ? ' / ' : ''}${chapterMarker}` : ''}
-                </span>
-              )}
-              {(paging.prev !== null || paging.next !== null) && (
-                <span className="flex items-center gap-1 tracking-normal">
-                  <button
-                    onClick={() => goToSibling('prev')}
-                    disabled={paging.prev === null}
-                    className="px-1.5 py-0.5 text-[12px] leading-none text-text-secondary transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-30"
-                    aria-label="previous page"
-                    title="previous ( [ or swipe right )"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    onClick={() => goToSibling('next')}
-                    disabled={paging.next === null}
-                    className="px-1.5 py-0.5 text-[12px] leading-none text-text-secondary transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-30"
-                    aria-label="next page"
-                    title="next ( ] or swipe left )"
-                  >
-                    ›
-                  </button>
-                </span>
-              )}
-            </div>
-            <input
-              value={activeEntry.name}
-              onChange={(event) =>
+    <Dialog.Root
+      modal={isNarrowViewport}
+      onOpenChange={setIsRefinementOpen}
+      open={isRefinementOpen}
+    >
+      <div className="editor-shell">
+      <div className="editor-topbar">
+        <button
+          aria-label="Open note directory"
+          className="icon-button mobile-directory-trigger"
+          onClick={(event) => onOpenSidebar(event.currentTarget)}
+          type="button"
+        >
+          <Icon name="menu" size={17} />
+        </button>
+
+        <button
+          aria-label={`Current note: ${activeEntry.name}. Open directory`}
+          className="breadcrumb"
+          onClick={(event) => onOpenSidebar(event.currentTarget)}
+          type="button"
+        >
+          <span>{parentName}</span>
+          <Icon name="chevron-right" size={12} />
+          <strong>{activeEntry.name}</strong>
+        </button>
+
+        <div className="editor-topbar-spacer" />
+
+        <span className="save-state" role="status" aria-live="polite">
+          {storageReady && !hasPendingUpdate ? (
+            <Icon name="check" size={13} />
+          ) : null}
+          {!storageReady
+            ? 'Opening local store'
+            : hasPendingUpdate
+              ? 'Saving locally'
+              : 'Saved locally'}
+        </span>
+
+        <div className="topbar-actions">
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <Dialog.Trigger asChild>
+                <button
+                  aria-label={
+                    isRefinementOpen
+                      ? 'Close refinement'
+                      : refinement.proposal
+                        ? 'Review refinement proposal'
+                        : 'Open refinement'
+                  }
+                  aria-pressed={isRefinementOpen}
+                  className="icon-button refinement-open-button"
+                  data-has-proposal={Boolean(refinement.proposal)}
+                  type="button"
+                >
+                  <Icon name="sparkles" size={16} />
+                </button>
+              </Dialog.Trigger>
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content className="ui-tooltip" sideOffset={7}>
+                Refinement
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+
+          <SpeechControl
+            getText={() => editor?.getText().trim() ?? ''}
+            label="Listen to note"
+          />
+
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <button
+                aria-controls="source-transcript-drawer"
+                aria-expanded={isSourceOpen}
+                aria-label={
+                  isSourceOpen
+                    ? 'Close source transcript'
+                    : 'Open source transcript'
+                }
+                aria-pressed={isSourceOpen}
+                className="icon-button"
+                onClick={() => setIsSourceOpen((open) => !open)}
+                type="button"
+              >
+                <Icon name="file" size={16} />
+              </button>
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content className="ui-tooltip" sideOffset={7}>
+                Source transcript
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <button
+                aria-label="Export Markdown"
+                className="icon-button"
+                onClick={exportMarkdown}
+                type="button"
+              >
+                <Icon name="download" size={16} />
+              </button>
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content className="ui-tooltip" sideOffset={7}>
+                Export Markdown
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger className="icon-button" aria-label="More note actions">
+              <Icon name="more" size={17} />
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content align="end" className="ui-menu" sideOffset={7}>
+                <DropdownMenu.Item
+                  className="ui-menu-item"
+                  disabled={!editor?.can().undo()}
+                  onSelect={() => editor?.chain().focus().undo().run()}
+                >
+                  <Icon name="undo" size={14} />
+                  Undo
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  className="ui-menu-item"
+                  disabled={!editor?.can().redo()}
+                  onSelect={() => editor?.chain().focus().redo().run()}
+                >
+                  <Icon name="redo" size={14} />
+                  Redo
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator className="ui-menu-separator" />
+                <DropdownMenu.Item
+                  className="ui-menu-item"
+                  onSelect={() => setIsSourceOpen((open) => !open)}
+                >
+                  <Icon name="file" size={14} />
+                  {isSourceOpen ? 'Hide' : 'Show'} source transcript
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  className="ui-menu-item"
+                  disabled={refinement.isGeneratingVariants}
+                  onSelect={() => void refinement.generateVariants()}
+                >
+                  <Icon name="sparkles" size={14} />
+                  Generate variants
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        </div>
+      </div>
+
+      <main className="document-viewport" id="main-content" tabIndex={-1}>
+        <article className="document-page">
+          <time className="document-date" dateTime={new Date(activeEntry.createdAt).toISOString()}>
+            {documentDate(activeEntry.createdAt)}
+          </time>
+          <div className="document-title-group">
+            <DocumentTitle
+              key={activeEntry.id}
+              entry={activeEntry}
+              onCommit={(nextTitle) =>
                 dispatch({
                   type: 'RENAME_ENTRY',
                   id: activeEntry.id,
-                  name: event.target.value,
+                  name: nextTitle,
                 })
               }
-              className="mt-2 w-full max-w-2xl border-b border-transparent bg-transparent pb-2 text-3xl text-text-primary outline-none transition-colors focus:border-border-strong font-brand"
+              onEditingChange={handleTitleEditingChange}
+              onEnterBody={() => editor?.commands.focus('start')}
             />
-            </div>
+            <span
+              aria-live="polite"
+              className="automatic-title-status"
+              data-active={automaticTitleStatus === 'suggesting'}
+            >
+              {automaticTitleStatus === 'suggesting'
+                ? 'Comprosody is titling this note…'
+                : activeEntry.titleSource === 'agent'
+                  ? 'Titled by Comprosody'
+                  : ''}
+            </span>
           </div>
+          <LinkedPassages entryId={activeEntry.id} />
+          <EditorContent editor={editor} />
 
-          <details className="group shrink-0">
-            <summary className="cursor-pointer list-none text-[10px] uppercase tracking-[0.2em] text-text-muted transition-colors hover:text-text-secondary [&::-webkit-details-marker]:hidden">
-              {draftWordCount}w
-            </summary>
-            <div className="mt-2 text-[10px] uppercase tracking-[0.18em] leading-relaxed text-text-muted">
-              transcript {transcriptWordCount}w · draft {draftWordCount}w ·{' '}
-              {draftParagraphs} ¶
-              {recordedDurationMs > 0 &&
-                ` · take ${formatDuration(recordedDurationMs)}`}{' '}
-              · updated {formatUpdatedAt(activeEntry.updatedAt)}
+          {isRecording && interimTranscript ? (
+            <div className="live-transcript">
+              <span aria-live="polite" role="status">Listening</span>
+              {interimTranscript}
             </div>
-          </details>
-        </div>
+          ) : null}
+        </article>
 
-        {refinementError && (
-          <p className="mt-4 border-l-2 border-hot pl-3 text-[11px] uppercase tracking-[0.16em] text-hot">
-            {refinementError}
-          </p>
-        )}
-      </div>
-
-      <Toolbar
-        onRefine={refine}
-        onRefineSelection={handleRefineSelection}
-        onGenerateVariants={generateVariants}
-        onSeedDraft={handleSeedDraft}
-        onUndo={handleUndo}
-        onCopy={handleCopy}
-        onExport={handleExport}
-        canUndo={canUndo}
-        copied={copied}
-        hasSelection={hasSelection}
-        hasTranscript={hasTranscript}
-        hasRefinedText={hasRefinedText}
-        isRefining={isRefining}
-        isGeneratingVariants={isGeneratingVariants}
-      />
-
-      {/* Below xl the panes stack in a scroll column: each keeps a real
-          minimum height and the container scrolls, so the on-screen keyboard
-          compresses the scrollport instead of crushing both panes (iOS then
-          auto-scrolls the focused textarea into view). */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain xl:grid xl:overflow-visible xl:grid-cols-[minmax(0,0.95fr)_1px_minmax(0,1.05fr)]">
-        {/* Raw transcript */}
-        <TranscriptView
-          entryId={activeEntry.id}
-          rawTranscript={activeEntry.rawTranscript}
-          interimTranscript={interimTranscript}
-          isRecording={isRecording}
+        <SourceTranscriptDrawer
           audioTakes={activeEntry.audioTakes}
-          onChangeTranscript={(value) =>
-            dispatch({
-              type: 'UPDATE_ENTRY',
-              id: activeEntry.id,
-              updates: { rawTranscript: value },
-            })
-          }
+          entryId={activeEntry.id}
+          interimTranscript={interimTranscript}
+          isOpen={isSourceOpen}
+          onClose={() => setIsSourceOpen(false)}
+          rawTranscript={activeEntry.rawTranscript}
         />
 
-        {/* Divider */}
-        <div className="hidden bg-border xl:block" />
+        <RefinementSidecar
+          hasSelection={hasSelection}
+          isOpen={isRefinementOpen}
+          onAccept={acceptRefinement}
+          onFaithfulEdit={() => {
+            setIsRefinementOpen(true);
+            flushPendingUpdate();
+            void refinement.refine({
+              mode: 'faithful',
+              sourceText: editor?.getMarkdown(),
+            });
+          }}
+          onFullOverhaul={() => {
+            setIsRefinementOpen(true);
+            flushPendingUpdate();
+            void refinement.refine({
+              mode: 'overhaul',
+              sourceText: editor?.getMarkdown(),
+            });
+          }}
+          onInstruction={applyInstruction}
+          onRetry={retryRefinement}
+          refinement={refinement}
+        />
+      </main>
 
-        {/* Refined text — flex-none for the same reason as TranscriptView */}
-        <div className="flex min-h-[60%] min-w-0 flex-none flex-col bg-surface-writing xl:min-h-0">
-          <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
-            <div className="min-w-0 truncate text-[10px] uppercase tracking-[0.28em] text-text-muted">
-              draft
-            </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <button
-                onClick={() =>
-                  setNotesEntryId((current) =>
-                    current === activeEntry.id ? null : activeEntry.id
-                  )
-                }
-                className={`px-2 py-1 text-[10px] uppercase tracking-[0.18em] transition-colors ${
-                  showNotes
-                    ? 'text-text-primary'
-                    : 'text-text-muted hover:text-text-primary'
-                }`}
-              >
-                notes{attachedNoteCount > 0 ? ` ${attachedNoteCount}` : ''}
-              </button>
-              <button
-                onClick={handleToggleDiff}
-                disabled={!canDiff}
-                className="px-2 py-1 text-[10px] uppercase tracking-[0.18em] text-text-muted transition-colors hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35"
-              >
-                {showDiff ? 'edit' : 'diff'}
-              </button>
-            </div>
-          </div>
-          <PassesBar
-            variants={variants}
-            errors={variantErrors}
-            highlighted={highlightedVariant?.label ?? null}
-            onHighlight={handleHighlightPass}
-            onRetry={(label) => void retryVariant(label)}
-            onAccept={handleAcceptPass}
-            onToNote={handlePassToNote}
-            onToChapter={handlePassToChapter}
-            canToChapter={bookAncestorId !== null}
-            onDismiss={handleDismissPasses}
-            isGenerating={isGeneratingVariants}
-          />
-          <div className="flex min-h-0 flex-1">
-            {highlightedVariant ? (
-              <VariantDiffView
-                oldText={activeEntry.refinedText}
-                newText={highlightedVariant.text}
-              />
-            ) : showDiff && canDiff ? (
-              <DiffView
-                oldText={activeEntry.rawTranscript}
-                newText={activeEntry.refinedText}
-              />
-            ) : (
-              <textarea
-                ref={refinedRef}
-                value={activeEntry.refinedText}
-                readOnly={isRefining}
-                aria-busy={isRefining}
-                onChange={(e) =>
-                  dispatch({
-                    type: 'UPDATE_ENTRY',
-                    id: activeEntry.id,
-                    updates: { refinedText: e.target.value },
-                  })
-                }
-                onSelect={handleSelectionChange}
-                onMouseUp={handleSelectionChange}
-                onKeyUp={handleSelectionChange}
-                placeholder="refine the transcript, or write here"
-                className={`flex-1 w-full resize-none bg-transparent px-5 py-5 text-[1rem] leading-relaxed text-text-primary outline-none placeholder:text-text-muted/50 font-writing ${
-                  isRefining ? 'cursor-wait opacity-70' : ''
-                }`}
-              />
-            )}
-            {showNotes && <MarginNotes entryId={activeEntry.id} />}
-          </div>
-        </div>
+      <VariantCards
+        variants={refinement.variants}
+        onAccept={(variant) => {
+          refinement.acceptVariant(variant);
+          setIsRefinementOpen(true);
+        }}
+      />
+
+      <section
+        aria-label="Writing and recording controls"
+        className="interaction-dock"
+        data-busy={isTranscribing || refinement.isRefining}
+        data-recording={isRecording}
+      >
+        <RefinementComposer
+          hasSelection={hasSelection}
+          isRefining={refinement.isRefining}
+          onCancel={refinement.cancel}
+          onFaithfulEdit={() => {
+            setIsRefinementOpen(true);
+            flushPendingUpdate();
+            void refinement.refine({
+              mode: 'faithful',
+              sourceText: editor?.getMarkdown(),
+            });
+          }}
+          onFullOverhaul={() => {
+            setIsRefinementOpen(true);
+            flushPendingUpdate();
+            void refinement.refine({
+              mode: 'overhaul',
+              sourceText: editor?.getMarkdown(),
+            });
+          }}
+          onInstruction={applyInstruction}
+        />
+        <RecordingDock
+          backgroundLimitMs={backgroundLimitMs}
+          backgroundNotice={backgroundNotice}
+          drawWaveform={drawWaveform}
+          isRecording={isRecording}
+          isTranscribing={isTranscribing}
+          onProviderChange={onProviderChange}
+          onBackgroundLimitChange={onBackgroundLimitChange}
+          onStart={onStart}
+          onStop={onStop}
+          prosody={prosody}
+          provider={provider}
+          startedAt={startedAt}
+        />
+      </section>
       </div>
-
-    </div>
+    </Dialog.Root>
   );
-}
+});

@@ -1,5 +1,9 @@
-import { Router } from 'express';
-import { streamRefinement, refineComplete } from '../lib/claude.js';
+import { Router, type Request, type Response } from 'express';
+import {
+  OllamaRefinementError,
+  streamRefinement,
+  refineComplete,
+} from '../lib/ollama.js';
 import { HttpError, reqNumber, reqObject, reqString } from '../lib/validate.js';
 
 export const refineRouter = Router();
@@ -16,12 +20,14 @@ interface VariantsBody {
   temperatures: Array<{ label: string; temperature: number }>;
 }
 
+const DEFAULT_TIMEOUT_MS = 120_000;
+
 function parseRefineBody(raw: unknown): RefineBody {
   const body = reqObject(raw);
   return {
     systemPrompt: reqString(body, 'systemPrompt', 50_000),
     userMessage: reqString(body, 'userMessage', 200_000),
-    temperature: reqNumber(body, 'temperature', 0, 2),
+    temperature: reqNumber(body, 'temperature', 0, 1),
   };
 }
 
@@ -37,10 +43,46 @@ function parseVariantsBody(raw: unknown): VariantsBody {
     const entry = reqObject(item, 'each temperatures item must be an object');
     return {
       label: reqString(entry, 'label', 32),
-      temperature: reqNumber(entry, 'temperature', 0, 2),
+      temperature: reqNumber(entry, 'temperature', 0, 1),
     };
   });
   return { systemPrompt, userMessage, temperatures };
+}
+
+function createAbortController(timeoutMs: number): AbortController {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  controller.signal.addEventListener('abort', () => clearTimeout(timer), { once: true });
+  return controller;
+}
+
+function abortOnDisconnect(
+  req: Request,
+  res: Response,
+  controller: AbortController,
+): () => void {
+  const abort = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  req.once('aborted', abort);
+  res.once('close', abort);
+  return () => {
+    req.off('aborted', abort);
+    res.off('close', abort);
+  };
+}
+
+function classifyError(err: unknown): { status: number; message: string } {
+  if (err instanceof OllamaRefinementError) {
+    return { status: err.status, message: err.message };
+  }
+  if (err instanceof Error && err.name === 'AbortError') {
+    return { status: 504, message: 'Refinement request timed out' };
+  }
+  return {
+    status: 500,
+    message: err instanceof Error ? err.message : 'Unknown error',
+  };
 }
 
 refineRouter.post('/refine', async (req, res) => {
@@ -52,65 +94,106 @@ refineRouter.post('/refine', async (req, res) => {
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
-  const upstream = new AbortController();
-  res.on('close', () => upstream.abort());
-
+  const controller = createAbortController(DEFAULT_TIMEOUT_MS);
+  const stopWatching = abortOnDisconnect(req, res, controller);
   let chunks = 0;
+
   try {
     for await (const chunk of streamRefinement({
       systemPrompt,
       userMessage,
       temperature,
-      signal: upstream.signal,
+      signal: controller.signal,
     })) {
       chunks += 1;
       res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
     }
     if (chunks === 0) {
-      res.write(`data: ${JSON.stringify({ error: 'model returned an empty refinement' })}\n\n`);
+      res.write(`data: ${JSON.stringify({ error: 'Model returned an empty refinement' })}\n\n`);
     } else {
       res.write('data: [DONE]\n\n');
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Refinement failed';
-    res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    if (!res.destroyed && !res.writableEnded) {
+      const { message } = classifyError(err);
+      res.write(`data: ${JSON.stringify({ error: message })}\n\n`);
+    }
+  } finally {
+    stopWatching();
+    controller.abort();
   }
-  res.end();
+  if (!res.destroyed && !res.writableEnded) res.end();
+});
+
+refineRouter.post('/refine/complete', async (req, res) => {
+  const { systemPrompt, userMessage, temperature } = parseRefineBody(req.body);
+  const controller = createAbortController(DEFAULT_TIMEOUT_MS);
+  const stopWatching = abortOnDisconnect(req, res, controller);
+
+  try {
+    const text = await refineComplete({ systemPrompt, userMessage, temperature, signal: controller.signal });
+    res.json({ text });
+  } catch (err) {
+    if (!res.destroyed && !res.writableEnded) {
+      const { status, message } = classifyError(err);
+      res.status(status).json({ error: message });
+    }
+  } finally {
+    stopWatching();
+    controller.abort();
+  }
 });
 
 refineRouter.post('/variants', async (req, res) => {
   const { systemPrompt, userMessage, temperatures } = parseVariantsBody(req.body);
-
-  const settled = await Promise.allSettled(
-    temperatures.map(({ label, temperature }) =>
-      refineComplete({ systemPrompt, userMessage, temperature }).then((text) => ({
-        label,
-        temperature,
-        text,
-      }))
-    )
+  const controllers: AbortController[] = [];
+  const disconnectController = new AbortController();
+  const stopWatching = abortOnDisconnect(req, res, disconnectController);
+  disconnectController.signal.addEventListener(
+    'abort',
+    () => controllers.forEach((controller) => controller.abort()),
+    { once: true },
   );
 
-  const variants = settled.flatMap((result) =>
-    result.status === 'fulfilled' ? [result.value] : []
-  );
-  const errors = settled.flatMap((result, i) =>
-    result.status === 'rejected'
-      ? [
-          {
-            label: temperatures[i].label,
-            error:
-              result.reason instanceof Error
-                ? result.reason.message
-                : String(result.reason),
-          },
-        ]
-      : []
-  );
-
-  if (variants.length === 0) {
-    res.status(502).json({ error: errors[0]?.error ?? 'All variant generations failed' });
-    return;
+  try {
+    // Sequential generation bounds provider pressure while still returning any
+    // successful alternatives when one temperature fails.
+    const results: Array<{ label: string; temperature: number; text: string }> = [];
+    const errors: Array<{ label: string; error: string }> = [];
+    for (const { label, temperature } of temperatures) {
+      const controller = createAbortController(DEFAULT_TIMEOUT_MS);
+      controllers.push(controller);
+      try {
+        const text = await refineComplete({
+          systemPrompt,
+          userMessage,
+          temperature,
+          signal: controller.signal,
+        });
+        results.push({ label, temperature, text });
+      } catch (error) {
+        errors.push({
+          label,
+          error: classifyError(error).message,
+        });
+      } finally {
+        controller.abort();
+      }
+    }
+    if (results.length === 0) {
+      res.status(502).json({ error: errors[0]?.error ?? 'All variant generations failed' });
+      return;
+    }
+    res.json({ variants: results, errors });
+  } catch (err) {
+    controllers.forEach((c) => c.abort());
+    if (!res.destroyed && !res.writableEnded) {
+      const { status, message } = classifyError(err);
+      res.status(status).json({ error: message });
+    }
+  } finally {
+    stopWatching();
+    disconnectController.abort();
+    controllers.forEach((controller) => controller.abort());
   }
-  res.json({ variants, errors });
 });

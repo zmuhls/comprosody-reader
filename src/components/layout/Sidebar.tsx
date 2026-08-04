@@ -1,106 +1,289 @@
-import { useState, useEffect } from 'react';
-import { useApp } from '../../context/AppContext';
+import {
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import { DirectoryTree } from '../sidebar/DirectoryTree';
 import { EntryActions } from '../sidebar/EntryActions';
+import { Icon } from '../ui/Icon';
+import { useApp } from '../../context/AppContext';
+import { LibrarySection } from '../library/LibrarySection';
+import { cadenceApiUrl } from '../../lib/urls';
+import { LogoutControl } from './LogoutControl';
 import { LexiconPanel } from '../sidebar/LexiconPanel';
 
-interface Props {
-  open: boolean;
+interface SidebarProps {
+  isOpen: boolean;
   onClose: () => void;
+  returnFocusTarget: HTMLElement | null;
 }
 
-export function Sidebar({ open, onClose }: Props) {
-  const { dispatch } = useApp();
+export const Sidebar = memo(function Sidebar({
+  isOpen,
+  onClose,
+  returnFocusTarget,
+}: SidebarProps) {
   const [serverOk, setServerOk] = useState<boolean | null>(null);
-  const [query, setQuery] = useState('');
+  const [openPanel, setOpenPanel] = useState<'voice' | 'settings' | null>(null);
+  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
+    window.matchMedia('(max-width: 900px)').matches,
+  );
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const { voiceProfile, storageReady } = useApp();
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 900px)');
+    const update = () => setIsNarrowViewport(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    if (!isNarrowViewport) return;
+    if (isOpen) {
+      returnFocusRef.current = returnFocusTarget;
+      const frame = window.requestAnimationFrame(() =>
+        closeButtonRef.current?.focus(),
+      );
+      return () => window.cancelAnimationFrame(frame);
+    }
+    const returnTarget = returnFocusRef.current;
+    returnFocusRef.current = null;
+    if (returnTarget?.isConnected) returnTarget.focus();
+  }, [isNarrowViewport, isOpen, returnFocusTarget]);
 
   useEffect(() => {
     let cancelled = false;
     const check = () => {
-      fetch('/api/health')
-        .then((r) => {
-          if (!cancelled) setServerOk(r.ok);
+      fetch(cadenceApiUrl('/health'))
+        .then((response) => {
+          if (!cancelled) setServerOk(response.ok);
         })
         .catch(() => {
           if (!cancelled) setServerOk(false);
         });
     };
+
     check();
-    const interval = setInterval(check, 30_000);
-    window.addEventListener('focus', check);
+    const id = window.setInterval(check, 10_000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
-      window.removeEventListener('focus', check);
+      window.clearInterval(id);
     };
   }, []);
 
+  const averagePace = voiceProfile.prosody.rolling?.pace.mean ?? 0;
+  const vocabulary = voiceProfile.vocabulary.terms
+    .filter((term) => term.count > 1)
+    .slice(0, 3)
+    .map((term) => term.preferred);
+
+  const handleSidebarKeyDown = (
+    event: KeyboardEvent<HTMLElement>,
+  ) => {
+    if (!isNarrowViewport || !isOpen) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onClose();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(
+      sidebarRef.current?.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), '
+          + 'select:not([disabled]), textarea:not([disabled]), '
+          + '[tabindex]:not([tabindex="-1"])',
+      ) ?? [],
+    ).filter((element) => !element.hasAttribute('inert'));
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
-    <aside
-      className={`fixed inset-y-0 left-0 z-40 flex h-app w-72 flex-shrink-0 flex-col border-r border-border bg-surface-raised backdrop-blur-md transition-transform duration-200 lg:static lg:z-auto lg:w-64 lg:translate-x-0 lg:bg-surface ${
-        open ? 'translate-x-0' : '-translate-x-full'
-      }`}
-    >
-      <div className="border-b border-border px-5 py-5">
-        <div className="flex items-start justify-between">
+    <>
+      <button
+        aria-label="Close note directory"
+        aria-hidden="true"
+        className={`sidebar-backdrop ${isOpen ? 'is-visible' : ''}`}
+        onClick={onClose}
+        tabIndex={-1}
+        type="button"
+      />
+      <section
+        aria-label="Note directory"
+        aria-hidden={isNarrowViewport ? !isOpen : undefined}
+        aria-modal={isNarrowViewport && isOpen ? true : undefined}
+        className={`sidebar ${isOpen ? 'is-open' : ''}`}
+        inert={isNarrowViewport && !isOpen ? true : undefined}
+        onKeyDown={handleSidebarKeyDown}
+        ref={sidebarRef}
+        role={isNarrowViewport ? 'dialog' : 'complementary'}
+      >
+        <div className="sidebar-header">
+          <div>
+            <h1>Comprosody</h1>
+            <p>Agentic Reader \ Vocal Notes</p>
+          </div>
           <button
-            onClick={() => {
-              dispatch({ type: 'SET_ACTIVE_ENTRY', id: null });
-              onClose();
-            }}
-            className="font-brand text-3xl italic text-text-primary transition-colors hover:text-accent"
-            title="home"
-          >
-            comprosody
-          </button>
-          <button
+            aria-label="Close note directory"
+            className="icon-button sidebar-close"
             onClick={onClose}
-            className="-mr-1 px-2 py-1 text-sm text-text-muted transition-colors hover:text-text-primary lg:hidden"
-            aria-label="close library"
+            ref={closeButtonRef}
+            type="button"
           >
-            ×
+            <Icon name="x" size={17} />
           </button>
         </div>
-        <p className="mt-1 text-[10px] uppercase tracking-[0.24em] text-text-muted">
-          agentic reader
-        </p>
-      </div>
 
-      <EntryActions />
+        <div className="sidebar-workspace">
+          <LibrarySection onSelectPublication={onClose} />
 
-      <div className="border-b border-border px-4 py-3">
-        <input
-          className="w-full border border-border bg-surface px-2 py-1.5 font-ui text-xs text-text-primary outline-none placeholder:text-text-muted focus:border-border-focus"
-          placeholder="filter entries..."
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
+          <div className="notes-section">
+            <div className="sidebar-section-heading">
+              <span>Notes</span>
+            </div>
+            <EntryActions />
+            <nav aria-label="Note directory" className="sidebar-tree">
+              <DirectoryTree onSelectEntry={onClose} />
+            </nav>
+            <LexiconPanel />
+          </div>
+        </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <DirectoryTree query={query} />
-      </div>
+        <div className="sidebar-footer">
+          {openPanel === 'voice' ? (
+            <section className="sidebar-popover" aria-label="Local voice profile">
+              <div className="sidebar-popover-heading">
+                <span>Voice profile</span>
+                <button
+                  aria-label="Close voice profile"
+                  className="icon-button"
+                  onClick={() => setOpenPanel(null)}
+                  type="button"
+                >
+                  <Icon name="x" size={14} />
+                </button>
+              </div>
+              <p>
+                Comprosody learns only from transcripts and prosody saved in this
+                browser. Raw audio is not retained.
+              </p>
+              <dl className="profile-mini-grid">
+                <div>
+                  <dt>Sessions</dt>
+                  <dd>{voiceProfile.source.prosodyEntryCount}</dd>
+                </div>
+                <div>
+                  <dt>Avg. pace</dt>
+                  <dd>
+                    {averagePace
+                      ? `${Math.round(averagePace)} wpm`
+                      : 'Learning'}
+                  </dd>
+                </div>
+              </dl>
+              {vocabulary.length > 0 ? (
+                <p className="profile-vocabulary">
+                  Familiar vocabulary: {vocabulary.join(', ')}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
 
-      <LexiconPanel />
+          {openPanel === 'settings' ? (
+            <section className="sidebar-popover" aria-label="Application status">
+              <div className="sidebar-popover-heading">
+                <span>Settings</span>
+                <button
+                  aria-label="Close settings"
+                  className="icon-button"
+                  onClick={() => setOpenPanel(null)}
+                  type="button"
+                >
+                  <Icon name="x" size={14} />
+                </button>
+              </div>
+              <p>
+                Transcription provider and fidelity controls live beside the
+                recording dock, where their effect is visible.
+              </p>
+              <div className="server-state">
+                <span
+                  className={`server-dot ${storageReady ? 'is-online' : ''}`}
+                  aria-hidden="true"
+                />
+                {storageReady ? 'IndexedDB ready' : 'Opening local database'}
+              </div>
+              <div className="server-state">
+                <span
+                  className={`server-dot ${serverOk ? 'is-online' : ''}`}
+                  aria-hidden="true"
+                />
+                {serverOk === null
+                  ? 'Checking local service'
+                  : serverOk
+                    ? 'Local service connected'
+                    : 'Local service offline'}
+              </div>
+            </section>
+          ) : null}
 
-      <div className="border-t border-border px-5 py-4">
-        <span className="flex items-center gap-2 text-[10px] uppercase tracking-[0.18em] text-text-muted">
-          <span
-            className={`inline-block h-2 w-2 ${
-              serverOk === null
-                ? 'bg-text-muted'
-                : serverOk
-                  ? 'bg-success'
-                  : 'bg-hot'
-            }`}
-          />
-          {serverOk === null
-            ? 'connecting...'
-            : serverOk
-              ? 'server connected'
-              : 'server offline'}
-        </span>
-      </div>
-    </aside>
+          <button
+            aria-expanded={openPanel === 'voice'}
+            className="sidebar-footer-row voice-profile-row"
+            onClick={() =>
+              setOpenPanel((current) => (current === 'voice' ? null : 'voice'))
+            }
+            type="button"
+          >
+            <span className="voice-mark">
+              <Icon name="waveform" size={17} />
+            </span>
+            <span className="sidebar-footer-copy">
+              <strong>Voice profile</strong>
+              <small>Learning locally</small>
+            </span>
+            <Icon name="chevron-down" size={15} />
+          </button>
+
+          <button
+            aria-expanded={openPanel === 'settings'}
+            className="sidebar-footer-row"
+            onClick={() =>
+              setOpenPanel((current) =>
+                current === 'settings' ? null : 'settings',
+              )
+            }
+            type="button"
+          >
+            <Icon name="settings" size={19} />
+            <span className="sidebar-footer-copy">
+              <strong>Settings</strong>
+              <small>
+                {serverOk === null
+                  ? 'Checking service'
+                  : serverOk
+                    ? 'Local service ready'
+                    : 'Service offline'}
+              </small>
+            </span>
+          </button>
+          <LogoutControl />
+        </div>
+      </section>
+    </>
   );
-}
+});

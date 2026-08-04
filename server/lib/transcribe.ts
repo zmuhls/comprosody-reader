@@ -1,110 +1,83 @@
-import { getApiKey } from './claude.js';
+import { shutdownWorker } from './whisperWorker.js';
+import { elevenLabsScribeProvider } from './transcription/elevenLabsScribeProvider.js';
+import { fasterWhisperProvider } from './transcription/fasterWhisperProvider.js';
+import {
+  UnsupportedTranscriptionProviderError,
+  type TranscriptionProvider,
+  type TranscriptionProviderId,
+  type TranscriptionResult,
+} from './transcription/types.js';
 
-export interface TranscriptionResult {
-  transcript: string;
+export type { TranscriptionResult, WordTimestamp } from './transcription/types.js';
+export {
+  TranscriptionConfigurationError,
+  TranscriptionUpstreamError,
+  UnsupportedTranscriptionModelError,
+  UnsupportedTranscriptionProviderError,
+} from './transcription/types.js';
+
+const providers: Record<TranscriptionProviderId, TranscriptionProvider> = {
+  local: fasterWhisperProvider,
+  elevenlabs: elevenLabsScribeProvider,
+};
+
+const providerAliases: Record<string, TranscriptionProviderId> = {
+  local: 'local',
+  whisper: 'local',
+  'faster-whisper': 'local',
+  elevenlabs: 'elevenlabs',
+  scribe: 'elevenlabs',
+};
+
+export interface TranscriptionOptions {
+  provider?: TranscriptionProviderId | string;
+  model?: string;
+  contentType?: string;
+  keyterms?: string[];
+  signal?: AbortSignal;
 }
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+export function resolveTranscriptionProvider(
+  requestedProvider?: string
+): TranscriptionProviderId {
+  const configured =
+    requestedProvider?.trim() ||
+    process.env.TRANSCRIPTION_PROVIDER?.trim() ||
+    'local';
+  const provider = providerAliases[configured.toLowerCase()];
 
-interface OpenRouterTranscriptionResponse {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
-  }>;
-}
+  if (!provider) {
+    throw new UnsupportedTranscriptionProviderError(configured);
+  }
 
-export function audioFormatFromContentType(contentType: string | undefined): string {
-  const mime = (contentType ?? '').split(';')[0].trim().toLowerCase();
-  if (mime.includes('mp4') || mime.includes('m4a')) return 'mp4';
-  if (mime.includes('ogg')) return 'ogg';
-  if (mime.includes('wav')) return 'wav';
-  return 'webm';
-}
-
-/**
- * Bias decoding toward spellings the speaker has taught the app. Hedged on
- * purpose — the model must not force a term onto audio that does not support
- * it, or the hint would corrupt transcripts instead of correcting them.
- */
-export function buildVocabularyPrompt(vocabulary: string[]): string {
-  return [
-    'The speaker uses the following vocabulary: proper nouns, technical terms,',
-    'and names that are easily misheard. When the audio is consistent with one',
-    'of these, prefer its exact spelling. Do not force these words onto audio',
-    `that does not support them: ${vocabulary.join(', ')}`,
-  ].join(' ');
+  return provider;
 }
 
 export async function transcribe(
   audioBuffer: Buffer,
-  format: string,
-  vocabulary: string[] = []
+  modelSize?: string
+): Promise<TranscriptionResult>;
+export async function transcribe(
+  audioBuffer: Buffer,
+  options?: TranscriptionOptions
+): Promise<TranscriptionResult>;
+export async function transcribe(
+  audioBuffer: Buffer,
+  modelOrOptions: string | TranscriptionOptions = {}
 ): Promise<TranscriptionResult> {
-  const transcribeModel =
-    process.env.OPENROUTER_TRANSCRIBE_MODEL || 'google/gemini-2.5-flash';
+  const options =
+    typeof modelOrOptions === 'string'
+      ? { model: modelOrOptions, provider: 'local' }
+      : modelOrOptions;
+  const providerId = resolveTranscriptionProvider(options.provider);
 
-  const base64Audio = audioBuffer.toString('base64');
-
-  const messages: unknown[] = [];
-  if (vocabulary.length > 0) {
-    messages.push({
-      role: 'system',
-      content: buildVocabularyPrompt(vocabulary),
-    });
-  }
-  messages.push({
-    role: 'user',
-    content: [
-      {
-        type: 'text',
-        text: 'Transcribe this audio recording exactly as spoken. Return only the transcribed text, nothing else. No commentary, labels, or formatting.',
-      },
-      {
-        type: 'input_audio',
-        input_audio: {
-          data: base64Audio,
-          format,
-        },
-      },
-    ],
+  return providers[providerId].transcribe({
+    audioBuffer,
+    model: options.model,
+    contentType: options.contentType,
+    keyterms: options.keyterms,
+    signal: options.signal,
   });
-
-  try {
-    const response = await fetch(OPENROUTER_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${getApiKey()}`,
-        'HTTP-Referer': 'https://github.com/zmuhls/comprosody-reader',
-        'X-Title': 'comprosody',
-      },
-      body: JSON.stringify({
-        model: transcribeModel,
-        messages,
-        temperature: 0,
-        max_tokens: 4000,
-      }),
-      signal: AbortSignal.timeout(120_000),
-    });
-
-    if (!response.ok) {
-      const err = await response.text();
-      throw new Error(`Transcription error ${response.status}: ${err}`);
-    }
-
-    const data = (await response.json()) as OpenRouterTranscriptionResponse;
-    const transcript = data.choices?.[0]?.message?.content?.trim() ?? '';
-
-    if (!transcript) {
-      throw new Error('No transcription returned');
-    }
-
-    return { transcript };
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'TimeoutError') {
-      throw new Error('Transcription request timed out after 120s');
-    }
-    throw err;
-  }
 }
+
+export { shutdownWorker };

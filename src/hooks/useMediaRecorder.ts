@@ -1,31 +1,21 @@
-import { useRef, useCallback } from 'react';
-
-// Safari has no webm support; audio/mp4 is its recordable format.
-const MIME_TYPE_CANDIDATES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
-
-function pickSupportedMimeType(): string | undefined {
-  if (
-    typeof MediaRecorder === 'undefined' ||
-    typeof MediaRecorder.isTypeSupported !== 'function'
-  ) {
-    return undefined;
-  }
-  return MIME_TYPE_CANDIDATES.find((type) => MediaRecorder.isTypeSupported(type));
-}
+import { useRef, useCallback, useMemo } from 'react';
+import { selectMediaRecorderMimeType } from '../lib/mediaRecorder';
 
 export function useMediaRecorder() {
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const mimeTypeRef = useRef('audio/webm');
+  const mimeTypeRef = useRef('application/octet-stream');
 
   const start = useCallback((stream: MediaStream) => {
     chunksRef.current = [];
 
-    const mimeType = pickSupportedMimeType();
-    mimeTypeRef.current = mimeType ?? 'audio/webm';
-    const recorder = mimeType
-      ? new MediaRecorder(stream, { mimeType })
+    const selectedMimeType = selectMediaRecorderMimeType(
+      MediaRecorder.isTypeSupported.bind(MediaRecorder),
+    );
+    const recorder = selectedMimeType
+      ? new MediaRecorder(stream, { mimeType: selectedMimeType })
       : new MediaRecorder(stream);
+    mimeTypeRef.current = recorder.mimeType || selectedMimeType || 'application/octet-stream';
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -54,5 +44,33 @@ export function useMediaRecorder() {
     });
   }, []);
 
-  return { start, stop };
+  const checkpoint = useCallback(() => {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== 'recording') return;
+    try {
+      recorder.requestData();
+    } catch {
+      // Some WebKit builds reject requestData while the page is transitioning.
+    }
+  }, []);
+
+  const cancel = useCallback(() => {
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    chunksRef.current = [];
+    if (!recorder || recorder.state === 'inactive') return;
+
+    recorder.ondataavailable = null;
+    recorder.onstop = null;
+    try {
+      recorder.stop();
+    } catch {
+      // The MediaStream tracks are stopped by the caller as a second boundary.
+    }
+  }, []);
+
+  return useMemo(
+    () => ({ cancel, checkpoint, start, stop }),
+    [cancel, checkpoint, start, stop],
+  );
 }

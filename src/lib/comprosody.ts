@@ -1,3 +1,5 @@
+import type { ProsodyDiagnostics } from '../types/audio';
+
 const FUNCTION_WORDS = new Set([
   // Articles, conjunctions, prepositions
   'a', 'an', 'the', 'and', 'but', 'or', 'nor', 'for', 'yet', 'so',
@@ -62,6 +64,26 @@ export function computeLexicalDensity(text: string): number {
   if (words.length === 0) return 0;
   const contentWords = words.filter((w) => !FUNCTION_WORDS.has(w.replace(/[^a-z']/g, '')));
   return contentWords.length / words.length;
+}
+
+/**
+ * Completes transcript-dependent diagnostics after server transcription.
+ *
+ * Energy and fluency are captured from the analyser while recording. Pace and
+ * lexical density cannot be authoritative until the post-stop transcript is
+ * available, so only those two fields are recomputed here.
+ */
+export function completeTranscriptProsody(
+  audioProsody: ProsodyDiagnostics,
+  transcript: string,
+  recordingDurationMs: number,
+): ProsodyDiagnostics {
+  const wordCount = transcript.split(/\s+/).filter(Boolean).length;
+  return {
+    ...audioProsody,
+    pace: computeWpm(wordCount, recordingDurationMs),
+    lexicalDensity: computeLexicalDensity(transcript),
+  };
 }
 
 export function interpretPace(wpm: number): string {

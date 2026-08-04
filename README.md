@@ -1,4 +1,4 @@
-# comprosody
+# Comprosody
 
 Voice-first writing tool — an agentic reader for vocal composition. Record speech, watch prosody diagnostics (pace, energy, fluency, lexical density) track your delivery live, then refine the transcript into prose shaped by how you actually spoke. Work collects into a library of books, chapters, and notes; the app learns your vocabulary from your own corrections.
 
@@ -7,18 +7,22 @@ Voice-first writing tool — an agentic reader for vocal composition. Record spe
 ```bash
 npm install
 cp .env.example .env
-# add your OpenRouter API key to .env
+# add only the server-side provider credentials you intend to use
 ```
 
 ## Configuration
 
-All model routing goes through [OpenRouter](https://openrouter.ai) — no vendor SDKs. Set these in `.env`:
+Provider credentials stay on the server. The integrated workspace supports local
+transcription, ElevenLabs Scribe and timed speech, and Ollama refinement. Set
+only the routes you use in `.env`:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `OPENROUTER_API_KEY` | — | your OpenRouter key |
-| `OPENROUTER_MODEL` | `moonshotai/kimi-k2-0905` | LLM for refinement |
-| `OPENROUTER_TRANSCRIBE_MODEL` | `google/gemini-2.5-flash` | audio transcription |
+| `OLLAMA_API_KEY` | — | Ollama refinement key |
+| `OLLAMA_MODEL` | `qwen3.5:397b` | Ollama refinement model |
+| `ELEVENLABS_API_KEY` | — | Scribe and timed read-aloud |
+| `TRANSCRIPTION_PROVIDER` | `local` | server transcription fallback |
+| `COMPROSODY_API_KEY` | — | required for non-loopback or production API access |
 | `CORS_ORIGIN` | `http://localhost:5173` | comma-separated CORS allowlist |
 | `PORT` | `3001` | backend server port |
 
@@ -37,8 +41,8 @@ Frontend at `http://localhost:5173`, backend at `http://localhost:3001`. Vite pr
 ## How it works
 
 1. **Record** — the seal button in the footer (or Ctrl/Cmd+Shift+Space). Web Speech API shows interim text while you talk; prosody readings update every half second; the breath-line waveform mirrors the mic. `+ note` in the footer records a vocal note attached to the open entry.
-2. **Transcribe** — on stop, the take persists to IndexedDB and the audio goes to OpenRouter for transcription, with your lexicon sent along as a vocabulary hint. If transcription fails you choose: retry the upload or keep the live transcript.
-3. **Refine** — pick a register (academic, narrative, analytical, field-journal, freewrite), a scale (word through paragraph), and reach. The system prompt composes those with your prosody readings, voice config, and any margin notes marked for inclusion. Refinement streams into the draft pane; select a passage and refine just the selection.
+2. **Transcribe** — on stop, the take persists to IndexedDB and follows the selected local or cloud provider boundary, with bounded vocabulary hints where supported. If transcription fails you choose: retry the upload or keep the live transcript.
+3. **Refine** — pick a register (academic, narrative, analytical, field-journal, freewrite), a scale (word through paragraph), and reach. The system prompt composes those with your prosody readings, voice config, and any margin notes marked for inclusion. Refinement streams through the configured server adapter; select a passage and refine just the selection.
 4. **Passes** — generate cool/warm/hot passes at different reach. Each pass previews as a diff over the draft; accept it, save it as an attached note, or append it as a new chapter.
 
 ## Library
@@ -74,20 +78,31 @@ src/                    # React frontend (Vite + Tailwind v4)
   lib/                  # comprosody (prosody math), prompts (system prompt builder),
                         # lexicon, refineContext, audioStore, storage, export
 
-server/                 # Express backend — stateless OpenRouter proxy
-  lib/claude.ts         # chat completions (SSE streaming + complete)
-  lib/transcribe.ts     # audio transcription (lexicon hint via X-Lexicon header)
+server/                 # Express backend — stateless provider gateway
+  lib/ollama.ts         # Ollama streaming and complete refinement
+  lib/transcribe.ts     # provider-neutral audio transcription
   lib/validate.ts       # request validation
-  routes/refine.ts      # /api/refine (SSE), /api/variants
-  routes/transcribe.ts  # /api/transcribe (raw audio body, 25 MB cap)
+  routes/refine.ts      # /api/refine, complete titles, and variants
+  routes/speech.ts      # bounded ElevenLabs speech and timed alignment
+  routes/transcribe.ts  # /api/transcribe (raw audio body, 50 MB cap)
 ```
 
 State lives client-side: entries, library structure, and lexicon in localStorage (debounced writes); audio takes in IndexedDB with lazy, metadata-first hydration. The backend keeps nothing.
 
-Works on phones: the layout tracks the visual viewport, so the on-screen keyboard compresses the app instead of hiding it.
+Works on phones: the layout tracks the visual viewport, keeps the microphone in
+its own touch-sized dock, and scrolls focused writing controls above the on-screen
+keyboard. A selectable background-recording window finalizes on return or at its
+hard cutoff; iOS may still suspend browser execution while another app is active.
+
+The hosted Readings deployment mounts Comprosody at `/studio` behind the same
+authenticated session and injects its service credential only at the private
+server gateway.
 
 ## Tests
 
 ```bash
 npm test
+npm run lint
+npm run build
+npm run test:e2e
 ```

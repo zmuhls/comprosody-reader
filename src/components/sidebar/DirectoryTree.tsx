@@ -1,58 +1,116 @@
-import { useState } from 'react';
+import { memo, useState, type DragEvent } from 'react';
 import { useStorage } from '../../hooks/useStorage';
 import { useDirectoryTree } from '../../hooks/useDirectoryTree';
-import { TreeNode } from './TreeNode';
-import { decodeDrag, getCurrentDrag, setCurrentDrag } from './dnd';
+import { TreeNode, type TreeMoveItem } from './TreeNode';
 
-interface Props {
-  query?: string;
+interface DirectoryTreeProps {
+  onSelectEntry?: () => void;
 }
 
-export function DirectoryTree({ query = '' }: Props) {
-  const { directories, entries, moveNode } = useStorage();
-  const tree = useDirectoryTree(directories, entries, query);
-  const [rootActive, setRootActive] = useState(false);
+export const DirectoryTree = memo(function DirectoryTree({
+  onSelectEntry,
+}: DirectoryTreeProps) {
+  const {
+    directories,
+    entries,
+    moveDirectory,
+    moveEntry,
+  } = useStorage();
+  const tree = useDirectoryTree(directories, entries);
+  const [pickedItem, setPickedItem] = useState<TreeMoveItem | null>(null);
+  const [draggedItem, setDraggedItem] = useState<TreeMoveItem | null>(null);
+  const [moveStatus, setMoveStatus] = useState('');
+  const movingItem = pickedItem ?? draggedItem;
 
-  const handleRootDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    setRootActive(false);
-    const payload = decodeDrag(e.dataTransfer) ?? getCurrentDrag();
-    if (!payload) return;
-    e.preventDefault();
-    moveNode(payload.nodeType, payload.id, null);
-    setCurrentDrag(null);
+  const directoryContains = (rootId: string, targetId: string): boolean => {
+    let current = directories[targetId] as typeof directories[string] | undefined;
+    while (current) {
+      if (current.id === rootId) return true;
+      current = current.parentId ? directories[current.parentId] : undefined;
+    }
+    return false;
   };
 
-  if (tree.length === 0) {
-    const hasAny =
-      Object.keys(entries).length > 0 || Object.keys(directories).length > 0;
-    return (
-      <div className="px-5 py-8 text-sm text-text-muted">
-        {query.trim() !== '' && hasAny
-          ? 'no matches'
-          : 'No entries yet. Start a take or create a folder to begin organizing the draft space.'}
-      </div>
-    );
-  }
+  const canPlace = (item: TreeMoveItem, parentId: string | null): boolean => {
+    if (item.type === 'entry') {
+      return entries[item.id]?.parentId !== parentId;
+    }
+    const directory = directories[item.id];
+    if (!directory || directory.parentId === parentId || item.id === parentId) return false;
+    return parentId === null || !directoryContains(item.id, parentId);
+  };
+
+  const place = (item: TreeMoveItem, parentId: string | null) => {
+    if (!canPlace(item, parentId)) return;
+    if (item.type === 'entry') moveEntry(item.id, parentId);
+    else moveDirectory(item.id, parentId);
+    const destination = parentId ? directories[parentId]?.name : 'Notes';
+    setMoveStatus(`${item.name} moved to ${destination || 'Notes'}.`);
+    setPickedItem(null);
+    setDraggedItem(null);
+  };
+
+  const handleRootDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (!movingItem || !canPlace(movingItem, null)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    place(movingItem, null);
+  };
 
   return (
-    <div className="flex min-h-full flex-col py-2">
-      <div>
-        {tree.map((node) => (
-          <TreeNode key={node.id} node={node} depth={0} />
-        ))}
-      </div>
-      {/* Trailing space doubles as the move-to-root drop zone. */}
+    <>
       <div
-        className={`min-h-10 flex-1 ${rootActive ? 'bg-accent/6 outline outline-1 -outline-offset-2 outline-accent/40' : ''}`}
-        onDragOver={(e) => {
-          if (!getCurrentDrag()) return;
-          e.preventDefault();
-          setRootActive(true);
+        className={`directory-tree ${movingItem ? 'is-move-mode' : ''}`}
+        onDragOver={(event) => {
+          if (!movingItem || !canPlace(movingItem, null)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
         }}
-        onDragLeave={() => setRootActive(false)}
         onDrop={handleRootDrop}
-        aria-hidden="true"
-      />
-    </div>
+      >
+        {movingItem ? (
+          <div className="tree-move-banner">
+            <span>moving {movingItem.name}</span>
+            <button onClick={() => setPickedItem(null)} type="button">cancel</button>
+          </div>
+        ) : null}
+        <div className="tree-root-target">
+          <span>Notes</span>
+          {movingItem && canPlace(movingItem, null) ? (
+            <button onClick={() => place(movingItem, null)} type="button">
+              place at top level
+            </button>
+          ) : null}
+        </div>
+        {tree.length === 0 ? (
+          <div className="directory-empty">Your notes will live here.</div>
+        ) : (
+          <ul className="directory-tree-list">
+            {tree.map((node) => (
+              <TreeNode
+                canPlace={canPlace}
+                depth={0}
+                key={node.id}
+                movingItem={movingItem}
+                node={node}
+                onDragEnd={() => setDraggedItem(null)}
+                onDragStart={(item) => setDraggedItem(item)}
+                onPick={(item) => {
+                  setPickedItem((current) => (
+                    current?.id === item.id && current.type === item.type ? null : item
+                  ));
+                  setMoveStatus('');
+                }}
+                onPlace={place}
+                onSelectEntry={onSelectEntry}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+      <p aria-live="polite" className="tree-move-status" role="status">
+        {moveStatus}
+      </p>
+    </>
   );
-}
+});

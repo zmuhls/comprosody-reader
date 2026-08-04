@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+server-dist
 *.local
 .env
 
@@ -23,6 +24,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+test-results/
 
 # Claude Code — per-user overrides and runtime state
 .claude/settings.local.json

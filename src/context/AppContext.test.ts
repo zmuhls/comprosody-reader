@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import {
   appReducer,
   collectDirectoryCascade,
@@ -28,7 +29,6 @@ function makeEntry(id: string, parentId: string | null, overrides: Partial<Entry
     ...overrides,
   };
 }
-
 function makeDirectory(
   id: string,
   parentId: string | null,
@@ -57,8 +57,58 @@ function makeState(): AppState {
     activeEntryId: null,
     refinementSettings: { genre: 'freewrite', scale: 'sentence', temperature: 0.5 },
     lexicon: {},
+    errors: [],
+    history: [],
+    historyIndex: -1,
   };
 }
+
+describe('workspace hydration and titles', () => {
+  it('reopens the most recently updated note when no active note survives', () => {
+    const older = makeEntry('older', null, { updatedAt: 10 });
+    const newer = makeEntry('newer', null, { updatedAt: 20 });
+    const hydrated = appReducer(makeState(), {
+      type: 'HYDRATE_WORKSPACE',
+      entries: { older, newer },
+      directories: {},
+    });
+    expect(hydrated.activeEntryId).toBe('newer');
+  });
+
+  it('preserves an active note that exists in the canonical snapshot', () => {
+    const active = makeEntry('active', null, { updatedAt: 10 });
+    const newer = makeEntry('newer', null, { updatedAt: 20 });
+    const hydrated = appReducer(
+      { ...makeState(), activeEntryId: active.id },
+      {
+        type: 'HYDRATE_WORKSPACE',
+        entries: { active, newer },
+        directories: {},
+      },
+    );
+    expect(hydrated.activeEntryId).toBe('active');
+  });
+
+  it('marks a user rename as manual so an automatic title cannot replace it', () => {
+    const note = makeEntry('note', null, {
+      kind: 'note',
+      titleSource: 'agent',
+      titleBasis: 'old-basis',
+    });
+    const state = makeState();
+    state.entries = { note };
+    const renamed = appReducer(state, {
+      type: 'RENAME_ENTRY',
+      id: note.id,
+      name: 'My chosen title',
+    });
+    expect(renamed.entries.note).toMatchObject({
+      name: 'My chosen title',
+      titleSource: 'manual',
+    });
+    expect(renamed.entries.note.titleBasis).toBeUndefined();
+  });
+});
 
 describe('appReducer DELETE_DIRECTORY', () => {
   it('cascades through nested subdirectories and their entries', () => {

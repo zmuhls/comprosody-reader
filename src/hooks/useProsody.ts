@@ -1,4 +1,4 @@
-import { useRef, useCallback, useEffect } from 'react';
+import { useRef, useCallback, useEffect, useState } from 'react';
 import { useRecording } from '../context/RecordingContext';
 import {
   computeWpm,
@@ -6,11 +6,19 @@ import {
   computeFluency,
   computeLexicalDensity,
 } from '../lib/comprosody';
+import type { ProsodyDiagnostics } from '../types/audio';
+import { defaultProsody } from '../types/audio';
 
 export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | null) {
   const { state, dispatch } = useRecording();
   const lastSpeechTimeRef = useRef<number>(0);
   const pauseStartRef = useRef<number | null>(null);
+  const wasRecordingRef = useRef(false);
+
+  // Local state for live prosody — avoids dispatching to context every 500ms
+  // which would re-render all RecordingContext consumers.
+  const [liveProsody, setLiveProsody] = useState<ProsodyDiagnostics>(defaultProsody);
+  const liveProsodyRef = useRef<ProsodyDiagnostics>(defaultProsody);
 
   const update = useCallback(() => {
     if (!state.session) return;
@@ -52,10 +60,9 @@ export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | nu
     const fluency = computeFluency(state.session.pauses, elapsed);
     const lexicalDensity = computeLexicalDensity(fullText);
 
-    dispatch({
-      type: 'UPDATE_PROSODY',
-      prosody: { pace, energy, fluency, lexicalDensity },
-    });
+    const next = { pace, energy, fluency, lexicalDensity };
+    liveProsodyRef.current = next;
+    setLiveProsody(next);
   }, [state.session, getTimeDomainData, dispatch]);
 
   // The interval is keyed on isRecording alone; `update` is read through a ref
@@ -67,16 +74,25 @@ export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | nu
   }, [update]);
 
   useEffect(() => {
-    if (!state.isRecording) return;
+    if (!state.isRecording) {
+      if (wasRecordingRef.current) {
+        wasRecordingRef.current = false;
+        dispatch({ type: 'FINALIZE_PROSODY', prosody: liveProsodyRef.current });
+      }
+      return;
+    }
 
+    wasRecordingRef.current = true;
     lastSpeechTimeRef.current = Date.now();
     pauseStartRef.current = null;
     const intervalId = window.setInterval(() => updateRef.current(), 500);
-
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [state.isRecording]);
+  }, [dispatch, state.isRecording]);
 
-  return state.prosody;
+  // The analyser owns the live display while recording. Once stopped, use the
+  // finalized context snapshot so MainPanel's post-transcription correction is
+  // reflected in the UI as well as the saved note and local voice profile.
+  return state.isRecording ? liveProsody : state.prosody;
 }

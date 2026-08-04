@@ -2,11 +2,13 @@ import { useRef, useCallback } from 'react';
 import { useRecording } from '../context/RecordingContext';
 
 /**
- * Web Speech API wrapper for interim transcript display during recording.
+ * Optional Web Speech API wrapper for interim transcript display during recording.
  * Final transcription is handled by the server endpoint (useTranscription) after
  * recording stops. This hook provides real-time interim text feedback while the
  * user is speaking, and keeps the accumulated final text in a ref so callers can
- * read it synchronously after stop() without stale-closure loss.
+ * read it synchronously after stop() without stale-closure loss. Because some
+ * browsers process recognition remotely, callers must expose this as an explicit
+ * opt-in; batch audio remains the authoritative transcript.
  */
 
 // Web Speech API type augmentation

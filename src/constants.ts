@@ -28,6 +28,7 @@ export const STORAGE_KEYS = {
   entries: 'comprosody:entries',
   directories: 'comprosody:directories',
   settings: 'comprosody:settings',
+  voiceProfile: 'comprosody:voice-profile',
   lexicon: 'comprosody:lexicon',
   schemaVersion: 'comprosody:schemaVersion',
 } as const;

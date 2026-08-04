@@ -2,14 +2,17 @@
 
 Audit findings from 2026-04-10, resolved in the 2026-07-26 optimization pass (branch `optimization-pass`). One item remains open below; everything else moved to Done with its resolution.
 
-## Next steps — ElevenLabs phase-out (logged 2026-08-01)
+## Current transcription direction (reconciled 2026-08-03)
 
-Recon result: there is **no ElevenLabs code, dependency, env var, or doc reference anywhere in the tree**. The exploratory transcription wiring from 2026-07-31 never produced a commit; its only artifact was a stale git worktree at `.claude/worktrees/elevenlabs` (detached HEAD at `6c426c7`, clean, zero elevenlabs references). Transcription already runs entirely on OpenRouter (`OPENROUTER_TRANSCRIBE_MODEL`, default `google/gemini-2.5-flash`) via `POST /api/transcribe`.
+Comprosody supports two explicit providers: private Faster Whisper (the default)
+and optional ElevenLabs Scribe, including realtime preview with batch recovery.
+Both receive bounded vocabulary hints; raw audio and cloud credentials stay out of
+URLs and client storage.
 
-- [x] Remove the stale worktree (`git worktree remove .claude/worktrees/elevenlabs`) — nothing unique in it; the checkout commit exists in the main repo.
-- [x] Confirm OpenRouter transcription is the sole, permanent path (no dual-provider switch to maintain).
-- [ ] **Gate for any future dedicated-STT provider** (ElevenLabs or otherwise): it must support vocabulary biasing equivalent to the `X-Lexicon` system-message hint, or the transcription-fidelity loop loses its upstream half and only the deterministic find/replace carries the lexicon. Evaluate against that requirement before wiring anything.
-- [ ] If ElevenLabs voice features (e.g. TTS readback of drafts) become desirable later, they enter as a new spec under `docs/superpowers/specs/` — not a revival of the old worktree.
+- [x] Keep Faster Whisper as the private default.
+- [x] Keep ElevenLabs opt-in and make degraded realtime sessions fall back once to the recorded audio.
+- [x] Preserve vocabulary biasing across both `X-Cadence-Keyterms` and the compatible `X-Lexicon` wire format.
+- [ ] Measure aggregate substitution counts so provider-side vocabulary-hint efficacy is visible over time.
 
 ## Open (added 2026-08-01, library & studio workup)
 
@@ -20,10 +23,6 @@ Recon result: there is **no ElevenLabs code, dependency, env var, or doc referen
 - [ ] **Audio hydrate/release hysteresis is viewport-based** — the takes list scrolls in its own container, so the 200px/600px root margins both collapse to the container clip edge. Works (release confirmed in e2e), but passing the container as the IntersectionObserver `root` would restore the intended hysteresis band.
 
 ## Open
-
-- [ ] **`.env.example` missing new vars** — needs two additions (blocked for automation by the protected-files hook; edit manually):
-  - `OPENROUTER_TRANSCRIBE_MODEL=google/gemini-2.5-flash` (used by `server/lib/transcribe.ts`)
-  - `CORS_ORIGIN=http://localhost:5173` (comma-separated allowlist read by `server/index.ts`)
 
 - [ ] **Refinement provenance gap** — nothing links a refinement to the settings/prosody that produced it. `entry.prosody` is a single snapshot overwritten on every recording stop (`MainPanel.tsx` `handleStop`), while `rawTranscript` accumulates across takes, so on a multi-take entry the stored prosody no longer describes what produced `refinedText`. `draftHistory` is bare `string[]` — no timestamp, no settings, no prosody. Does not affect the lexicon loop (which diffs per-take transcripts), but blocks any future refinement-style learning: you cannot learn from a signal you cannot attribute.
 
@@ -40,7 +39,7 @@ Recon result: there is **no ElevenLabs code, dependency, env var, or doc referen
 
 ### High
 
-- [x] **`refineComplete` is dead code** — client function and `/api/refine/complete` route both deleted (`server/lib/claude.ts#refineComplete` kept — `/api/variants` uses it).
+- [x] **`refineComplete` has a concrete owner** — automatic note titles use the bounded `/api/refine/complete` route; variants use their partial-result route.
 - [x] **Word timestamps pipeline is inert** — removed end to end: server returns `{ transcript }` only; `WordTimestamp`, `session.wordTimestamps`, and `ADD_WORD_TIMESTAMP` deleted from the frontend.
 - [x] **VoiceConfigToggles label click dead zone** — converted to a real `<input type="checkbox">` (peer + sr-only) inside the label, with keyboard focus ring.
 - [x] **`@anthropic-ai/sdk` is an unused dependency** — removed (`idb-keyval` and `diff` added instead, both actively used).
@@ -50,7 +49,7 @@ Recon result: there is **no ElevenLabs code, dependency, env var, or doc referen
 
 - [x] **`SET_AUDIO_BLOB` dispatch is dead** — action and `session.audioBlob` removed; recordings now persist durably to IndexedDB (`src/lib/audioStore.ts`) with a per-entry takes player in the editor.
 - [x] **Stale-closure fallback may lose final phrase** — `finalTranscriptRef` + `getFinalTranscript()` in `useSpeechRecognition`; fallback reads go through the ref.
-- [x] **No size limit on raw audio uploads** — 25 MB cap in `/api/transcribe`: Content-Length pre-check (413) plus streamed byte counting with `req.destroy()`.
+- [x] **No size limit on raw audio uploads** — 50 MB cap in `/api/transcribe`: Content-Length pre-check (413) plus streamed byte counting with `req.destroy()`.
 - [x] **`max_tokens: 64000` in `streamRefinement`** — shared `MAX_OUTPUT_TOKENS = 8192` used by both refinement paths.
 - [x] **Empty content silently returns 200** — `refineComplete` throws on empty content; `/api/refine` emits an error event when the stream produces zero chunks.
 
@@ -62,14 +61,13 @@ Recon result: there is **no ElevenLabs code, dependency, env var, or doc referen
 - [x] **Compounding CSS transparency** — Sidebar uses `bg-surface` (token already carries alpha).
 - [x] **Waveform rAF lifecycle coupling** — `drawWaveform` returns a cancel function; `Waveform` cancels in its own effect cleanup. HiDPI drawing bug (device-pixel coords on a pre-scaled context) fixed alongside.
 - [x] **`response.body!` non-null assertion** — explicit null checks with clear errors, client and server.
-- [x] **Duplicated API key access** — `getApiKey()` exported from `server/lib/claude.ts`, shared by transcribe.
 - [x] **No `X-Accel-Buffering: no` header on SSE** — added, plus `flushHeaders()` after validation.
 - [x] **CORS fully open** — allowlist from `CORS_ORIGIN` env (default `http://localhost:5173`).
 - [x] **`isTranscribing` does not disable `RecordButton`** — disabled while a transcription is in flight (`aria-pressed`, reason in title).
 
 ### Fixed beyond the audit
 
-- [x] Client disconnect on `/api/refine` now aborts the upstream OpenRouter stream (stops token billing).
+- [x] Client disconnect on `/api/refine` now aborts the upstream Ollama request.
 - [x] `DELETE_DIRECTORY` recursively cascades through nested sub-directories (was orphaning grandchildren permanently); IndexedDB recordings cascade too.
 - [x] Stale interim transcript no longer bakes into the editor after recording stops.
 - [x] `useProsody` interval no longer restarts on every render tick.

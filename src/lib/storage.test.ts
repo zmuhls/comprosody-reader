@@ -1,13 +1,75 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { STORAGE_KEYS } from '../constants';
 import {
   createDebouncedPersist,
-  loadEntries,
-  saveEntries,
   loadDirectories,
+  loadEntries,
+  loadRefinementSettings,
   normalizeEntry,
+  saveEntries,
 } from './storage';
-import { STORAGE_KEYS } from '../constants';
 import { defaultProsody, defaultVoiceConfig } from '../types/audio';
 import type { Entry } from '../types/editor';
+
+beforeEach(() => {
+  localStorage.clear();
+});
+
+describe('loadRefinementSettings', () => {
+  it('loads only supported refinement settings', () => {
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify({
+      genre: 'academic',
+      scale: 'paragraph',
+      temperature: 0.35,
+      mode: 'overhaul',
+      highFidelity: false,
+      autoRefine: false,
+      unexpected: 'discard me',
+    }));
+
+    expect(loadRefinementSettings()).toEqual({
+      genre: 'academic',
+      scale: 'paragraph',
+      temperature: 0.35,
+      mode: 'overhaul',
+      highFidelity: false,
+      autoRefine: false,
+    });
+  });
+
+  it('drops invalid values so application defaults remain authoritative', () => {
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify({
+      genre: 'legal-brief',
+      scale: 'book',
+      temperature: 1.5,
+      mode: 'rewrite-everything',
+      highFidelity: 'yes',
+      autoRefine: 'always',
+    }));
+
+    expect(loadRefinementSettings()).toEqual({});
+  });
+
+  it('migrates the legacy boolean fidelity field without trusting other legacy values', () => {
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify({
+      fidelity: true,
+      temperature: '0.2',
+      autoRefine: null,
+    }));
+
+    expect(loadRefinementSettings()).toEqual({
+      highFidelity: true,
+    });
+  });
+
+  it.each(['null', '[]', '"academic"', '{not-json'])(
+    'returns an empty settings object for invalid storage payload %s',
+    (payload) => {
+      localStorage.setItem(STORAGE_KEYS.settings, payload);
+      expect(loadRefinementSettings()).toEqual({});
+    },
+  );
+});
 
 function makeLegacyEntry(overrides: Partial<Entry> = {}): Partial<Entry> & { id: string } {
   return {
@@ -130,7 +192,8 @@ describe('loadEntries', () => {
     const entries = loadEntries();
     expect(entries.e1.prosody).toEqual(defaultProsody);
     expect(entries.e1.voiceConfig).toEqual(defaultVoiceConfig);
-    expect(entries.e1.name).toBe('');
+    expect(entries.e1.name).toBe('Untitled');
+    expect(entries.e1.titleSource).toBe('fallback');
     expect(entries.e1.rawTranscript).toBe('');
     expect(entries.e1.refinedText).toBe('');
     expect(entries.e1.parentId).toBeNull();

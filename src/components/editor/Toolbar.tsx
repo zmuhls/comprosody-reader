@@ -1,125 +1,75 @@
-import { useApp } from '../../context/AppContext';
-import { SettingsRail } from './SettingsRail';
+import { memo, useState, type FormEvent } from 'react';
+import { Icon } from '../ui/Icon';
 
 interface Props {
-  onRefine: () => void;
-  onRefineSelection: () => void;
-  onGenerateVariants: () => void;
-  onSeedDraft: () => void;
-  onUndo: () => void;
-  onCopy: () => void;
-  onExport: () => void;
-  canUndo: boolean;
-  copied: boolean;
   hasSelection: boolean;
-  hasTranscript: boolean;
-  hasRefinedText: boolean;
   isRefining: boolean;
-  isGeneratingVariants: boolean;
+  onCancel: () => void;
+  onFaithfulEdit: () => void;
+  onFullOverhaul: () => void;
+  onInstruction: (instruction: string) => Promise<boolean>;
 }
 
-const SECONDARY_BUTTON =
-  'px-2 py-1.5 text-[10px] uppercase tracking-[0.18em] text-text-secondary transition-colors hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-35';
-
-function Delimiter() {
-  return (
-    <span className="select-none text-text-muted/40" aria-hidden="true">
-      ·
-    </span>
-  );
-}
-
-export function Toolbar({
-  onRefine,
-  onRefineSelection,
-  onGenerateVariants,
-  onSeedDraft,
-  onUndo,
-  onCopy,
-  onExport,
-  canUndo,
-  copied,
+export const RefinementComposer = memo(function RefinementComposer({
   hasSelection,
-  hasTranscript,
-  hasRefinedText,
   isRefining,
-  isGeneratingVariants,
+  onCancel,
+  onFaithfulEdit,
+  onFullOverhaul,
+  onInstruction,
 }: Props) {
-  const { state } = useApp();
-  const hasEntry = !!state.activeEntryId;
-  const canRefine =
-    hasEntry && hasTranscript && !isRefining && !isGeneratingVariants;
-  const hasContent = hasTranscript || hasRefinedText;
+  const [instruction, setInstruction] = useState('');
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const value = instruction.trim();
+    if (!value || isRefining) return;
+    const applied = await onInstruction(value);
+    if (applied) setInstruction('');
+  };
 
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border bg-surface px-4 py-2 sm:px-5">
-      <SettingsRail />
-
-      <div className="flex-1" />
-
-      <div className="flex flex-wrap items-center gap-1.5">
+    <div className="refinement-composer">
+      <form className="refinement-input-shell" onSubmit={submit}>
+        <input
+          aria-label={hasSelection ? 'Refine selected text' : 'Refine this note'}
+          disabled={isRefining}
+          onChange={(event) => setInstruction(event.target.value)}
+          placeholder={
+            hasSelection ? 'Refine the selection…' : 'Refine this passage…'
+          }
+          value={instruction}
+        />
         <button
-          onClick={onSeedDraft}
-          disabled={!hasTranscript || isRefining || isGeneratingVariants}
-          className={SECONDARY_BUTTON}
+          aria-label="Apply focused refinement"
+          className="refinement-send"
+          disabled={!instruction.trim() || isRefining}
+          type="submit"
         >
-          {hasRefinedText ? 'reset draft' : 'seed draft'}
+          <Icon name="arrow-up" size={15} />
         </button>
+      </form>
 
-        <Delimiter />
-
-        <button
-          onClick={onUndo}
-          disabled={!canUndo || isRefining || isGeneratingVariants}
-          className={SECONDARY_BUTTON}
-        >
-          undo
-        </button>
-
-        <Delimiter />
-
-        <button
-          onClick={onRefine}
-          disabled={!canRefine}
-          className="border border-accent bg-accent px-4 py-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-canvas transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-35"
-        >
-          {isRefining ? 'refining…' : 'refine'}
-        </button>
+      <div className="refinement-actions">
+        {isRefining ? (
+          <button className="text-action is-active" onClick={onCancel} type="button">
+            Stop proposal
+          </button>
+        ) : (
+          <button className="text-action is-active" onClick={onFaithfulEdit} type="button">
+            Faithful edit
+          </button>
+        )}
 
         <button
-          onClick={onRefineSelection}
-          disabled={!canRefine || !hasSelection}
-          className={SECONDARY_BUTTON}
+          className="text-action"
+          disabled={isRefining}
+          onClick={onFullOverhaul}
+          type="button"
         >
-          selection
-        </button>
-
-        <button
-          onClick={onGenerateVariants}
-          disabled={!canRefine}
-          className={SECONDARY_BUTTON}
-        >
-          {isGeneratingVariants ? 'generating…' : 'passes'}
-        </button>
-
-        <Delimiter />
-
-        <button
-          onClick={onCopy}
-          disabled={!hasContent}
-          className={`${SECONDARY_BUTTON} ${copied ? 'text-success hover:text-success' : ''}`}
-        >
-          {copied ? 'copied' : 'copy'}
-        </button>
-
-        <button
-          onClick={onExport}
-          disabled={!hasContent}
-          className={SECONDARY_BUTTON}
-        >
-          export
+          Full overhaul
         </button>
       </div>
     </div>
   );
-}
+});

@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import type { ProsodyDiagnostics } from '../../types/audio';
 import { RecordButton } from './RecordButton';
 import { Waveform } from './Waveform';
@@ -36,8 +35,6 @@ export function RecordingFooter({
   transcriptionError,
   canRetryTranscription,
   prosody,
-  sessionStartedAt,
-  liveWordCount,
   drawWaveform,
   onStart,
   onStartNote,
@@ -45,20 +42,6 @@ export function RecordingFooter({
   onRetryTranscription,
   onUseLiveTranscript,
 }: Props) {
-  const [tickNow, setTickNow] = useState(0);
-
-  useEffect(() => {
-    if (!isRecording) return;
-    const intervalId = window.setInterval(() => setTickNow(Date.now()), 1000);
-    return () => window.clearInterval(intervalId);
-  }, [isRecording]);
-
-  // A stale tick from a previous take is clamped to 0:00 until the first tick.
-  const elapsedMs =
-    isRecording && sessionStartedAt != null
-      ? Math.max(0, tickNow - sessionStartedAt)
-      : null;
-
   const status = isRecording
     ? 'recording'
     : isTranscribing
@@ -81,18 +64,15 @@ export function RecordingFooter({
         <Waveform
           drawWaveform={drawWaveform}
           isRecording={isRecording}
-          className="absolute inset-0 h-full w-full opacity-70"
-          color="#d98a54"
         />
       </div>
 
       <div className="relative flex min-h-[72px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
         <RecordButton
           isRecording={isRecording}
+          isTranscribing={isTranscribing && !isRecording}
           onStart={onStart}
           onStop={onStop}
-          disabled={isTranscribing && !isRecording}
-          energy={isRecording ? prosody.energy : 0}
         />
 
         <div className="min-w-0">
@@ -119,12 +99,7 @@ export function RecordingFooter({
 
         <div className="min-w-4 flex-1" />
 
-        <ProsodyPanel
-          prosody={prosody}
-          isRecording={isRecording}
-          elapsedMs={elapsedMs}
-          wordCount={liveWordCount}
-        />
+        <ProsodyPanel prosody={prosody} />
 
         <VoiceConfigToggles />
       </div>
