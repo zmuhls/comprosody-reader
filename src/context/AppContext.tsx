@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
   type Dispatch,
+  type SetStateAction,
 } from 'react';
 import type { Entry, Directory } from '../types/editor';
 import type { RefinementSettings } from '../types/llm';
@@ -335,6 +336,8 @@ const AppContext = createContext<{
   dispatch: Dispatch<AppAction>;
   voiceProfile: VoiceProfile;
   storageReady: boolean;
+  titleEditingEntryId: string | null;
+  setTitleEditingEntryId: Dispatch<SetStateAction<string | null>>;
 } | null>(null);
 
 function useDebouncedSaver<T>(
@@ -377,6 +380,7 @@ function useDebouncedSaver<T>(
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, reducerDispatch] = useReducer(appReducer, null, createInitialState);
   const [storageReady, setStorageReady] = useState(false);
+  const [titleEditingEntryId, setTitleEditingEntryId] = useState<string | null>(null);
   const storageReadyRef = useRef(false);
   const pendingWorkspaceActionsRef = useRef<AppAction[]>([]);
   const dispatch = useCallback<Dispatch<AppAction>>(
@@ -457,7 +461,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider
-      value={{ state, dispatch, voiceProfile, storageReady }}
+      value={{
+        state,
+        dispatch,
+        voiceProfile,
+        storageReady,
+        titleEditingEntryId,
+        setTitleEditingEntryId,
+      }}
     >
       {children}
     </AppContext.Provider>

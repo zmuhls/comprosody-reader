@@ -67,8 +67,8 @@ export function RefinementSidecar({
   return (
     <Dialog.Portal>
       <Dialog.Content asChild>
-        <aside className="refinement-sidecar is-open">
-      <header className="refinement-sidecar-header">
+        <section className="refinement-sidecar is-open">
+      <div className="refinement-sidecar-header">
         <div>
           <Dialog.Title asChild>
             <strong>Refinement</strong>
@@ -86,7 +86,7 @@ export function RefinementSidecar({
             <Icon name="x" size={15} />
           </button>
         </Dialog.Close>
-      </header>
+      </div>
 
       <div className="refinement-sidecar-scroll">
         <section className="refinement-presets" aria-label="Refinement presets">
@@ -261,7 +261,7 @@ export function RefinementSidecar({
           </div>
         </form>
       </footer>
-        </aside>
+        </section>
       </Dialog.Content>
     </Dialog.Portal>
   );

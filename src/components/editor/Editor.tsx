@@ -66,10 +66,12 @@ function safeFilename(name: string): string {
 export function DocumentTitle({
   entry,
   onCommit,
+  onEditingChange,
   onEnterBody,
 }: {
   entry: Entry;
   onCommit: (title: string) => void;
+  onEditingChange?: (editing: boolean) => void;
   onEnterBody: () => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -78,8 +80,11 @@ export function DocumentTitle({
     value: entry.name,
   });
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const displayRef = useRef<HTMLButtonElement | null>(null);
   const lastTouchAtRef = useRef(Number.NEGATIVE_INFINITY);
-  const value = draft.baseName === entry.name ? draft.value : entry.name;
+  const value = isEditing ? draft.value : entry.name;
+
+  useEffect(() => () => onEditingChange?.(false), [onEditingChange]);
 
   useEffect(() => {
     if (!isEditing) return;
@@ -89,6 +94,7 @@ export function DocumentTitle({
 
   const beginEditing = () => {
     setDraft({ baseName: entry.name, value: entry.name });
+    onEditingChange?.(true);
     setIsEditing(true);
   };
 
@@ -97,6 +103,7 @@ export function DocumentTitle({
     setDraft({ baseName: entry.name, value: nextTitle });
     if (nextTitle !== entry.name) onCommit(nextTitle);
     setIsEditing(false);
+    onEditingChange?.(false);
     if (enterBody) onEnterBody();
   };
 
@@ -105,9 +112,12 @@ export function DocumentTitle({
       <button
         aria-label={`Rename note title: ${entry.name}`}
         className="document-title document-title-display"
+        onClick={(event) => {
+          if (event.detail === 0) beginEditing();
+        }}
         onDoubleClick={beginEditing}
         onKeyDown={(event) => {
-          if (event.key !== 'Enter' && event.key !== 'F2') return;
+          if (!['Enter', ' ', 'F2'].includes(event.key)) return;
           event.preventDefault();
           beginEditing();
         }}
@@ -124,6 +134,7 @@ export function DocumentTitle({
         }}
         title="Double-click or double-tap to rename"
         type="button"
+        ref={displayRef}
       >
         {entry.name}
       </button>
@@ -146,6 +157,8 @@ export function DocumentTitle({
           event.preventDefault();
           setDraft({ baseName: entry.name, value: entry.name });
           setIsEditing(false);
+          onEditingChange?.(false);
+          window.requestAnimationFrame(() => displayRef.current?.focus());
         }
       }}
       ref={inputRef}
@@ -212,12 +225,18 @@ export const Editor = memo(function Editor({
   refinement,
   startedAt,
 }: Props) {
-  const { state, dispatch, storageReady } = useApp();
+  const {
+    state,
+    dispatch,
+    storageReady,
+    titleEditingEntryId,
+    setTitleEditingEntryId,
+  } = useApp();
   const { createEntry } = useStorage();
   const [isSourceOpen, setIsSourceOpen] = useState(false);
   const [isRefinementOpen, setIsRefinementOpen] = useState(false);
   const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
-    window.matchMedia('(max-width: 820px)').matches,
+    window.matchMedia('(max-width: 900px)').matches,
   );
   const [hasSelection, setHasSelection] = useState(false);
   const [hasPendingUpdate, setHasPendingUpdate] = useState(false);
@@ -230,14 +249,24 @@ export const Editor = memo(function Editor({
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
     : null;
-  const automaticTitleStatus = useAutomaticNoteTitle(activeEntry);
+  const automaticTitleStatus = useAutomaticNoteTitle(
+    activeEntry,
+    Boolean(activeEntry && titleEditingEntryId === activeEntry.id),
+  );
+  const handleTitleEditingChange = useCallback((editing: boolean) => {
+    const entryId = activeEntryIdRef.current;
+    setTitleEditingEntryId((current) => {
+      if (editing) return entryId;
+      return current === entryId ? null : current;
+    });
+  }, [setTitleEditingEntryId]);
 
   useEffect(() => {
     activeEntryIdRef.current = state.activeEntryId;
   }, [state.activeEntryId]);
 
   useEffect(() => {
-    const query = window.matchMedia('(max-width: 820px)');
+    const query = window.matchMedia('(max-width: 900px)');
     const update = () => setIsNarrowViewport(query.matches);
     update();
     query.addEventListener('change', update);
@@ -278,7 +307,9 @@ export const Editor = memo(function Editor({
     editorProps: {
       attributes: {
         'aria-label': 'Note body',
+        'aria-multiline': 'true',
         class: 'document-prose',
+        role: 'textbox',
         spellcheck: 'true',
       },
     },
@@ -492,7 +523,7 @@ export const Editor = memo(function Editor({
 
   if (!activeEntry) {
     return (
-      <div className="editor-empty-state">
+      <main className="editor-empty-state" id="main-content" tabIndex={-1}>
         <button
           className="mobile-menu-button"
           onClick={(event) => onOpenSidebar(event.currentTarget)}
@@ -508,7 +539,7 @@ export const Editor = memo(function Editor({
             New note
           </button>
         </div>
-      </div>
+      </main>
     );
   }
 
@@ -523,7 +554,7 @@ export const Editor = memo(function Editor({
       open={isRefinementOpen}
     >
       <div className="editor-shell">
-      <header className="editor-topbar">
+      <div className="editor-topbar">
         <button
           aria-label="Open note directory"
           className="icon-button mobile-directory-trigger"
@@ -534,6 +565,7 @@ export const Editor = memo(function Editor({
         </button>
 
         <button
+          aria-label={`Current note: ${activeEntry.name}. Open directory`}
           className="breadcrumb"
           onClick={(event) => onOpenSidebar(event.currentTarget)}
           type="button"
@@ -674,9 +706,9 @@ export const Editor = memo(function Editor({
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
         </div>
-      </header>
+      </div>
 
-      <main className="document-viewport">
+      <main className="document-viewport" id="main-content" tabIndex={-1}>
         <article className="document-page">
           <time className="document-date" dateTime={new Date(activeEntry.createdAt).toISOString()}>
             {documentDate(activeEntry.createdAt)}
@@ -692,6 +724,7 @@ export const Editor = memo(function Editor({
                   name: nextTitle,
                 })
               }
+              onEditingChange={handleTitleEditingChange}
               onEnterBody={() => editor?.commands.focus('start')}
             />
             <span
@@ -758,7 +791,8 @@ export const Editor = memo(function Editor({
         }}
       />
 
-      <div
+      <section
+        aria-label="Writing and recording controls"
         className="interaction-dock"
         data-busy={isTranscribing || refinement.isRefining}
         data-recording={isRecording}
@@ -799,7 +833,7 @@ export const Editor = memo(function Editor({
           provider={provider}
           startedAt={startedAt}
         />
-      </div>
+      </section>
       </div>
     </Dialog.Root>
   );

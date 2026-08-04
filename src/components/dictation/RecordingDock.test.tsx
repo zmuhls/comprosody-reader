@@ -45,4 +45,14 @@ describe('RecordingDock', () => {
       ),
     ).toBe(true);
   });
+
+  it('announces recording lifecycle changes as one polite atomic status', () => {
+    const view = render(
+      <RecordingDock {...baseProps} backgroundNotice="Recording while away" isRecording />,
+    );
+    const status = view.getByRole('status');
+    expect(status.textContent).toBe('Recording while away');
+    expect(status.getAttribute('aria-live')).toBe('polite');
+    expect(status.getAttribute('aria-atomic')).toBe('true');
+  });
 });

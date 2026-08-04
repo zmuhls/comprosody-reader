@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const stylesheet = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8');
-const mobileStart = stylesheet.indexOf('@media (max-width: 600px)');
+const mobileStart = stylesheet.indexOf('@media (max-width: 900px)');
 const mobileEnd = stylesheet.indexOf(
   '@media (prefers-reduced-motion: reduce)',
   mobileStart,
@@ -35,6 +35,7 @@ describe('mobile touch target stylesheet contract', () => {
     expectFortyFourPixelTarget(
       '.sidebar-header .icon-button',
       '.entry-folder-action',
+      '.tree-rename-action',
       '.tree-delete',
       '.editor-topbar .icon-button',
       '.refinement-sidecar-header .icon-button',
@@ -69,6 +70,7 @@ describe('mobile touch target stylesheet contract', () => {
     expect(
       declarationsFor(
         '.entry-primary-action',
+        '.tree-primary-action',
         '.tree-row',
         '.breadcrumb',
         '.mobile-workspace-switch button',

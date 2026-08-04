@@ -1,13 +1,14 @@
 import { Icon } from '../ui/Icon';
 import { Tooltip } from 'radix-ui';
 
-export function ScholarRail() {
+export function ScholarRail({ inert = false }: { inert?: boolean }) {
   return (
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
         <aside
           aria-label="Scholar search is planned for a later release"
           className="scholar-rail"
+          inert={inert ? true : undefined}
           tabIndex={0}
         >
           <Icon name="search" size={15} />

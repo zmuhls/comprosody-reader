@@ -28,7 +28,7 @@ describe('DocumentTitle', () => {
     vi.restoreAllMocks();
   });
 
-  it('synchronizes an external rename even when a local draft exists', () => {
+  it('protects an in-progress manual draft from a delayed automatic title', () => {
     const onCommit = vi.fn();
     const onEnterBody = vi.fn();
     const { rerender } = render(
@@ -53,7 +53,24 @@ describe('DocumentTitle', () => {
       />,
     );
 
-    expect((title as HTMLInputElement).value).toBe('Renamed elsewhere');
+    expect((title as HTMLInputElement).value).toBe('Uncommitted draft');
+    fireEvent.keyDown(title, { key: 'Enter' });
+    expect(onCommit).toHaveBeenCalledWith('Uncommitted draft');
+  });
+
+  it('accepts a synthesized assistive click without changing pointer shortcuts', () => {
+    render(
+      <DocumentTitle
+        entry={makeEntry('Original')}
+        onCommit={vi.fn()}
+        onEnterBody={vi.fn()}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Rename note title: Original' }),
+      { detail: 0 },
+    );
+    expect(screen.getByRole('textbox', { name: 'Note title' })).not.toBeNull();
   });
 
   it('renames on double tap and enters the note body after Enter', () => {

@@ -23,6 +23,9 @@ interface MobileWorkspaceSelection {
 
 function AppInner() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
+    window.matchMedia?.('(max-width: 900px)').matches ?? false,
+  );
   const [sidebarReturnFocusTarget, setSidebarReturnFocusTarget] =
     useState<HTMLElement | null>(null);
   const [mobileWorkspaceSelection, setMobileWorkspaceSelection] =
@@ -33,6 +36,14 @@ function AppInner() {
   const { activePublication } = useLibrary();
 
   useEffect(() => installVisualViewportSync(), []);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const query = window.matchMedia('(max-width: 900px)');
+    const update = () => setIsNarrowViewport(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
   const activePublicationId = activePublication?.id ?? null;
   const mobileWorkspaceView =
     mobileWorkspaceSelection.publicationId === activePublicationId
@@ -54,23 +65,41 @@ function AppInner() {
     );
     setIsSidebarOpen(true);
   };
+  const sidebarModalOpen = isNarrowViewport && isSidebarOpen;
+  const skipToReading = Boolean(
+    activePublication && mobileWorkspaceView === 'reader',
+  );
 
   return (
     <RecordingProvider>
       <Tooltip.Provider delayDuration={450}>
         <div className="app-frame">
+          <a
+            className="skip-link"
+            href={skipToReading ? '#reading-content' : '#main-content'}
+            inert={sidebarModalOpen ? true : undefined}
+          >
+            {skipToReading ? 'Skip to reading' : 'Skip to note'}
+          </a>
           <Sidebar
             isOpen={isSidebarOpen}
             onClose={() => setIsSidebarOpen(false)}
             returnFocusTarget={sidebarReturnFocusTarget}
           />
-          <SidebarResizer />
+          <div
+            aria-label="Note directory sizing"
+            className="sidebar-resizer-region"
+            role="region"
+          >
+            <SidebarResizer />
+          </div>
           <div
             className={`workspace-stage ${
               activePublication
                 ? `is-reading mobile-view-${mobileWorkspaceView}`
                 : ''
             }`}
+            inert={sidebarModalOpen ? true : undefined}
           >
             {activePublication ? (
               <nav
@@ -109,8 +138,8 @@ function AppInner() {
               <MainPanel onOpenSidebar={openSidebar} />
             </div>
           </div>
-          <ScholarRail />
-          <CommandPalette />
+          <ScholarRail inert={sidebarModalOpen} />
+          {sidebarModalOpen ? null : <CommandPalette />}
         </div>
       </Tooltip.Provider>
     </RecordingProvider>

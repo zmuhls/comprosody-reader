@@ -62,6 +62,37 @@ test('titles a private note in the background without blocking writing', async (
   await expect(page.getByText('Titled by Comprosody')).toBeVisible();
 });
 
+test('manual title editing suspends background titling in every browser engine', async ({
+  page,
+}, testInfo) => {
+  let titleRequests = 0;
+  await page.route('**/studio/api/refine/complete', async (route) => {
+    titleRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ text: 'Automatic title must not win' }),
+    });
+  });
+  const body = await createNote(page);
+  await body.fill(NOTE_SOURCE);
+  await beginRename(page.getByRole('button', {
+    name: /Rename note title:/,
+  }), testInfo.project.name);
+  const input = page.getByRole('textbox', { name: 'Note title' });
+  await input.fill('Manual title in progress');
+  await page.waitForTimeout(1_400);
+  await expect(input).toHaveValue('Manual title in progress');
+  expect(titleRequests).toBe(0);
+
+  await input.press('Enter');
+  await expect(page.getByRole('button', {
+    name: 'Rename note title: Manual title in progress',
+  })).toBeVisible();
+  await page.waitForTimeout(1_400);
+  expect(titleRequests).toBe(0);
+});
+
 test('double activation renames notes and folders, then places a note by touch-safe controls', async ({
   page,
 }, testInfo) => {
@@ -82,8 +113,7 @@ test('double activation renames notes and folders, then places a note by touch-s
 
   await openDirectoryIfNeeded(page);
   await page.getByRole('button', { name: 'New folder' }).click();
-  const folderRow = page.getByText('New Folder').locator('..');
-  await beginRename(folderRow, testInfo.project.name);
+  await page.getByRole('button', { name: 'Rename directory New Folder' }).click();
   const folderInput = page.getByRole('textbox', { name: 'Rename directory' });
   await folderInput.fill('Archive');
   await folderInput.press('Enter');
@@ -94,13 +124,13 @@ test('double activation renames notes and folders, then places a note by touch-s
     'Public Memory Note moved to Archive.',
   );
   const archiveBranch = page
-    .getByText('Archive', { exact: true })
+    .getByRole('button', { name: 'Archive', exact: true })
     .locator('..')
     .locator('..');
   await expect(
     archiveBranch
-      .getByRole('group')
-      .getByText('Public Memory Note', { exact: true }),
+      .locator('.tree-children')
+      .getByRole('button', { name: 'Public Memory Note', exact: true }),
   ).toBeVisible();
   await attachScreenshot(page, testInfo, 'renamed-and-organized-note.png');
 });
@@ -162,6 +192,10 @@ test('keeps the microphone inside its dock above an iOS visual keyboard', async 
       configurable: true,
       value: viewport,
     });
+    window.setTestVisualViewport = (next) => {
+      Object.assign(viewport, next);
+      for (const listener of listeners.get('resize') ?? []) listener();
+    };
   });
   const body = await createNote(page);
   await body.fill(NOTE_SOURCE);
@@ -180,4 +214,22 @@ test('keeps the microphone inside its dock above an iOS visual keyboard', async 
   );
   expect(microphone.width).toBeGreaterThanOrEqual(50);
   await attachScreenshot(page, testInfo, 'ios-keyboard-microphone.png');
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.evaluate(() => {
+    window.setTestVisualViewport({ height: 250, width: 844 });
+  });
+  await expect(page.locator('.sidebar')).toHaveRole('dialog');
+  await expect(page.locator('html')).toHaveAttribute('data-virtual-keyboard', 'open');
+  const landscapeDock = await page.locator('.interaction-dock').boundingBox();
+  const landscapeMicrophone = await page
+    .getByRole('button', { name: 'Start recording' })
+    .boundingBox();
+  expect(landscapeDock).not.toBeNull();
+  expect(landscapeMicrophone).not.toBeNull();
+  expect(landscapeMicrophone.y).toBeGreaterThanOrEqual(landscapeDock.y);
+  expect(landscapeMicrophone.y + landscapeMicrophone.height).toBeLessThanOrEqual(
+    landscapeDock.y + landscapeDock.height,
+  );
+  await attachScreenshot(page, testInfo, 'ios-landscape-keyboard-microphone.png');
 });

@@ -185,7 +185,12 @@ export function RecordingDock({
         </Popover.Portal>
       </Popover.Root>
 
-      <span className="recording-state-text">
+      <span
+        aria-atomic="true"
+        aria-live="polite"
+        className="recording-state-text"
+        role="status"
+      >
         {backgroundNotice || (isTranscribing
           ? `Transcribing · ${providerDetails.shortLabel}`
           : isRecording

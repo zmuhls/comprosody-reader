@@ -8,9 +8,9 @@
   --color-border-focus: #aaa4ae;
   --color-text-primary: #18161a;
   --color-text-secondary: #4f4a53;
-  --color-text-muted: #746f78;
-  --color-accent: #89838f;
-  --color-accent-hover: #6f6976;
+  --color-text-muted: #68636c;
+  --color-accent: #655f6b;
+  --color-accent-hover: #514b57;
   --color-warm: #9a7048;
   --color-hot: #9b4338;
   --color-cool: #65777a;
@@ -115,16 +115,38 @@ button {
 }
 
 button:focus-visible,
+a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
-[contenteditable="true"]:focus-visible {
-  outline: 1px solid #777772;
+[contenteditable="true"]:focus-visible,
+[tabindex]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
 .document-prose:focus-visible {
-  outline: none;
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.skip-link {
+  position: fixed;
+  top: max(8px, env(safe-area-inset-top));
+  left: max(8px, env(safe-area-inset-left));
+  z-index: 100;
+  min-height: 44px;
+  padding: 11px 14px;
+  border: 1px solid var(--color-border-focus);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  transform: translateY(-150%);
+}
+
+.skip-link:focus-visible {
+  transform: translateY(0);
 }
 
 ::selection {
@@ -147,6 +169,10 @@ textarea:focus-visible,
     linear-gradient(to bottom, var(--grid-wide) 1px, transparent 1px),
     linear-gradient(to right, var(--grid-wide) 1px, transparent 1px);
   background-size: 24px 24px, 24px 24px, 96px 96px, 96px 96px;
+}
+
+.sidebar-resizer-region {
+  flex: 0 0 0;
 }
 
 .workspace-stage {
@@ -208,9 +234,9 @@ textarea:focus-visible,
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--sidebar-width) - 8px);
+  left: calc(var(--sidebar-width) - 12px);
   z-index: 31;
-  width: 16px;
+  width: 24px;
   cursor: ew-resize;
   touch-action: none;
 }
@@ -219,7 +245,7 @@ textarea:focus-visible,
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 7px;
+  left: 11px;
   width: 1px;
   background: var(--color-border-focus);
   content: "";
@@ -291,7 +317,11 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 .sidebar-section-heading a {
+  display: inline-flex;
+  min-width: 44px;
   min-height: 24px;
+  align-items: center;
+  justify-content: flex-end;
   color: var(--color-text-muted);
   font-size: 8.5px;
   font-weight: 500;
@@ -401,8 +431,10 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 .library-status button {
+  min-width: 32px;
+  min-height: 32px;
   border: 0;
-  padding: 3px 0;
+  padding: 6px 5px;
   background: transparent;
   color: var(--color-accent);
   font-size: 9px;
@@ -423,8 +455,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   gap: 3px;
   min-height: 42px;
   padding: 4px 10px 6px 12px;
-  opacity: 0.58;
-  transition: opacity var(--motion-fast) ease;
+  opacity: 1;
 }
 
 .sidebar:hover .entry-actions,
@@ -463,6 +494,13 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   flex-direction: column;
 }
 
+.directory-tree-list,
+.tree-children {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
 .directory-empty {
   padding: 28px 20px;
   color: var(--color-text-muted);
@@ -486,6 +524,23 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   transition:
     color var(--motion-fast) ease,
     background var(--motion-fast) ease;
+}
+
+.tree-primary-action {
+  display: inline-flex;
+  min-height: 24px;
+  min-width: 0;
+  align-self: stretch;
+  flex: 1;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
 .tree-move-handle {
@@ -571,10 +626,13 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 .tree-row:hover,
-.tree-row:focus-visible {
+.tree-row:focus-within {
   background: rgb(0 0 0 / 0.028);
   color: var(--color-text-primary);
-  outline: none;
+}
+
+.tree-primary-action:focus-visible {
+  outline-offset: -2px;
 }
 
 .tree-row-directory {
@@ -628,11 +686,12 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   white-space: nowrap;
 }
 
+.tree-rename-action,
 .tree-delete {
   display: inline-flex;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
   align-items: center;
   justify-content: center;
   border: 0;
@@ -643,9 +702,16 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   cursor: pointer;
 }
 
+.tree-row:hover .tree-rename-action,
 .tree-row:hover .tree-delete,
+.tree-rename-action:focus-visible,
 .tree-delete:focus-visible {
   opacity: 1;
+}
+
+.tree-rename-action:hover {
+  color: var(--color-text-primary);
+  background: var(--accent-soft);
 }
 
 .tree-delete:hover {
@@ -663,6 +729,14 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   color: var(--color-text-primary);
   font-size: inherit;
   outline: none;
+}
+
+.tree-rename-input:focus-visible,
+.refinement-guidance input:focus-visible,
+.refinement-input-shell input:focus-visible,
+.command-input-row input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 
 .sidebar-footer {
@@ -1225,7 +1299,8 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 .document-title:focus-visible {
-  outline: none;
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
 }
 
 .linked-passages {
@@ -1636,6 +1711,9 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 .refinement-settings summary {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
   color: var(--color-text-muted);
   font-size: 9.5px;
   letter-spacing: 0.04em;
@@ -1702,6 +1780,9 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 .refinement-attempts summary {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
   color: var(--color-text-muted);
   font-family: var(--font-ui);
   font-size: 9px;
@@ -1940,6 +2021,8 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 .refinement-input-shell input {
+  height: 100%;
+  min-height: 40px;
   min-width: 0;
   flex: 1;
   border: 0;
@@ -1979,6 +2062,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 .text-action {
+  min-height: 30px;
   border: 0;
   border-bottom: 1px solid transparent;
   padding: 5px 0;
@@ -2014,8 +2098,10 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 
 .mini-switch {
   position: relative;
-  width: 23px;
-  height: 12px;
+  width: 30px;
+  min-width: 30px;
+  height: 24px;
+  min-height: 24px;
   border: 1px solid var(--color-border);
   border-radius: 7px;
   padding: 0;
@@ -2029,17 +2115,20 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 .mini-switch-thumb {
+  position: absolute;
+  top: 7px;
+  left: 0;
   display: block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--color-surface);
-  transform: translateX(1px);
+  transform: translateX(2px);
   transition: transform var(--motion-fast) ease;
 }
 
 .mini-switch[data-state="checked"] .mini-switch-thumb {
-  transform: translateX(12px);
+  transform: translateX(18px);
 }
 
 .recording-row {
@@ -2279,7 +2368,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   backdrop-filter: blur(1px);
 }
 
-.command-palette {
+.command-palette-dialog {
   position: fixed;
   top: min(18vh, 150px);
   left: 50%;
@@ -2291,6 +2380,10 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   background: var(--color-surface-overlay);
   box-shadow: 0 18px 64px rgb(30 30 26 / 0.14);
   transform: translateX(-50%);
+}
+
+.command-palette {
+  overflow: hidden;
 }
 
 .command-input-row {
@@ -2361,7 +2454,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 
 [cmdk-item] > span:last-child {
   margin-left: auto;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
   font-size: 9px;
 }
 
@@ -2809,12 +2902,16 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   background-clip: padding-box;
 }
 
-@media (max-width: 820px) {
+@media (max-width: 900px) {
   :root {
     --dock-collapsed-height: 78px;
   }
 
   .sidebar-resizer {
+    display: none;
+  }
+
+  .sidebar-resizer-region {
     display: none;
   }
 
@@ -3090,8 +3187,15 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 @media (max-width: 600px) {
+  .breadcrumb {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
   .sidebar-header .icon-button,
   .entry-folder-action,
+  .tree-rename-action,
   .tree-delete,
   .editor-topbar .icon-button,
   .refinement-sidecar-header .icon-button,
@@ -3110,6 +3214,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 
   .entry-primary-action,
+  .tree-primary-action,
   .tree-row,
   .sidebar-footer-row,
   .breadcrumb,
@@ -3117,8 +3222,14 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
     min-height: 44px;
   }
 
+  .breadcrumb {
+    min-width: 44px;
+  }
+
+  .tree-rename-action,
   .tree-delete {
     flex-basis: 44px;
+    opacity: 1;
   }
 
   .editor-topbar {
@@ -3279,7 +3390,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 }
 
-@media (max-width: 820px) {
+@media (max-width: 900px) {
   html[data-virtual-keyboard="open"] .interaction-dock,
   html[data-virtual-keyboard="open"] .interaction-dock:hover,
   html[data-virtual-keyboard="open"] .interaction-dock:focus-within,
@@ -3339,5 +3450,42 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :root,
+  :root[data-reader-theme="dark"] {
+    --color-surface: Canvas;
+    --color-surface-raised: Canvas;
+    --color-surface-overlay: Canvas;
+    --color-border: CanvasText;
+    --color-border-focus: CanvasText;
+    --color-text-primary: CanvasText;
+    --color-text-secondary: CanvasText;
+    --color-text-muted: CanvasText;
+    --color-accent: Highlight;
+    --color-accent-hover: Highlight;
+    --accent-soft: Canvas;
+    --accent-highlight: Highlight;
+    --grid-fine: transparent;
+    --grid-wide: transparent;
+  }
+
+  .app-frame {
+    background-image: none;
+  }
+
+  .document-page,
+  .epub-viewer,
+  .refinement-sidecar,
+  .sidebar,
+  .ui-menu,
+  .ui-popover,
+  dialog,
+  input,
+  select,
+  textarea {
+    border-color: CanvasText;
   }
 }

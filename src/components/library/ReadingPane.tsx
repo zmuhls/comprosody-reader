@@ -447,8 +447,10 @@ function PublicationReadingPane({
     <section
       aria-label={`Reading ${activePublication.title}`}
       className="reading-pane"
+      id="reading-content"
+      tabIndex={-1}
     >
-      <header className="reading-toolbar">
+      <div className="reading-toolbar">
         <button
           aria-label="Previous page"
           className="icon-button"
@@ -483,7 +485,7 @@ function PublicationReadingPane({
           <Icon name="x" size={13} />
           <span>Close book</span>
         </button>
-      </header>
+      </div>
 
       <div className="reading-canvas">
         {isOpening ? (

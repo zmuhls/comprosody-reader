@@ -7,6 +7,7 @@ import {
   type MouseEvent,
 } from 'react';
 import type { TreeNode as TreeNodeType } from '../../hooks/useDirectoryTree';
+import { useApp } from '../../context/AppContext';
 import { useStorage } from '../../hooks/useStorage';
 import { Icon } from '../ui/Icon';
 
@@ -45,6 +46,8 @@ export const TreeNode = memo(function TreeNode({
   const lastTouchAtRef = useRef(Number.NEGATIVE_INFINITY);
   const touchActivationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressClickRef = useRef(false);
+  const primaryActionRef = useRef<HTMLButtonElement | null>(null);
+  const { setTitleEditingEntryId } = useApp();
   const {
     activeEntryId,
     setActiveEntry,
@@ -56,7 +59,10 @@ export const TreeNode = memo(function TreeNode({
 
   useEffect(() => () => {
     if (touchActivationTimerRef.current) clearTimeout(touchActivationTimerRef.current);
-  }, []);
+    if (node.type === 'entry') {
+      setTitleEditingEntryId((current) => current === node.id ? null : current);
+    }
+  }, [node.id, node.type, setTitleEditingEntryId]);
 
   const item: TreeMoveItem = { id: node.id, name: node.name, type: node.type };
   const isActive = node.type === 'entry' && node.id === activeEntryId;
@@ -67,16 +73,26 @@ export const TreeNode = memo(function TreeNode({
 
   const beginRename = () => {
     setEditName(node.name);
+    if (node.type === 'entry') setTitleEditingEntryId(node.id);
     setIsEditing(true);
   };
 
-  const handleRename = () => {
+  const finishRename = ({ commit, restoreFocus }: {
+    commit: boolean;
+    restoreFocus: boolean;
+  }) => {
     const nextName = editName.trim();
-    if (nextName) {
+    if (commit && nextName) {
       if (node.type === 'entry') renameEntry(node.id, nextName);
       else renameDirectory(node.id, nextName);
     }
     setIsEditing(false);
+    if (node.type === 'entry') {
+      setTitleEditingEntryId((current) => current === node.id ? null : current);
+    }
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => primaryActionRef.current?.focus());
+    }
   };
 
   const handleDelete = (event: MouseEvent) => {
@@ -103,23 +119,10 @@ export const TreeNode = memo(function TreeNode({
   };
 
   return (
-    <div className="tree-branch">
+    <li className="tree-branch">
       <div
-        aria-expanded={node.type === 'directory' ? isOpen : undefined}
-        aria-selected={node.type === 'entry' ? isActive : undefined}
         className={`tree-row tree-row-${node.type} ${isActive ? 'is-active' : ''} ${isPicked ? 'is-moving' : ''} ${canPlaceInside ? 'is-drop-target' : ''}`}
         draggable={!isEditing}
-        onClick={(event) => {
-          if (suppressClickRef.current) {
-            event.preventDefault();
-            return;
-          }
-          handleActivate();
-        }}
-        onDoubleClick={(event) => {
-          event.preventDefault();
-          beginRename();
-        }}
         onDragEnd={onDragEnd}
         onDragOver={(event) => {
           if (!canPlaceInside) return;
@@ -132,41 +135,7 @@ export const TreeNode = memo(function TreeNode({
           onDragStart(item);
         }}
         onDrop={handleDrop}
-        onKeyDown={(event) => {
-          if (event.key === 'F2') {
-            event.preventDefault();
-            beginRename();
-          } else if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            handleActivate();
-          }
-        }}
-        onPointerUp={(event) => {
-          if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
-          event.preventDefault();
-          event.stopPropagation();
-          suppressClickRef.current = true;
-          const now = performance.now();
-          if (now - lastTouchAtRef.current <= 460) {
-            if (touchActivationTimerRef.current) {
-              clearTimeout(touchActivationTimerRef.current);
-              touchActivationTimerRef.current = null;
-            }
-            lastTouchAtRef.current = Number.NEGATIVE_INFINITY;
-            beginRename();
-            window.setTimeout(() => { suppressClickRef.current = false; }, 0);
-            return;
-          }
-          lastTouchAtRef.current = now;
-          touchActivationTimerRef.current = setTimeout(() => {
-            suppressClickRef.current = false;
-            touchActivationTimerRef.current = null;
-            handleActivate();
-          }, 460);
-        }}
-        role="treeitem"
         style={{ paddingLeft: `${depth * 14 + 10}px` }}
-        tabIndex={0}
       >
         <button
           aria-label={`${isPicked ? 'Cancel moving' : 'Move'} ${node.name}`}
@@ -183,34 +152,82 @@ export const TreeNode = memo(function TreeNode({
           <span aria-hidden="true">⠿</span>
         </button>
 
-        <span className="tree-leading-icon">
-          {node.type === 'directory' ? (
-            <Icon
-              name={isOpen ? 'chevron-down' : 'chevron-right'}
-              size={13}
-            />
-          ) : (
-            <Icon name="file" size={13} />
-          )}
-        </span>
-
         {isEditing ? (
           <input
             aria-label={`Rename ${node.type}`}
             autoFocus
             className="tree-rename-input"
-            onBlur={handleRename}
+            onBlur={() => finishRename({ commit: true, restoreFocus: false })}
             onChange={(event) => setEditName(event.target.value)}
-            onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => {
-              event.stopPropagation();
-              if (event.key === 'Enter') handleRename();
-              if (event.key === 'Escape') setIsEditing(false);
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                finishRename({ commit: true, restoreFocus: true });
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                finishRename({ commit: false, restoreFocus: true });
+              }
             }}
             value={editName}
           />
         ) : (
-          <span className="tree-label">{node.name}</span>
+          <button
+            aria-current={isActive ? 'page' : undefined}
+            aria-expanded={node.type === 'directory' ? isOpen : undefined}
+            className="tree-primary-action"
+            onClick={(event) => {
+              if (suppressClickRef.current) {
+                event.preventDefault();
+                return;
+              }
+              handleActivate();
+            }}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              beginRename();
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== 'F2') return;
+              event.preventDefault();
+              beginRename();
+            }}
+            onPointerUp={(event) => {
+              if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
+              event.preventDefault();
+              suppressClickRef.current = true;
+              const now = performance.now();
+              if (now - lastTouchAtRef.current <= 460) {
+                if (touchActivationTimerRef.current) {
+                  clearTimeout(touchActivationTimerRef.current);
+                  touchActivationTimerRef.current = null;
+                }
+                lastTouchAtRef.current = Number.NEGATIVE_INFINITY;
+                beginRename();
+                window.setTimeout(() => { suppressClickRef.current = false; }, 0);
+                return;
+              }
+              lastTouchAtRef.current = now;
+              touchActivationTimerRef.current = setTimeout(() => {
+                suppressClickRef.current = false;
+                touchActivationTimerRef.current = null;
+                handleActivate();
+              }, 460);
+            }}
+            ref={primaryActionRef}
+            type="button"
+          >
+            <span className="tree-leading-icon">
+              {node.type === 'directory' ? (
+                <Icon
+                  name={isOpen ? 'chevron-down' : 'chevron-right'}
+                  size={13}
+                />
+              ) : (
+                <Icon name="file" size={13} />
+              )}
+            </span>
+            <span className="tree-label">{node.name}</span>
+          </button>
         )}
 
         {canPlaceInside ? (
@@ -229,6 +246,18 @@ export const TreeNode = memo(function TreeNode({
         ) : null}
 
         <button
+          aria-label={`Rename ${node.type} ${node.name}`}
+          className="tree-rename-action"
+          onClick={(event) => {
+            event.preventDefault();
+            beginRename();
+          }}
+          type="button"
+        >
+          <span aria-hidden="true">✎</span>
+        </button>
+
+        <button
           aria-label={`Delete ${node.type} ${node.name}`}
           className="tree-delete"
           onClick={handleDelete}
@@ -241,7 +270,7 @@ export const TreeNode = memo(function TreeNode({
       </div>
 
       {node.type === 'directory' && isOpen && node.children.length > 0 ? (
-        <div role="group">
+        <ul className="tree-children">
           {node.children.map((child) => (
             <TreeNode
               canPlace={canPlace}
@@ -256,8 +285,8 @@ export const TreeNode = memo(function TreeNode({
               onSelectEntry={onSelectEntry}
             />
           ))}
-        </div>
+        </ul>
       ) : null}
-    </div>
+    </li>
   );
 });

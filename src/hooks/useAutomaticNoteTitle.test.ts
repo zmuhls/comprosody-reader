@@ -89,6 +89,28 @@ describe('useAutomaticNoteTitle', () => {
     expect(mocks.dispatch).not.toHaveBeenCalled();
   });
 
+  it('waits while manual title editing is active, then resumes after cancellation', async () => {
+    mocks.refineComplete.mockResolvedValue('Archive and Public Memory');
+    const { rerender } = renderHook(
+      ({ suspended }) => useAutomaticNoteTitle(note(), suspended),
+      { initialProps: { suspended: false } },
+    );
+    act(() => vi.advanceTimersByTime(600));
+    rerender({ suspended: true });
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(mocks.refineComplete).not.toHaveBeenCalled();
+
+    rerender({ suspended: false });
+    await act(async () => {
+      vi.advanceTimersByTime(1_200);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mocks.refineComplete).toHaveBeenCalledOnce();
+    expect(mocks.dispatch).toHaveBeenCalledTimes(2);
+  });
+
   it('settles on the local fallback when the title request times out', async () => {
     mocks.refineComplete.mockImplementation(({ signal }: { signal: AbortSignal }) => (
       new Promise((_resolve, reject) => {

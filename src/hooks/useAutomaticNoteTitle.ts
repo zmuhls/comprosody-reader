@@ -19,7 +19,10 @@ interface TitleAttemptStatus {
 const TITLE_IDLE_DELAY_MS = 1_200;
 const TITLE_REQUEST_TIMEOUT_MS = 20_000;
 
-export function useAutomaticNoteTitle(entry: Entry | null): AutomaticTitleStatus {
+export function useAutomaticNoteTitle(
+  entry: Entry | null,
+  suspended = false,
+): AutomaticTitleStatus {
   const { dispatch, storageReady } = useApp();
   const [attemptStatus, setAttemptStatus] = useState<TitleAttemptStatus | null>(null);
   const latestEntryRef = useRef(entry);
@@ -39,7 +42,7 @@ export function useAutomaticNoteTitle(entry: Entry | null): AutomaticTitleStatus
   }, [entry]);
 
   useEffect(() => {
-    if (!storageReady || !entryId || !basis || !source || manual) return;
+    if (!storageReady || !entryId || !basis || !source || manual || suspended) return;
     if (attemptedBasisRef.current.get(entryId) === basis) return;
 
     const controller = new AbortController();
@@ -115,7 +118,7 @@ export function useAutomaticNoteTitle(entry: Entry | null): AutomaticTitleStatus
       if (requestTimeout) clearTimeout(requestTimeout);
       controller.abort();
     };
-  }, [basis, dispatch, entryId, manual, source, storageReady]);
+  }, [basis, dispatch, entryId, manual, source, storageReady, suspended]);
 
   if (
     !entryId

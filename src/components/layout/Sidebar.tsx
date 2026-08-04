@@ -27,7 +27,7 @@ export const Sidebar = memo(function Sidebar({
   const [serverOk, setServerOk] = useState<boolean | null>(null);
   const [openPanel, setOpenPanel] = useState<'voice' | 'settings' | null>(null);
   const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
-    window.matchMedia('(max-width: 820px)').matches,
+    window.matchMedia('(max-width: 900px)').matches,
   );
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const sidebarRef = useRef<HTMLElement | null>(null);
@@ -35,7 +35,7 @@ export const Sidebar = memo(function Sidebar({
   const { voiceProfile, storageReady } = useApp();
 
   useEffect(() => {
-    const query = window.matchMedia('(max-width: 820px)');
+    const query = window.matchMedia('(max-width: 900px)');
     const update = () => setIsNarrowViewport(query.matches);
     update();
     query.addEventListener('change', update);
@@ -115,23 +115,23 @@ export const Sidebar = memo(function Sidebar({
     <>
       <button
         aria-label="Close note directory"
-        aria-hidden={!isOpen}
+        aria-hidden="true"
         className={`sidebar-backdrop ${isOpen ? 'is-visible' : ''}`}
         onClick={onClose}
-        tabIndex={isOpen ? 0 : -1}
+        tabIndex={-1}
         type="button"
       />
-      <aside
-        aria-label={isNarrowViewport ? 'Note directory' : undefined}
-        aria-hidden={isNarrowViewport && !isOpen}
+      <section
+        aria-label="Note directory"
+        aria-hidden={isNarrowViewport ? !isOpen : undefined}
         aria-modal={isNarrowViewport && isOpen ? true : undefined}
         className={`sidebar ${isOpen ? 'is-open' : ''}`}
         inert={isNarrowViewport && !isOpen ? true : undefined}
         onKeyDown={handleSidebarKeyDown}
         ref={sidebarRef}
-        role={isNarrowViewport ? 'dialog' : undefined}
+        role={isNarrowViewport ? 'dialog' : 'complementary'}
       >
-        <header className="sidebar-header">
+        <div className="sidebar-header">
           <div>
             <h1>Cadence</h1>
             <p>Speak into thought.</p>
@@ -145,7 +145,7 @@ export const Sidebar = memo(function Sidebar({
           >
             <Icon name="x" size={17} />
           </button>
-        </header>
+        </div>
 
         <div className="sidebar-workspace">
           <LibrarySection onSelectPublication={onClose} />
@@ -281,7 +281,7 @@ export const Sidebar = memo(function Sidebar({
           </button>
           <LogoutControl />
         </div>
-      </aside>
+      </section>
     </>
   );
 });

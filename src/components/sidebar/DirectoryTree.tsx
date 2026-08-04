@@ -58,54 +58,59 @@ export const DirectoryTree = memo(function DirectoryTree({
   };
 
   return (
-    <div
-      className={`directory-tree ${movingItem ? 'is-move-mode' : ''}`}
-      onDragOver={(event) => {
-        if (!movingItem || !canPlace(movingItem, null)) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'move';
-      }}
-      onDrop={handleRootDrop}
-      role="tree"
-    >
-      {movingItem ? (
-        <div className="tree-move-banner">
-          <span>moving {movingItem.name}</span>
-          <button onClick={() => setPickedItem(null)} type="button">cancel</button>
-        </div>
-      ) : null}
-      <div className="tree-root-target">
-        <span>Notes</span>
-        {movingItem && canPlace(movingItem, null) ? (
-          <button onClick={() => place(movingItem, null)} type="button">
-            place at top level
-          </button>
+    <>
+      <div
+        className={`directory-tree ${movingItem ? 'is-move-mode' : ''}`}
+        onDragOver={(event) => {
+          if (!movingItem || !canPlace(movingItem, null)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+        }}
+        onDrop={handleRootDrop}
+      >
+        {movingItem ? (
+          <div className="tree-move-banner">
+            <span>moving {movingItem.name}</span>
+            <button onClick={() => setPickedItem(null)} type="button">cancel</button>
+          </div>
         ) : null}
+        <div className="tree-root-target">
+          <span>Notes</span>
+          {movingItem && canPlace(movingItem, null) ? (
+            <button onClick={() => place(movingItem, null)} type="button">
+              place at top level
+            </button>
+          ) : null}
+        </div>
+        {tree.length === 0 ? (
+          <div className="directory-empty">Your notes will live here.</div>
+        ) : (
+          <ul className="directory-tree-list">
+            {tree.map((node) => (
+              <TreeNode
+                canPlace={canPlace}
+                depth={0}
+                key={node.id}
+                movingItem={movingItem}
+                node={node}
+                onDragEnd={() => setDraggedItem(null)}
+                onDragStart={(item) => setDraggedItem(item)}
+                onPick={(item) => {
+                  setPickedItem((current) => (
+                    current?.id === item.id && current.type === item.type ? null : item
+                  ));
+                  setMoveStatus('');
+                }}
+                onPlace={place}
+                onSelectEntry={onSelectEntry}
+              />
+            ))}
+          </ul>
+        )}
       </div>
-      {tree.length === 0 ? (
-        <div className="directory-empty">Your notes will live here.</div>
-      ) : tree.map((node) => (
-        <TreeNode
-          canPlace={canPlace}
-          depth={0}
-          key={node.id}
-          movingItem={movingItem}
-          node={node}
-          onDragEnd={() => setDraggedItem(null)}
-          onDragStart={(item) => setDraggedItem(item)}
-          onPick={(item) => {
-            setPickedItem((current) => (
-              current?.id === item.id && current.type === item.type ? null : item
-            ));
-            setMoveStatus('');
-          }}
-          onPlace={place}
-          onSelectEntry={onSelectEntry}
-        />
-      ))}
       <p aria-live="polite" className="tree-move-status" role="status">
         {moveStatus}
       </p>
-    </div>
+    </>
   );
 });

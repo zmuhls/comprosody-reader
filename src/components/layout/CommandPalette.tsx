@@ -79,7 +79,8 @@ export function CommandPalette() {
   return (
     <Command.Dialog
       className="command-palette"
-      label="Cadence commands and note search"
+      contentClassName="command-palette-dialog"
+      label="Comprosody commands and note search"
       onOpenChange={setIsOpen}
       open={isOpen}
       shouldFilter={false}
