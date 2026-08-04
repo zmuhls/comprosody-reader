@@ -1,4 +1,4 @@
-import { memo, useState, type DragEvent } from 'react';
+import { memo, useRef, useState, type DragEvent } from 'react';
 import { useStorage } from '../../hooks/useStorage';
 import { useDirectoryTree } from '../../hooks/useDirectoryTree';
 import { TreeNode, type TreeMoveItem } from './TreeNode';
@@ -20,6 +20,7 @@ export const DirectoryTree = memo(function DirectoryTree({
   const [pickedItem, setPickedItem] = useState<TreeMoveItem | null>(null);
   const [draggedItem, setDraggedItem] = useState<TreeMoveItem | null>(null);
   const [moveStatus, setMoveStatus] = useState('');
+  const dragPlacementCommittedRef = useRef(false);
   const movingItem = pickedItem ?? draggedItem;
 
   const directoryContains = (rootId: string, targetId: string): boolean => {
@@ -42,6 +43,9 @@ export const DirectoryTree = memo(function DirectoryTree({
 
   const place = (item: TreeMoveItem, parentId: string | null) => {
     if (!canPlace(item, parentId)) return;
+    if (draggedItem?.id === item.id && draggedItem.type === item.type) {
+      dragPlacementCommittedRef.current = true;
+    }
     if (item.type === 'entry') moveEntry(item.id, parentId);
     else moveDirectory(item.id, parentId);
     const destination = parentId ? directories[parentId]?.name : 'Notes';
@@ -71,7 +75,16 @@ export const DirectoryTree = memo(function DirectoryTree({
         {movingItem ? (
           <div className="tree-move-banner">
             <span>moving {movingItem.name}</span>
-            <button onClick={() => setPickedItem(null)} type="button">cancel</button>
+            <button
+              onClick={() => {
+                setPickedItem(null);
+                setDraggedItem(null);
+                setMoveStatus(`Move cancelled for ${movingItem.name}.`);
+              }}
+              type="button"
+            >
+              cancel
+            </button>
           </div>
         ) : null}
         <div className="tree-root-target">
@@ -93,13 +106,25 @@ export const DirectoryTree = memo(function DirectoryTree({
                 key={node.id}
                 movingItem={movingItem}
                 node={node}
-                onDragEnd={() => setDraggedItem(null)}
-                onDragStart={(item) => setDraggedItem(item)}
+                onDragEnd={() => {
+                  if (draggedItem && !dragPlacementCommittedRef.current) {
+                    setMoveStatus(`Move cancelled for ${draggedItem.name}.`);
+                  }
+                  dragPlacementCommittedRef.current = false;
+                  setDraggedItem(null);
+                }}
+                onDragStart={(item) => {
+                  dragPlacementCommittedRef.current = false;
+                  setDraggedItem(item);
+                  setMoveStatus(`Moving ${item.name}. Drop it on a destination.`);
+                }}
                 onPick={(item) => {
-                  setPickedItem((current) => (
-                    current?.id === item.id && current.type === item.type ? null : item
-                  ));
-                  setMoveStatus('');
+                  const cancelling = pickedItem?.id === item.id
+                    && pickedItem.type === item.type;
+                  setPickedItem(cancelling ? null : item);
+                  setMoveStatus(cancelling
+                    ? `Move cancelled for ${item.name}.`
+                    : `Moving ${item.name}. Choose a destination.`);
                 }}
                 onPlace={place}
                 onSelectEntry={onSelectEntry}
@@ -108,7 +133,12 @@ export const DirectoryTree = memo(function DirectoryTree({
           </ul>
         )}
       </div>
-      <p aria-live="polite" className="tree-move-status" role="status">
+      <p
+        aria-atomic="true"
+        aria-live="polite"
+        className="tree-move-status"
+        role="status"
+      >
         {moveStatus}
       </p>
     </>

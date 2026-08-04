@@ -229,6 +229,7 @@ async function mockAccessibleLibrary(page) {
 
 test('empty workspace and active editor satisfy automated accessibility checks', async ({ page }) => {
   await page.goto('./');
+  await expect(page).toHaveTitle('Comprosody');
   await expect(page.getByText('A quiet place for spoken thought.')).toBeVisible();
   await expect(
     page.locator('#main-content').getByRole('heading', { level: 1 }),
@@ -236,6 +237,7 @@ test('empty workspace and active editor satisfy automated accessibility checks',
   await expectNoViolations(page, 'empty workspace');
 
   await createNote(page);
+  await expect(page).toHaveTitle(/ — Comprosody$/u);
   await expect(
     page.locator('#main-content').getByRole('heading', { level: 1 }),
   ).toBeVisible();
@@ -263,6 +265,7 @@ test('integrated reader exposes labeled keyboard content and restores focus', as
     await page.getByRole('button', { name: 'Notes' }).click();
   }
   await page.getByRole('button', { name: /Accessible Reading Patterns/u }).click();
+  await expect(page).toHaveTitle('Accessible Reading Patterns — Comprosody');
   const reading = page.getByRole('region', { name: 'Reading Accessible Reading Patterns' });
   await expect(reading).toBeVisible();
   await expect(reading).toBeFocused();
@@ -401,6 +404,27 @@ test('dark theme and reduced motion remain accessible', async ({ page }) => {
   await expectNoViolations(page, 'dark refinement');
 });
 
+test('increased-contrast preferences simplify decoration and preserve semantics', async ({ page }) => {
+  await page.emulateMedia({ contrast: 'more', reducedMotion: 'reduce' });
+  await createNote(page);
+  const contrast = await page.evaluate(() => ({
+    backgroundImage: getComputedStyle(document.querySelector('.app-frame')).backgroundImage,
+    border: getComputedStyle(document.documentElement)
+      .getPropertyValue('--color-border')
+      .trim(),
+    muted: getComputedStyle(document.documentElement)
+      .getPropertyValue('--color-text-muted')
+      .trim(),
+  }));
+  expect(contrast.backgroundImage).toBe('none');
+  expect(contrast.border).toBe('#77717b');
+  expect(contrast.muted).toBe('#454048');
+  await expectNoViolations(page, 'increased-contrast editor');
+  const directoryTrigger = page.getByRole('button', { name: 'Open note directory' });
+  if (await directoryTrigger.isVisible()) await directoryTrigger.click();
+  await expectNoViolations(page, 'increased-contrast note directory');
+});
+
 test('320px reflow and text spacing preserve the writing workspace', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 568 });
   await createNote(page);
@@ -448,6 +472,70 @@ test('320px reflow and text spacing preserve the writing workspace', async ({ pa
   await page.keyboard.press('Escape');
   await expect(sidebar).toBeHidden();
   await expect(trigger).toBeFocused();
+});
+
+test('an iOS visual keyboard keeps the active note caret above the recording dock', async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== 'webkit-phone', 'iOS visual viewport contract.');
+  await page.addInitScript(() => {
+    const listeners = new Map();
+    const viewport = {
+      height: 844,
+      width: 390,
+      offsetTop: 0,
+      offsetLeft: 0,
+      scale: 1,
+      addEventListener(type, listener) {
+        const current = listeners.get(type) ?? [];
+        current.push(listener);
+        listeners.set(type, current);
+      },
+      removeEventListener(type, listener) {
+        listeners.set(type, (listeners.get(type) ?? []).filter((item) => item !== listener));
+      },
+    };
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: viewport,
+    });
+    window.setTestVisualViewport = (next) => {
+      Object.assign(viewport, next);
+      for (const listener of listeners.get('resize') ?? []) listener();
+    };
+  });
+  const body = await createNote(page);
+  await body.fill(Array.from(
+    { length: 24 },
+    (_, index) => `Keyboard visibility line ${index + 1} stays readable.`,
+  ).join('\n'));
+  await page.evaluate(() => {
+    const editor = document.querySelector('[aria-label="Note body"]');
+    editor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    window.setTestVisualViewport({ height: 360, width: 390 });
+  });
+  await expect(page.locator('html')).toHaveAttribute('data-virtual-keyboard', 'open');
+
+  await expect.poll(async () => page.evaluate(() => {
+    const selection = window.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    const caret = range?.getBoundingClientRect();
+    const dock = document.querySelector('.interaction-dock')?.getBoundingClientRect();
+    const viewport = window.visualViewport;
+    if (!caret || !dock || !viewport) return false;
+    const visibleTop = viewport.offsetTop + 72;
+    const visibleBottom = viewport.offsetTop + viewport.height - dock.height - 16;
+    return caret.top >= visibleTop - 1 && caret.bottom <= visibleBottom + 1;
+  }), {
+    message: 'the active note caret should remain clear of the iOS keyboard and recording dock',
+    timeout: 3_000,
+  }).toBe(true);
 });
 
 test('responsive breakpoint matrix preserves navigation and recording geometry', async ({

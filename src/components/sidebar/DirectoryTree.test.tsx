@@ -67,11 +67,40 @@ describe('DirectoryTree organization controls', () => {
   it('lets touch and keyboard users pick a note and place it in a folder', () => {
     render(<DirectoryTree />);
     fireEvent.click(screen.getByRole('button', { name: 'Move Research note' }));
+    expect(screen.getByRole('status').textContent).toBe(
+      'Moving Research note. Choose a destination.',
+    );
     fireEvent.click(screen.getByRole('button', { name: 'place here' }));
 
     expect(mocks.moveEntry).toHaveBeenCalledWith('note', 'archive');
     expect(screen.getByRole('status').textContent).toBe(
       'Research note moved to Archive.',
+    );
+    expect(screen.getByRole('status').getAttribute('aria-atomic')).toBe('true');
+  });
+
+  it('announces cancellation when a picked move is cancelled', () => {
+    render(<DirectoryTree />);
+    fireEvent.click(screen.getByRole('button', { name: 'Move Research note' }));
+    fireEvent.click(screen.getByRole('button', { name: 'cancel' }));
+
+    expect(screen.getByRole('status').textContent).toBe(
+      'Move cancelled for Research note.',
+    );
+  });
+
+  it('announces cancellation when a desktop drag ends without a destination', () => {
+    render(<DirectoryTree />);
+    const row = screen.getByRole('button', { name: 'Research note' }).closest('.tree-row');
+    const dataTransfer = { effectAllowed: 'none', setData: vi.fn() };
+    fireEvent.dragStart(row!, { dataTransfer });
+    expect(screen.getByRole('status').textContent).toBe(
+      'Moving Research note. Drop it on a destination.',
+    );
+
+    fireEvent.dragEnd(row!);
+    expect(screen.getByRole('status').textContent).toBe(
+      'Move cancelled for Research note.',
     );
   });
 
