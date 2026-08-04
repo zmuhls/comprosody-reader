@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ReactNode } from 'react';
+import { useState, useRef, useEffect, useId, type ReactNode } from 'react';
 
 interface Props {
   label: string;
@@ -12,6 +12,7 @@ interface Props {
 export function InfoPopover({ label, children }: Props) {
   const [isOpen, setIsOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const contentId = useId();
 
   useEffect(() => {
     if (!isOpen) return;
@@ -32,19 +33,25 @@ export function InfoPopover({ label, children }: Props) {
   return (
     <div className="relative inline-flex" ref={ref}>
       <button
+        aria-controls={isOpen ? contentId : undefined}
         onClick={() => setIsOpen((open) => !open)}
         aria-label={label}
         aria-expanded={isOpen}
-        className={`flex h-4 w-4 items-center justify-center rounded-full border text-[9px] leading-none transition-colors ${
+        className={`info-popover-trigger flex h-8 w-8 items-center justify-center rounded-full border text-[11px] leading-none transition-colors ${
           isOpen
             ? 'border-accent text-accent'
             : 'border-border text-text-muted hover:border-border-focus hover:text-text-secondary'
         }`}
+        type="button"
       >
         i
       </button>
       {isOpen && (
-        <div className="absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 border border-border bg-surface-overlay px-4 py-3 text-[11px] normal-case leading-relaxed tracking-normal text-text-secondary shadow-[0_22px_70px_rgba(0,0,0,0.42)]">
+        <div
+          className="absolute left-1/2 top-full z-30 mt-2 w-64 -translate-x-1/2 border border-border bg-surface-overlay px-4 py-3 text-[11px] normal-case leading-relaxed tracking-normal text-text-secondary shadow-[0_22px_70px_rgba(0,0,0,0.42)]"
+          id={contentId}
+          role="note"
+        >
           {children}
         </div>
       )}
