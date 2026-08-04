@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AppProvider } from './context/AppContext';
+import { AppProvider, useApp } from './context/AppContext';
 import { RecordingProvider } from './context/RecordingContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { MainPanel } from './components/layout/MainPanel';
@@ -33,6 +33,7 @@ function AppInner() {
       view: 'reader',
     });
   const { activePublication } = useLibrary();
+  const { state } = useApp();
   const previousPublicationIdRef = useRef<string | null>(null);
 
   useEffect(() => installVisualViewportSync(), []);
@@ -49,6 +50,18 @@ function AppInner() {
     mobileWorkspaceSelection.publicationId === activePublicationId
       ? mobileWorkspaceSelection.view
       : 'reader';
+  const activeEntry = state.activeEntryId
+    ? state.entries[state.activeEntryId]
+    : null;
+
+  useEffect(() => {
+    const contextTitle = activePublication && mobileWorkspaceView === 'reader'
+      ? activePublication.title
+      : activeEntry?.name;
+    document.title = contextTitle
+      ? `${contextTitle} — Comprosody`
+      : 'Comprosody';
+  }, [activeEntry?.name, activePublication, mobileWorkspaceView]);
 
   useEffect(() => {
     const previousPublicationId = previousPublicationIdRef.current;

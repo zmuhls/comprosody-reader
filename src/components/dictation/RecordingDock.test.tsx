@@ -55,4 +55,17 @@ describe('RecordingDock', () => {
     expect(status.getAttribute('aria-live')).toBe('polite');
     expect(status.getAttribute('aria-atomic')).toBe('true');
   });
+
+  it('describes the iOS background-recording limit without relying on hover text', () => {
+    const view = render(<RecordingDock {...baseProps} />);
+    const trigger = view.getByRole('combobox', {
+      name: 'Background recording limit',
+    });
+    const descriptionId = trigger.getAttribute('aria-describedby');
+
+    expect(descriptionId).toBe('background-recording-help');
+    expect(document.getElementById(descriptionId!)?.textContent).toContain(
+      'iOS may pause the page sooner',
+    );
+  });
 });

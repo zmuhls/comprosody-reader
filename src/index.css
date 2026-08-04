@@ -3721,6 +3721,53 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 }
 
+@media (prefers-contrast: more) {
+  :root {
+    --color-border: #77717b;
+    --color-border-strong: #57515a;
+    --color-border-focus: #39343c;
+    --color-text-secondary: #302c33;
+    --color-text-muted: #454048;
+    --grid-fine: transparent;
+    --grid-wide: transparent;
+  }
+
+  :root[data-reader-theme="dark"] {
+    --color-border: #aca5b2;
+    --color-border-strong: #d1cbd6;
+    --color-border-focus: #f1eff3;
+    --color-text-secondary: #ebe7ed;
+    --color-text-muted: #d6d1da;
+  }
+
+  .app-frame {
+    background-image: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --accent-soft: var(--color-surface-raised);
+    --grid-fine: transparent;
+    --grid-wide: transparent;
+  }
+
+  .app-frame {
+    background-image: none;
+  }
+
+  [cmdk-overlay],
+  .sidebar-backdrop {
+    backdrop-filter: none;
+    background: var(--color-surface);
+  }
+
+  .speech-search,
+  .speech-voice-list {
+    background: var(--color-surface-raised);
+  }
+}
+
 @media (forced-colors: active) {
   :root,
   :root[data-reader-theme="dark"] {

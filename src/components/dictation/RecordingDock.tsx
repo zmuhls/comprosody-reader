@@ -129,6 +129,7 @@ export function RecordingDock({
         value={String(backgroundLimitMs)}
       >
         <Select.Trigger
+          aria-describedby="background-recording-help"
           aria-label="Background recording limit"
           className="background-limit-trigger"
           disabled={isRecording || isTranscribing}
@@ -157,6 +158,11 @@ export function RecordingDock({
           </Select.Content>
         </Select.Portal>
       </Select.Root>
+
+      <span className="sr-only" id="background-recording-help">
+        Best effort while this page is away. iOS may pause the page sooner;
+        recording finalizes when you return or when this limit is reached.
+      </span>
 
       <Popover.Root>
         <Popover.Trigger className="voice-profile-trigger" type="button">

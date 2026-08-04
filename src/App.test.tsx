@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 const mocks = vi.hoisted(() => ({
   activePublication: null as { id: string; title: string } | null,
+  activeEntry: null as { id: string; name: string } | null,
 }));
 
 function PassThrough({ children }: { children: ReactNode }) {
@@ -17,6 +18,14 @@ vi.mock('radix-ui', () => ({
 
 vi.mock('./context/AppContext', () => ({
   AppProvider: PassThrough,
+  useApp: () => ({
+    state: {
+      activeEntryId: mocks.activeEntry?.id ?? null,
+      entries: mocks.activeEntry
+        ? { [mocks.activeEntry.id]: mocks.activeEntry }
+        : {},
+    },
+  }),
 }));
 
 vi.mock('./context/RecordingContext', () => ({
@@ -83,6 +92,21 @@ import App from './App';
 describe('mobile reading workspace', () => {
   beforeEach(() => {
     mocks.activePublication = null;
+    mocks.activeEntry = null;
+    document.title = 'Comprosody';
+  });
+
+  it('keeps the browser title aligned with the active note or reading view', async () => {
+    mocks.activeEntry = { id: 'note-1', name: 'Field recording' };
+    const { rerender } = render(<App />);
+    await waitFor(() => expect(document.title).toBe('Field recording — Comprosody'));
+
+    mocks.activePublication = { id: 'book-1', title: 'Book one' };
+    rerender(<App />);
+    await waitFor(() => expect(document.title).toBe('Book one — Comprosody'));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Note' }));
+    await waitFor(() => expect(document.title).toBe('Field recording — Comprosody'));
   });
 
   it('keeps the note mounted and exposes an accessible Reader/Note switch', () => {
