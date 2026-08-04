@@ -2191,6 +2191,21 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   padding: 0 clamp(18px, 3.2vw, 40px);
 }
 
+.recording-options-trigger {
+  display: none;
+}
+
+.recording-options-panel {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.recording-options-panel > strong,
+.recording-options-close {
+  display: none;
+}
+
 .record-control {
   position: absolute;
   top: 8px;
@@ -3399,6 +3414,101 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   .recording-state-text {
     bottom: max(8px, env(safe-area-inset-bottom));
     font-size: 12px;
+  }
+
+  .recording-options-trigger {
+    position: absolute;
+    top: 20px;
+    right: 18px;
+    z-index: 4;
+    display: inline-flex;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--color-border);
+    border-radius: 50%;
+    background: var(--color-surface-overlay);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
+
+  .recording-options-trigger:hover,
+  .recording-options-trigger:focus-visible,
+  .recording-row[data-options-open="true"] .recording-options-trigger {
+    border-color: var(--color-border-focus);
+    color: var(--color-text-primary);
+  }
+
+  .recording-options-trigger:disabled {
+    color: var(--color-text-muted);
+    cursor: default;
+  }
+
+  .recording-options-panel {
+    position: absolute;
+    right: 14px;
+    bottom: calc(100% + 8px);
+    z-index: 6;
+    display: none;
+    width: min(320px, calc(100vw - 28px));
+    max-height: min(
+      360px,
+      calc(var(--visual-viewport-height) - var(--dock-collapsed-height) - 80px)
+    );
+    overflow-y: auto;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 8px;
+    padding: 14px;
+    background: var(--color-surface-raised);
+    box-shadow: 0 18px 48px rgb(24 22 25 / 0.16);
+  }
+
+  .recording-row[data-options-open="true"] .recording-options-panel {
+    display: grid;
+  }
+
+  .recording-options-panel > strong {
+    display: block;
+    color: var(--color-text-primary);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .recording-options-panel .provider-trigger,
+  .recording-options-panel .background-limit-trigger,
+  .recording-options-panel .voice-profile-trigger {
+    display: inline-flex;
+    width: 100%;
+    max-width: none;
+    min-height: 48px;
+    justify-content: space-between;
+    border: 1px solid var(--color-border);
+    border-radius: 5px;
+    padding: 0 12px;
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .recording-options-close {
+    display: inline-flex;
+    min-height: 48px;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 5px;
+    background: var(--color-surface-overlay);
+    color: var(--color-text-secondary);
+    cursor: pointer;
+  }
+
+  .recording-row[data-options-open="true"] .recording-state-text {
+    color: var(--color-text-secondary);
+    opacity: 1;
   }
 
   .sidebar-section-heading {

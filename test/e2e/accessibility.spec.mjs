@@ -474,6 +474,67 @@ test('320px reflow and text spacing preserve the writing workspace', async ({ pa
   await expect(trigger).toBeFocused();
 });
 
+test('mobile recording options are operable before recording begins', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await createNote(page);
+
+  const trigger = page.getByRole('button', { name: 'Recording options', exact: true });
+  await expect(trigger).toBeVisible();
+  await expect(trigger).toBeEnabled();
+  const triggerBox = await trigger.boundingBox();
+  expect(triggerBox?.width).toBeGreaterThanOrEqual(44);
+  expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
+
+  await trigger.click();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  const provider = page.getByRole('combobox', { name: 'Transcription provider' });
+  const backgroundLimit = page.getByRole('combobox', {
+    name: 'Background recording limit',
+  });
+  await expect(provider).toBeVisible();
+  await expect(provider).toBeEnabled();
+  await expect(provider).toBeFocused();
+  await expect(backgroundLimit).toBeVisible();
+  await expect(backgroundLimit).toBeEnabled();
+  await expect(backgroundLimit).toHaveAttribute(
+    'aria-describedby',
+    'background-recording-help',
+  );
+  await expect(page.locator('#background-recording-help')).toContainText(
+    'iOS may pause the page sooner',
+  );
+
+  await backgroundLimit.click();
+  await page.getByRole('option', { name: 'Stop after 1 min away' }).click();
+  await expect(backgroundLimit).toContainText('away 1 min');
+
+  const panelGeometry = await page.locator('#recording-options-panel').evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      bottom: rect.bottom,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      viewportHeight: window.visualViewport?.height ?? window.innerHeight,
+      viewportTop: window.visualViewport?.offsetTop ?? 0,
+      viewportWidth: window.visualViewport?.width ?? window.innerWidth,
+    };
+  });
+  expect(panelGeometry.left).toBeGreaterThanOrEqual(-1);
+  expect(panelGeometry.right).toBeLessThanOrEqual(panelGeometry.viewportWidth + 1);
+  expect(panelGeometry.top).toBeGreaterThanOrEqual(panelGeometry.viewportTop - 1);
+  expect(panelGeometry.bottom).toBeLessThanOrEqual(
+    panelGeometry.viewportTop + panelGeometry.viewportHeight + 1,
+  );
+  await expectNoHorizontalOverflow(page, 'mobile recording options');
+  await expectMinimumTargets(page, 'mobile recording options', 44);
+  await expectNoViolations(page, 'mobile recording options');
+
+  await page.getByRole('button', { name: 'Close recording options' }).click();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(trigger).toBeFocused();
+});
+
 test('an iOS visual keyboard keeps the active note caret above the recording dock', async ({
   page,
 }, testInfo) => {
