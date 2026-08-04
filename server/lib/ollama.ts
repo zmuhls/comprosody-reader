@@ -435,6 +435,13 @@ export function createOllamaRefinementProvider(
         'invalid_response',
       );
     }
+    if (!result.text.trim()) {
+      throw new OllamaRefinementError(
+        'Ollama Cloud returned an empty refinement',
+        502,
+        'invalid_response',
+      );
+    }
     return result.text;
   }
 

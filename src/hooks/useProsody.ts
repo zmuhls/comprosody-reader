@@ -11,13 +11,14 @@ import { defaultProsody } from '../types/audio';
 
 export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | null) {
   const { state, dispatch } = useRecording();
-  const intervalRef = useRef<number>(0);
   const lastSpeechTimeRef = useRef<number>(0);
   const pauseStartRef = useRef<number | null>(null);
+  const wasRecordingRef = useRef(false);
 
   // Local state for live prosody — avoids dispatching to context every 500ms
   // which would re-render all RecordingContext consumers.
   const [liveProsody, setLiveProsody] = useState<ProsodyDiagnostics>(defaultProsody);
+  const liveProsodyRef = useRef<ProsodyDiagnostics>(defaultProsody);
 
   const update = useCallback(() => {
     if (!state.session) return;
@@ -59,32 +60,36 @@ export function useProsody(getTimeDomainData: () => Uint8Array<ArrayBuffer> | nu
     const fluency = computeFluency(state.session.pauses, elapsed);
     const lexicalDensity = computeLexicalDensity(fullText);
 
-    setLiveProsody({ pace, energy, fluency, lexicalDensity });
+    const next = { pace, energy, fluency, lexicalDensity };
+    liveProsodyRef.current = next;
+    setLiveProsody(next);
   }, [state.session, getTimeDomainData, dispatch]);
 
+  // The interval is keyed on isRecording alone; `update` is read through a ref
+  // so session mutations (interim/final/pause dispatches) never tear down the
+  // timer or reset in-progress pause tracking.
+  const updateRef = useRef(update);
   useEffect(() => {
-    if (state.isRecording) {
-      intervalRef.current = window.setInterval(update, 500);
-      lastSpeechTimeRef.current = Date.now();
-      pauseStartRef.current = null;
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = 0;
+    updateRef.current = update;
+  }, [update]);
+
+  useEffect(() => {
+    if (!state.isRecording) {
+      if (wasRecordingRef.current) {
+        wasRecordingRef.current = false;
+        dispatch({ type: 'FINALIZE_PROSODY', prosody: liveProsodyRef.current });
       }
-      // When recording stops, finalize prosody into context once
-      if (liveProsody.pace > 0 || liveProsody.energy > 0 || liveProsody.fluency !== 1) {
-        dispatch({ type: 'FINALIZE_PROSODY', prosody: liveProsody });
-      }
+      return;
     }
+
+    wasRecordingRef.current = true;
+    lastSpeechTimeRef.current = Date.now();
+    pauseStartRef.current = null;
+    const intervalId = window.setInterval(() => updateRef.current(), 500);
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = 0;
-      }
+      window.clearInterval(intervalId);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.isRecording, update]);
+  }, [dispatch, state.isRecording]);
 
   // The analyser owns the live display while recording. Once stopped, use the
   // finalized context snapshot so MainPanel's post-transcription correction is

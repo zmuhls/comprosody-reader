@@ -21,6 +21,7 @@ import {
 import { completeTranscriptProsody } from '../../lib/comprosody';
 import { selectTranscriptionHints } from '../../lib/voiceProfile';
 import { SESSION_LOGOUT_INTENT_EVENT } from '../../lib/session';
+import { attachTranscript, saveRecording } from '../../lib/audioStore';
 import type { TranscriptionProviderId } from '../../types/transcription';
 import { Editor } from '../editor/Editor';
 import {
@@ -319,6 +320,33 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
         return;
       }
 
+      const recordedAt = recordingState.session?.startedAt ?? stoppedAt;
+      let takeSaved = false;
+      if (audioBlob.size > 0) {
+        try {
+          await saveRecording(target.entryId, audioBlob, {
+            recordedAt,
+            durationMs: recordingDurationMs,
+          });
+          takeSaved = true;
+          const entry = stateRef.current.entries[target.entryId];
+          if (entry) {
+            dispatch({
+              type: 'UPDATE_ENTRY',
+              id: target.entryId,
+              updates: {
+                recordedDurationMs:
+                  (entry.recordedDurationMs ?? 0) + recordingDurationMs,
+                audioTakes: (entry.audioTakes ?? 0) + 1,
+              },
+              recordHistory: false,
+            });
+          }
+        } catch (error) {
+          console.error('Failed to persist recording:', error);
+        }
+      }
+
       let snapshotSaved = false;
       const saveSnapshot = (
         metrics: typeof capturedProsody,
@@ -371,6 +399,12 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
 
         const latestEntry = stateRef.current.entries[target.entryId];
         if (!latestEntry) return;
+
+        if (takeSaved) {
+          void attachTranscript(target.entryId, recordedAt, transcript).catch(
+            (error) => console.error('Failed to attach take transcript:', error),
+          );
+        }
 
         const appended = appendRecordingTranscript(latestEntry, transcript);
         const correctedProsody = completeTranscriptProsody(

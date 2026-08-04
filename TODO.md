@@ -1,86 +1,104 @@
-# comprosody TODO
+# TODO
 
-Generated from LLM-as-a-judge review. Critical issues (🔴) have been fixed;
-remaining issues are organized by severity below.
+Audit findings from 2026-04-10, resolved in the 2026-07-26 optimization pass (branch `optimization-pass`). One item remains open below; everything else moved to Done with its resolution.
 
-## Already Fixed (since review)
+## Current transcription direction (reconciled 2026-08-03)
 
-- [x] Refinement provider replaced with Ollama Cloud and a configurable model
-- [x] Production server script added (`npm run server:prod`)
-- [x] localStorage writes debounced (500ms via `useDebouncedSaver`)
-- [x] WhisperModel loaded once via persistent worker (`whisperWorker.ts` / `whisper_worker.py`)
-- [x] Recursive directory deletion (`collectDescendantDirectoryIds` cleans children + entries)
-- [x] Simple shared-secret auth (`COMPROSODY_API_KEY` env var, enforced in production)
-- [x] CORS restricted to allowed origins (`ALLOWED_ORIGINS` env var)
-- [x] Request validation on `/refine`, `/refine/complete`, `/variants`
-- [x] Abort/cleanup on client disconnect for streaming routes
-- [x] Audio size limit (50 MB) on `/transcribe`
-- [x] `requirements.txt` exists with `faster-whisper>=1.1.0`
-- [x] Error dispatch via `SET_ERROR` in `AppContext` + `ErrorBanner` component displays errors in UI
-- [x] `dist/` is gitignored and not tracked in git
+Comprosody supports two explicit providers: private Faster Whisper (the default)
+and optional ElevenLabs Scribe, including realtime preview with batch recovery.
+Both receive bounded vocabulary hints; raw audio and cloud credentials stay out of
+URLs and client storage.
 
-## High Priority — All Fixed
+- [x] Keep Faster Whisper as the private default.
+- [x] Keep ElevenLabs opt-in and make degraded realtime sessions fall back once to the recorded audio.
+- [x] Preserve vocabulary biasing across both `X-Cadence-Keyterms` and the compatible `X-Lexicon` wire format.
+- [ ] Measure aggregate substitution counts so provider-side vocabulary-hint efficacy is visible over time.
 
-- [x] Surface transcription/refinement errors in the UI (`ErrorBanner` component + `SET_ERROR` dispatch)
-- [x] Add undo/history for refinement (`recordHistory: true` on final commit after streaming)
-- [x] Rate limiting on API routes (in-memory per-IP limiter, 60 req/min)
-- [x] Fix 500ms re-render during recording (`useProsody` uses local `liveProsody` state, only dispatches `FINALIZE_PROSODY` on stop)
-- [x] Fix per-token re-render during streaming (`useRefinement` uses local `streamingText` state, single dispatch on completion)
-- [x] Consolidate `useRefinement` to single instance (called once in `Editor`, props passed to `Toolbar`)
-- [x] `refineComplete` uses `messages.create()` instead of `stream().finalMessage()` (no streaming overhead)
-- [x] `/api/variants` runs sequentially instead of `Promise.all` (avoids 3x rate-limit exposure)
+## Open (added 2026-08-01, library & studio workup)
 
-## Medium Priority
+- [ ] **Diagnostic blind spot for refineContext** — `scripts/prosody-pipeline-diagnostic.ts` never calls `buildSystemPrompt` with the new `refineContext` argument, so its oversized-prompt tracking misses the whole fifth dimension. Worst case adds ~200–270 tokens (cap 1200 chars). Flagged by prompt-composition review; magnitude re-confirmed by the 2026-08-01 post-implementation review.
+- [ ] **Margin-note text sits recency-close to the final directive** — the context block's "guidance, not instructions" disclaimer is one line at the block's top, while verbatim note text lands immediately before the closing "Return only the refined text" instruction. Directive-looking note content gets recency advantage over the single distant disclaimer. Consider a short reinforcement line after `notesLine` (mind the byte-identical absent-context pin). Flagged 2026-08-01 post-implementation review.
+- [ ] **Context disclaimer's scope reference is imprecise for selection refines** — `buildSelectionPrompt` reuses the full system prompt, so "the edit scope defined above" points at the scale line, not the `[START]`/`[END]` constraint that lives only in the user message. No observed misbehavior; tighten the wording if selection refines start over-editing. Flagged 2026-08-01 post-implementation review.
+- [ ] **No way to create directly into an empty book** — `+ entry`/`+ note` target the active entry's parent; an empty book can only be filled by drag or *move to…*. A "new chapter here" row action on book rows would close the gap.
+- [ ] **Audio hydrate/release hysteresis is viewport-based** — the takes list scrolls in its own container, so the 200px/600px root margins both collapse to the container clip edge. Works (release confirmed in e2e), but passing the container as the IntersectionObserver `root` would restore the intended hysteresis band.
 
-- [ ] Prosody metrics not recomputed after manual transcript edits
-      `src/lib/comprosody.ts` only used in `useProsody.ts` during recording
-- [ ] `computeFluency` can exceed 1.0 if pauses overlap or start before `startedAt`
-      `src/lib/comprosody.ts:51-58`
-- [ ] `computeEnergy` scaling (`rms * 3`) saturates at 1 for typical speech, losing dynamic range
-      `src/lib/comprosody.ts:41-49`
-- [ ] `interpretPace` boundary labels are brittle (1 WPM difference flips LLM instruction)
-      `src/lib/comprosody.ts:67-73`, `src/lib/prompts.ts`
-- [ ] Selection refine context extraction splits on `/[.!?]\s/` — breaks on `Dr.`, `e.g.`, decimals
-      `src/hooks/useRefinement.ts:82-85`
-- [ ] `RecordingContext` session includes `audioBlob` but never persisted (lost on refresh)
-      `src/types/audio.ts`, `src/hooks/useTranscription.ts`
-- [ ] `useSpeechRecognition` restart loop on `onend` if `shouldRestartRef.current` is true
-      May spin-crash loop on genuine API errors
-      `src/hooks/useSpeechRecognition.ts:71-78`
-- [ ] `activeEntry` lookup duplicated everywhere — extract to a `useActiveEntry` hook
-      `src/hooks/useRefinement.ts:19-21`, `src/components/editor/Editor.tsx:19-21`, etc.
-- [x] Provider-specific prompt-cache configuration removed with the Ollama adapter
-- [ ] No accessibility labels on toggles/buttons
-      `src/components/dictation/VoiceConfigToggles.tsx`, `src/components/editor/Toolbar.tsx`
-- [ ] UI is not responsive — fixed sidebar width, two-pane split, tiny `text-[9px]`
-      `src/components/layout/Sidebar.tsx`, `src/components/editor/Editor.tsx`
-- [ ] No empty-state guidance for new users
-      `src/components/editor/Editor.tsx:50-56`
-- [ ] `SET_TRANSCRIPT` clears word timestamps mid-flow
-      `src/context/RecordingContext.tsx`
-- [ ] `RecordButton` derives `isRecording` from speech hook, not recording context
-      `src/components/layout/MainPanel.tsx`
-- [ ] `Sidebar` health check fires once, never refreshes
-      `src/components/layout/Sidebar.tsx:12-17`
-- [ ] Transcription error plumbing loses Python stdout (only surfaces stderr)
-      `server/lib/transcribe.ts` — though whisperWorker now reads stdout JSON
-- [ ] `tsconfig.node.json` only includes `vite.config.ts`
-      `eslint.config.js` not type-checked
+## Open
 
-## Low Priority
+- [ ] **Refinement provenance gap** — nothing links a refinement to the settings/prosody that produced it. `entry.prosody` is a single snapshot overwritten on every recording stop (`MainPanel.tsx` `handleStop`), while `rawTranscript` accumulates across takes, so on a multi-take entry the stored prosody no longer describes what produced `refinedText`. `draftHistory` is bare `string[]` — no timestamp, no settings, no prosody. Does not affect the lexicon loop (which diffs per-take transcripts), but blocks any future refinement-style learning: you cannot learn from a signal you cannot attribute.
 
-- [ ] `README.md` is still the Vite template — needs real onboarding/architecture docs
-- [ ] `Waveform` starts new rAF loop on every `isRecording` change
-      `src/components/dictation/Waveform.tsx:11-15`
-- [ ] `VariantCards` truncates at 300 chars with hardcoded ellipsis
-      `src/components/editor/VariantCards.tsx:44-45`
-- [ ] Health check doesn't verify downstream deps (Ollama Cloud/Whisper)
-      `server/index.ts:50-52`
-- [ ] `VoiceConfigToggles` uses inline object dispatch (harmless but creates new refs)
-      `src/components/dictation/VoiceConfigToggles.tsx:14-16`
-- [ ] Pre-existing TS error: `whisperWorker.ts:28` unused `ready` field
-      Either use it (gate `transcribe()` calls) or remove it
-- [ ] `tempfile` path prefix is predictable (`/tmp/comprosody-${uuid}.webm`)
-      Minor symlink race risk on shared `/tmp`
-- [ ] `express.json({ limit: '10mb' })` but `/transcribe` is raw binary — inconsistent
-      `server/index.ts:45`
+- [ ] **Lexicon hint efficacy unmeasured** — the deterministic pass fires exactly where the upstream vocabulary hint failed, so `AppliedSubstitution` counts are the metric for whether the hint is doing anything. Currently surfaced per-transcription in the UI but never aggregated. If the count stays flat as the lexicon grows, the hint is inert and only the find/replace is carrying the feature.
+
+## Done
+
+### Critical
+
+- [x] **Selection refinement can corrupt text** — refined textarea is `readOnly` while refining (`aria-busy`, visual cue); `refineSelection` re-checks the captured selection against the current entry text before splicing and errors with `selection changed during refinement` on mismatch.
+- [x] **No timeouts on upstream `fetch` calls** — `AbortSignal.timeout(60_000)` on `refineComplete`, `120_000` on transcribe; `streamRefinement` gets an idle-timeout controller (60s to first byte, 30s per chunk) combined with an optional external signal via `AbortSignal.any`.
+- [x] **No input validation on backend routes** — hand-rolled `server/lib/validate.ts` (`HttpError`, `reqObject`, `reqString`, `reqNumber`) validates `/api/refine` before SSE headers and `/api/variants` including the temperatures array; unit-tested.
+- [x] **`/api/variants` is fail-fast** — `Promise.allSettled`; responds `{ variants, errors }` with partial results, 502 only when all fail. Client surfaces "n of m variants returned".
+
+### High
+
+- [x] **`refineComplete` has a concrete owner** — automatic note titles use the bounded `/api/refine/complete` route; variants use their partial-result route.
+- [x] **Word timestamps pipeline is inert** — removed end to end: server returns `{ transcript }` only; `WordTimestamp`, `session.wordTimestamps`, and `ADD_WORD_TIMESTAMP` deleted from the frontend.
+- [x] **VoiceConfigToggles label click dead zone** — converted to a real `<input type="checkbox">` (peer + sr-only) inside the label, with keyboard focus ring.
+- [x] **`@anthropic-ai/sdk` is an unused dependency** — removed (`idb-keyval` and `diff` added instead, both actively used).
+- [x] **No global JSON error handler on Express** — 4-arity JSON error middleware in `server/index.ts` (`headersSent` guard, `HttpError` status mapping); redundant per-route try/catch removed.
+
+### Medium
+
+- [x] **`SET_AUDIO_BLOB` dispatch is dead** — action and `session.audioBlob` removed; recordings now persist durably to IndexedDB (`src/lib/audioStore.ts`) with a per-entry takes player in the editor.
+- [x] **Stale-closure fallback may lose final phrase** — `finalTranscriptRef` + `getFinalTranscript()` in `useSpeechRecognition`; fallback reads go through the ref.
+- [x] **No size limit on raw audio uploads** — 50 MB cap in `/api/transcribe`: Content-Length pre-check (413) plus streamed byte counting with `req.destroy()`.
+- [x] **`max_tokens: 64000` in `streamRefinement`** — shared `MAX_OUTPUT_TOKENS = 8192` used by both refinement paths.
+- [x] **Empty content silently returns 200** — `refineComplete` throws on empty content; `/api/refine` emits an error event when the stream produces zero chunks.
+
+### Low
+
+- [x] **No localStorage write debounce** — `createDebouncedPersist` (trailing 300 ms) for entries/directories with flush on `pagehide`/`visibilitychange`; settings save immediately; all savers quota-safe.
+- [x] **`generateVariants` missing `dispatch` in deps** — stale finding: the dep array already includes `dispatch` in current code; no change needed.
+- [x] **`VariantCards` `LABEL_STYLES` weak typing** — typed `Record<Variant['label'], ...>`.
+- [x] **Compounding CSS transparency** — Sidebar uses `bg-surface` (token already carries alpha).
+- [x] **Waveform rAF lifecycle coupling** — `drawWaveform` returns a cancel function; `Waveform` cancels in its own effect cleanup. HiDPI drawing bug (device-pixel coords on a pre-scaled context) fixed alongside.
+- [x] **`response.body!` non-null assertion** — explicit null checks with clear errors, client and server.
+- [x] **No `X-Accel-Buffering: no` header on SSE** — added, plus `flushHeaders()` after validation.
+- [x] **CORS fully open** — allowlist from `CORS_ORIGIN` env (default `http://localhost:5173`).
+- [x] **`isTranscribing` does not disable `RecordButton`** — disabled while a transcription is in flight (`aria-pressed`, reason in title).
+
+### Fixed beyond the audit
+
+- [x] Client disconnect on `/api/refine` now aborts the upstream Ollama request.
+- [x] `DELETE_DIRECTORY` recursively cascades through nested sub-directories (was orphaning grandchildren permanently); IndexedDB recordings cascade too.
+- [x] Stale interim transcript no longer bakes into the editor after recording stops.
+- [x] `useProsody` interval no longer restarts on every render tick.
+- [x] Safari support: MediaRecorder mimeType probe (`webm;codecs=opus` → `webm` → `mp4`), server maps Content-Type to upstream audio format.
+- [x] localStorage load normalization/migration (`schemaVersion` 2) backfills new entry metadata on legacy data.
+
+### Mobile keyboard fix (2026-08-01)
+
+- [x] **iOS keyboard sheared the editor out of view** — root cause: `h-screen` shell + `overflow-hidden` vs iOS Safari's overlay keyboard (layout viewport never resizes; Safari pans the window instead). Fixed with `useAppViewportHeight` (VisualViewport → `--app-height` → `h-app` utility), a below-`xl` scrollable pane column (panes size to content, iOS caret-reveal scrolls the focused pane into view), the `short:` variant (≤520px height melts the entry header away), and a 16px form-control floor on coarse pointers to stop focus auto-zoom.
+- [x] **Margin-notes bottom sheet overlays the footer below `xl`** — now `absolute` inside the editor column, docked above the footer; also keeps it above the on-screen keyboard.
+
+### New features (2026-07-26)
+
+- [x] Durable audio takes: IndexedDB persistence + per-entry takes player with native audio controls.
+- [x] Transcription retry UX: failed uploads offer `retry upload` / `use live transcript` instead of silently falling back; live transcript auto-rescued if a new recording starts.
+- [x] Export/copy: markdown download and clipboard copy per entry (`src/lib/export.ts`).
+- [x] Undo: `draftHistory` (cap 10) with toolbar undo across refine/splice/variant overwrites.
+- [x] Raw-vs-refined diff view (`diffWords`) toggle in the refined pane.
+- [x] Sidebar search over name/transcript/draft with directory-aware filtering.
+- [x] Keyboard shortcuts: Ctrl/Cmd+Shift+Space record toggle, Ctrl/Cmd+Enter refine, Ctrl/Cmd+Shift+C copy.
+- [x] Live recording stats (elapsed `m:ss`, running word count) in the footer; per-entry word badge in the sidebar; take-duration chip in the editor.
+- [x] Delete confirmations on entries/directories; health check re-polls every 30 s and on window focus.
+
+### Lexicon — transcription fidelity loop (2026-07-31)
+
+Closes the loop `correction → confirmed term → vocabulary hint → fewer corrections`. Design: `docs/superpowers/specs/`; plan approved on branch `optimization-pass`.
+
+- [x] `src/lib/lexicon.ts` — pure phonetic filter (`phoneticSimilarity` via normalized Levenshtein + folded consonant skeleton), `extractCandidates` (reuses `diffWords`), `applyLexicon`, `rankForHint`, `encodeLexiconHint`, `mergeCandidate`. 40 unit tests.
+- [x] `StoredRecording.transcript` — each take records the text it contributed, giving the correction diff its baseline and closing the "takes stored without their transcript" gap.
+- [x] Confirm chips (`CorrectionChips`) in the transcript pane; phonetic filter rejects content edits, sentence rewrites, and case-only changes so they never reach the lexicon.
+- [x] Vocabulary hint reaches the model: base64 `X-Lexicon` header (raw-audio body has no JSON envelope) → `optHeaderStringArray` → `transcribe(audio, format, vocabulary)` system message. Malformed hints decode to `[]` rather than blocking transcription. Wire format pinned by a literal asserted on both sides.
+- [x] Client-side deterministic pass with case-sensitive, word-bounded matching; `AutoCorrectionNotice` reports what was rewritten after the model produced it.
+- [x] Misfire demotion — reverting a substitution disables that rule (`misfires >= confirmations`), keeping a bad entry from rewriting every future transcript. Demoted terms still feed the upstream hint.
+- [x] `LexiconPanel` in the sidebar: list, hand-add (incl. hint-only terms), delete, re-enable demoted.

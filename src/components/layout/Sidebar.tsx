@@ -12,6 +12,7 @@ import { useApp } from '../../context/AppContext';
 import { LibrarySection } from '../library/LibrarySection';
 import { cadenceApiUrl } from '../../lib/urls';
 import { LogoutControl } from './LogoutControl';
+import { LexiconPanel } from '../sidebar/LexiconPanel';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -133,8 +134,8 @@ export const Sidebar = memo(function Sidebar({
       >
         <div className="sidebar-header">
           <div>
-            <h1>Cadence</h1>
-            <p>Speak into thought.</p>
+            <h1>Comprosody</h1>
+            <p>Agentic Reader \ Vocal Notes</p>
           </div>
           <button
             aria-label="Close note directory"
@@ -158,6 +159,7 @@ export const Sidebar = memo(function Sidebar({
             <nav aria-label="Note directory" className="sidebar-tree">
               <DirectoryTree onSelectEntry={onClose} />
             </nav>
+            <LexiconPanel />
           </div>
         </div>
 
@@ -176,7 +178,7 @@ export const Sidebar = memo(function Sidebar({
                 </button>
               </div>
               <p>
-                Cadence learns only from transcripts and prosody saved in this
+                Comprosody learns only from transcripts and prosody saved in this
                 browser. Raw audio is not retained.
               </p>
               <dl className="profile-mini-grid">

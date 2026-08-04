@@ -83,6 +83,8 @@ function makeEntry(id: string, refinedText: string): Entry {
     id,
     name: id,
     parentId: null,
+    kind: 'note',
+    order: 0,
     rawTranscript: `${id} raw`,
     refinedText,
     prosody: { ...defaultProsody },
@@ -125,6 +127,7 @@ describe('MainPanel recording integrity', () => {
       errors: [],
       history: [],
       historyIndex: -1,
+      lexicon: {},
     };
     let recordingState: RecordingState = {
       isRecording: false,
@@ -428,6 +431,7 @@ describe('MainPanel recording integrity', () => {
       errors: [],
       history: [],
       historyIndex: -1,
+      lexicon: {},
     };
     let recordingState: RecordingState = {
       isRecording: false,
@@ -579,6 +583,7 @@ describe('MainPanel recording integrity', () => {
       errors: [],
       history: [],
       historyIndex: -1,
+      lexicon: {},
     };
     let recordingState: RecordingState = {
       isRecording: false,

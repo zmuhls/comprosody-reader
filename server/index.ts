@@ -1,4 +1,5 @@
 import express from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
@@ -15,7 +16,11 @@ const host = process.env.HOST || '127.0.0.1';
 const isLoopbackHost = new Set(['127.0.0.1', '::1', 'localhost']).has(host);
 
 const allowedOrigins = new Set(
-  (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://127.0.0.1:5173')
+  (
+    process.env.ALLOWED_ORIGINS
+    || process.env.CORS_ORIGIN
+    || 'http://localhost:5173,http://127.0.0.1:5173'
+  )
     .split(',')
     .map((o) => o.trim())
     .filter(Boolean)
@@ -121,8 +126,28 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
+app.use(
+  (
+    error: Error & { status?: number; statusCode?: number },
+    _req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    if (res.headersSent) {
+      next(error);
+      return;
+    }
+    const status = error.status ?? error.statusCode ?? 500;
+    res.status(status).json({
+      error: status >= 500
+        ? 'Internal server error'
+        : error.message || 'Request failed',
+    });
+  },
+);
+
 const server = app.listen(port, host, () => {
-  console.log(`Cadence server listening at http://${host}:${port}`);
+  console.log(`Comprosody server listening at http://${host}:${port}`);
 });
 
 function shutdown() {

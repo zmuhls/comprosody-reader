@@ -1,10 +1,17 @@
 @import "tailwindcss";
 
+/* Upstream library/studio work uses this to melt secondary chrome in short
+   keyboard-height viewports. */
+@custom-variant short (@media (max-height: 520px));
+
 @theme {
+  --color-canvas: #f4f3f5;
   --color-surface: #f4f3f5;
   --color-surface-raised: #eceaed;
   --color-surface-overlay: #e4e1e7;
+  --color-surface-writing: #fbfafc;
   --color-border: #d1cdd4;
+  --color-border-strong: #bcb6c0;
   --color-border-focus: #aaa4ae;
   --color-text-primary: #18161a;
   --color-text-secondary: #4f4a53;
@@ -16,6 +23,9 @@
   --color-cool: #65777a;
   --color-success: #627767;
   --color-energy: #8e4437;
+  --color-recording: #9b4338;
+  --font-brand: "EB Garamond", Georgia, serif;
+  --font-writing: "Crimson Pro", Georgia, serif;
   --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
@@ -34,7 +44,7 @@
   --font-reading: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
   --sidebar-width: 232px;
   --topbar-height: 56px;
-  --dock-collapsed-height: 58px;
+  --dock-collapsed-height: 72px;
   --dock-expanded-height: 176px;
   --motion-fast: 140ms;
   --motion-normal: 220ms;
@@ -49,11 +59,19 @@
   --keyboard-inset: 0px;
 }
 
+@utility h-app {
+  height: 100dvh;
+  height: var(--app-height, var(--visual-viewport-height, 100dvh));
+}
+
 :root[data-reader-theme="dark"] {
+  --color-canvas: #0b0b0d;
   --color-surface: #0b0b0d;
   --color-surface-raised: #121216;
   --color-surface-overlay: #19181d;
+  --color-surface-writing: #101015;
   --color-border: #34303b;
+  --color-border-strong: #50495a;
   --color-border-focus: #50495a;
   --color-text-primary: #f1eff3;
   --color-text-secondary: #c4c0c8;
@@ -65,6 +83,7 @@
   --color-cool: #aebbc2;
   --color-success: #98ae9e;
   --color-energy: #cfa0b4;
+  --color-recording: #ff8fbc;
   --accent-soft: rgb(221 216 232 / 5.5%);
   --accent-highlight: rgb(221 216 232 / 22%);
   --grid-fine: rgb(241 239 243 / 2.7%);
@@ -112,6 +131,15 @@ textarea {
 
 button {
   -webkit-tap-highlight-color: transparent;
+}
+
+/* iOS Safari zooms and pans controls rendered below 16px. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em);
+  }
 }
 
 button:focus-visible,
@@ -1950,7 +1978,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   left: 0;
   z-index: 9;
   height: var(--dock-collapsed-height);
-  overflow: hidden;
+  overflow: visible;
   border-top: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-surface-raised) 97%, transparent);
   transition: height var(--motion-normal) ease;
@@ -2179,6 +2207,27 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
     color var(--motion-fast) ease,
     border-color var(--motion-fast) ease,
     background var(--motion-fast) ease;
+}
+
+/* The microphone is its own control surface. Keeping this geometry separate
+   from the expandable dock prevents Safari/WebKit from clipping the circular
+   button at the dock border when the visual viewport or keyboard changes. */
+.recording-microphone-control {
+  display: flex;
+  width: 56px;
+  height: 56px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--color-surface-raised);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+
+.recording-microphone-button {
+  width: 50px;
+  min-width: 50px;
+  height: 50px;
+  min-height: 50px;
 }
 
 .record-button:hover {
@@ -3186,6 +3235,143 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 }
 
+/* Roomy touch layout: phone and tablet controls should feel intentionally
+   mobile, not like the desktop UI compressed into a narrow column. */
+@media (max-width: 900px) {
+  :root {
+    --dock-collapsed-height: 100px;
+    --dock-expanded-height: 232px;
+  }
+
+  .sidebar {
+    width: min(92vw, 360px);
+  }
+
+  .workspace-stage.is-reading {
+    --mobile-workspace-switch-height: 58px;
+  }
+
+  .mobile-workspace-switch {
+    gap: 8px;
+    padding: 5px 12px;
+  }
+
+  .mobile-workspace-switch button {
+    min-width: 96px;
+    min-height: 48px;
+    padding: 0 20px;
+    font-size: 12px;
+  }
+
+  .mobile-workspace-switch .mobile-workspace-menu {
+    left: max(8px, env(safe-area-inset-left));
+    width: 48px;
+    min-width: 48px;
+  }
+
+  .sidebar-header {
+    min-height: 76px;
+    padding: max(16px, env(safe-area-inset-top)) 18px 14px;
+  }
+
+  .sidebar-workspace,
+  .sidebar-tree,
+  .library-section {
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .entry-actions {
+    min-height: 60px;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+
+  .entry-primary-action,
+  .tree-primary-action,
+  .tree-row,
+  .library-row,
+  .sidebar-footer-row,
+  .tree-place-target,
+  .tree-root-target button,
+  .tree-move-banner button,
+  .ui-menu-item {
+    min-height: 48px;
+  }
+
+  .sidebar-header .icon-button,
+  .entry-folder-action,
+  .tree-rename-action,
+  .tree-delete,
+  .tree-move-handle,
+  .editor-topbar .icon-button,
+  .refinement-sidecar-header .icon-button {
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
+  }
+
+  .document-page {
+    padding: 52px 28px 220px;
+  }
+
+  .document-title {
+    min-height: 50px;
+    font-size: clamp(34px, 10vw, 42px);
+    line-height: 1.12;
+  }
+
+  .document-prose {
+    font-size: 18px;
+    line-height: 1.7;
+  }
+
+  .interaction-dock,
+  .interaction-dock:hover,
+  .interaction-dock:focus-within,
+  .interaction-dock[data-recording="true"],
+  .interaction-dock[data-busy="true"] {
+    height: var(--dock-collapsed-height);
+  }
+
+  .interaction-dock[data-recording="true"],
+  .interaction-dock[data-busy="true"],
+  .interaction-dock:focus-within {
+    height: var(--dock-expanded-height);
+  }
+
+  .recording-row {
+    height: var(--dock-collapsed-height);
+    gap: 16px;
+    padding: 0 18px max(6px, env(safe-area-inset-bottom));
+  }
+
+  .record-control,
+  .interaction-dock[data-recording="true"] .record-control,
+  .interaction-dock[data-busy="true"] .record-control,
+  .interaction-dock:focus-within .record-control {
+    top: 14px;
+  }
+
+  .recording-microphone-control {
+    width: 64px;
+    height: 64px;
+  }
+
+  .recording-microphone-button {
+    width: 56px;
+    min-width: 56px;
+    height: 56px;
+    min-height: 56px;
+  }
+
+  .recording-state-text {
+    bottom: max(8px, env(safe-area-inset-bottom));
+    font-size: 10px;
+  }
+}
+
 @media (max-width: 600px) {
   .breadcrumb {
     display: none;
@@ -3203,14 +3389,14 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   .tree-place-target,
   .tree-root-target button,
   .tree-move-banner button {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
-    min-height: 44px;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
   }
 
   .entry-actions {
-    min-height: 52px;
+    min-height: 60px;
   }
 
   .entry-primary-action,
@@ -3219,16 +3405,16 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   .sidebar-footer-row,
   .breadcrumb,
   .mobile-workspace-switch button {
-    min-height: 44px;
+    min-height: 48px;
   }
 
   .breadcrumb {
-    min-width: 44px;
+    min-width: 48px;
   }
 
   .tree-rename-action,
   .tree-delete {
-    flex-basis: 44px;
+    flex-basis: 48px;
     opacity: 1;
   }
 
@@ -3243,7 +3429,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 
   .document-title {
-    min-height: 44px;
+    min-height: 50px;
   }
 
   .refinement-input-shell,
@@ -3251,17 +3437,17 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   .refinement-send,
   .text-action,
   .auto-refine-control {
-    min-height: 44px;
+    min-height: 48px;
   }
 
   .refinement-input-shell {
-    height: 44px;
+    height: 48px;
   }
 
   .refinement-send {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
   }
 
   .text-action {
@@ -3276,10 +3462,10 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 
   .mini-switch {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
-    min-height: 44px;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
     border: 0;
     border-radius: 0;
     background: transparent;
@@ -3287,8 +3473,8 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 
   .mini-switch::before {
     position: absolute;
-    top: 15px;
-    left: 10px;
+    top: 17px;
+    left: 12px;
     width: 23px;
     height: 12px;
     border: 1px solid var(--color-border);
@@ -3309,25 +3495,25 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 
   .mini-switch-thumb {
     position: absolute;
-    top: 17px;
-    left: 12px;
+    top: 19px;
+    left: 14px;
     transform: none;
   }
 
   .mini-switch[data-state="checked"] .mini-switch-thumb {
-    left: 24px;
+    left: 26px;
     transform: none;
   }
 
   .record-control {
-    top: 6px;
+    top: 14px;
   }
 
   .record-button {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
-    min-height: 44px;
+    width: 56px;
+    min-width: 56px;
+    height: 56px;
+    min-height: 56px;
   }
 
   .interaction-dock[data-recording="true"] .record-control,
@@ -3338,14 +3524,14 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 
   .provider-trigger,
   .background-limit-trigger {
-    height: 44px;
-    min-height: 44px;
+    height: 48px;
+    min-height: 48px;
     padding-right: 6px;
     padding-left: 6px;
   }
 
   .ui-menu-item {
-    min-height: 44px;
+    min-height: 48px;
   }
 
   .refinement-preset,
@@ -3354,16 +3540,16 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   .refinement-stop,
   .refinement-guidance > div,
   .refinement-guidance button {
-    min-height: 44px;
+    min-height: 48px;
   }
 
   .refinement-guidance > div {
-    height: 44px;
+    height: 48px;
   }
 
   .refinement-guidance button {
-    width: 44px;
-    min-width: 44px;
+    width: 48px;
+    min-width: 48px;
   }
 
   .refinement-guidance input,
@@ -3374,7 +3560,7 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   .refinement-settings summary,
   .refinement-attempts summary {
     display: flex;
-    min-height: 44px;
+    min-height: 48px;
     align-items: center;
   }
 
@@ -3383,10 +3569,10 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 
   .error-dismiss {
-    width: 44px;
-    min-width: 44px;
-    height: 44px;
-    min-height: 44px;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
   }
 }
 
@@ -3396,28 +3582,28 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   html[data-virtual-keyboard="open"] .interaction-dock:focus-within,
   html[data-virtual-keyboard="open"] .interaction-dock[data-recording="true"],
   html[data-virtual-keyboard="open"] .interaction-dock[data-busy="true"] {
-    height: 82px;
-    overflow: hidden;
+    height: 100px;
+    overflow: visible;
   }
 
   html[data-virtual-keyboard="open"] .recording-row {
-    height: 82px;
+    height: 100px;
   }
 
   html[data-virtual-keyboard="open"] .record-control,
   html[data-virtual-keyboard="open"] .interaction-dock[data-recording="true"] .record-control,
   html[data-virtual-keyboard="open"] .interaction-dock[data-busy="true"] .record-control,
   html[data-virtual-keyboard="open"] .interaction-dock:focus-within .record-control {
-    top: 8px;
+    top: 12px;
     left: 50%;
     transform: translateX(-50%);
   }
 
   html[data-virtual-keyboard="open"] .record-button {
-    width: 50px;
-    min-width: 50px;
-    height: 50px;
-    min-height: 50px;
+    width: 56px;
+    min-width: 56px;
+    height: 56px;
+    min-height: 56px;
   }
 
   html[data-virtual-keyboard="open"] .refinement-composer,

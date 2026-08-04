@@ -24,7 +24,7 @@ export function RecordButton({
             ? 'Stop recording'
             : 'Start recording'
       }
-      className={`record-button ${isRecording ? 'is-recording' : ''} ${
+      className={`record-button recording-microphone-button ${isRecording ? 'is-recording' : ''} ${
         isTranscribing ? 'is-busy' : ''
       }`}
       disabled={disabled}

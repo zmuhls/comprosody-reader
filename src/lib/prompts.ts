@@ -117,6 +117,7 @@ export interface RefinementPromptOptions {
   mode?: RefinementMode;
   instruction?: string;
   vocabularyHints?: readonly string[];
+  refineContext?: string;
 }
 
 function buildFidelityGuidance(
@@ -154,8 +155,11 @@ export function buildSystemPrompt(
   settings: RefinementSettings,
   prosody: ProsodyDiagnostics,
   voiceConfig: VoiceConfig,
-  options: RefinementPromptOptions = {},
+  optionsOrContext: RefinementPromptOptions | string = {},
 ): string {
+  const options = typeof optionsOrContext === 'string'
+    ? { refineContext: optionsOrContext }
+    : optionsOrContext;
   const mode = options.mode ?? settings.mode ?? 'faithful';
   const parts = [
     GENRE_PREAMBLES[settings.genre],
@@ -178,6 +182,11 @@ export function buildSystemPrompt(
     '',
     'This is refinement, not rewriting. Preserve the speaker\'s voice, intent, and argumentative direction. Return only the refined text with no commentary or explanation.',
   ];
+  // Location/notes guidance slots in before the output-format instruction,
+  // which must stay last. Absent context leaves the prompt byte-identical.
+  if (options.refineContext?.trim()) {
+    parts.splice(parts.length - 1, 0, options.refineContext.trim(), '');
+  }
   return parts.filter(Boolean).join('\n');
 }
 
@@ -188,9 +197,14 @@ export function buildSelectionPrompt(
   contextBefore: string,
   selection: string,
   contextAfter: string,
-  options: RefinementPromptOptions = {},
+  optionsOrContext: RefinementPromptOptions | string = {},
 ): { system: string; user: string } {
-  const system = buildSystemPrompt(settings, prosody, voiceConfig, options);
+  const system = buildSystemPrompt(
+    settings,
+    prosody,
+    voiceConfig,
+    optionsOrContext,
+  );
   const user = `Here is a fragment of dictated text to refine. The selected portion is between [START] and [END] markers. Refine ONLY the selected text, maintaining coherence with the surrounding context. Return ONLY the refined selected text, nothing else.
 
 Context before: ${contextBefore}

@@ -27,7 +27,6 @@ const client = vi.hoisted(() => {
 const services = vi.hoisted(() => ({
   appDispatch: vi.fn(),
   recordImprovementEvent: vi.fn().mockResolvedValue(true),
-  recordingDispatch: vi.fn(),
 }));
 
 vi.mock('@elevenlabs/client', () => ({
@@ -45,10 +44,6 @@ vi.mock('@elevenlabs/client', () => ({
 
 vi.mock('../context/AppContext', () => ({
   useApp: () => ({ dispatch: services.appDispatch }),
-}));
-
-vi.mock('../context/RecordingContext', () => ({
-  useRecording: () => ({ dispatch: services.recordingDispatch }),
 }));
 
 vi.mock('../lib/improvementMetrics', async (importOriginal) => ({
@@ -184,10 +179,6 @@ describe('useRealtimeTranscription', () => {
       transcript: 'The archive preserves a public memory',
     });
     expect(client.connection.commit).toHaveBeenCalledTimes(1);
-    expect(services.recordingDispatch).toHaveBeenCalledWith({
-      type: 'SET_TRANSCRIPT',
-      text: 'The archive preserves a public memory',
-    });
   });
 
   it('falls back when earlier committed text has no post-stop commit event', async () => {
@@ -220,9 +211,6 @@ describe('useRealtimeTranscription', () => {
       transcript: 'An earlier committed segment',
     });
     expect(client.connection.commit).toHaveBeenCalledTimes(1);
-    expect(services.recordingDispatch).not.toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'SET_TRANSCRIPT' }),
-    );
   });
 
   it('marks a disconnected live session for exactly one final batch fallback', async () => {

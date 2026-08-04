@@ -63,6 +63,7 @@ export function automaticTitleCandidate(entry: Entry): {
   basis: string;
   source: string;
 } | null {
+  if (entry.kind !== 'note') return null;
   const source = noteTitleSource(entry);
   if (source.length < 16 || hasManualNoteTitle(entry)) return null;
   const basis = noteTitleBasis(source);

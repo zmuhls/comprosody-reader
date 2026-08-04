@@ -44,7 +44,9 @@ async function requestTranscription(
   }) as Request['get'];
 
   const result: TestResponse = { status: 200, body: undefined };
-  const response = {
+  const response = Object.assign(new EventEmitter(), {
+    destroyed: false,
+    writableEnded: false,
     status(code: number) {
       result.status = code;
       return response;
@@ -53,7 +55,7 @@ async function requestTranscription(
       result.body = body;
       return response;
     },
-  } as unknown as Response;
+  }) as unknown as Response;
 
   await handleTranscription(req, response);
   return result;

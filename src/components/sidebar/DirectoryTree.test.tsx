@@ -14,13 +14,15 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const directories: Record<string, Directory> = {
-  archive: { id: 'archive', name: 'Archive', parentId: null },
+  archive: { id: 'archive', name: 'Archive', parentId: null, kind: 'folder' },
 };
 const entries: Record<string, Entry> = {
   note: {
     id: 'note',
     name: 'Research note',
     parentId: null,
+    kind: 'note',
+    order: 0,
     rawTranscript: '',
     refinedText: '',
     prosody: { ...defaultProsody },

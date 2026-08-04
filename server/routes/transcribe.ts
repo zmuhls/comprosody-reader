@@ -12,10 +12,17 @@ import {
   elevenLabsRealtimeTokenClient,
   type RealtimeScribeTokenRequestOptions,
 } from '../lib/transcription/elevenLabsScribeProvider.js';
+import { optHeaderStringArray } from '../lib/validate.js';
 
 export const transcribeRouter = Router();
 
 const MAX_AUDIO_BYTES = 50 * 1024 * 1024; // 50 MB
+// Node's aggregate header limit is larger, but vocabulary is only an optional
+// hint. Keep each supported hint header well below that ceiling so it can be
+// rejected before the audio body is accepted.
+const MAX_KEYTERM_HEADER_CHARACTERS = 4096;
+const MAX_LEXICON_HEADER_TERMS = 200;
+const MAX_LEXICON_HEADER_TERM_CHARACTERS = 64;
 export const MAX_TRANSCRIPTION_KEYTERMS = 100;
 export const MAX_KEYTERM_CHARACTERS = 50;
 export const MAX_KEYTERM_WORDS = 5;
@@ -101,8 +108,22 @@ function transcriptionErrorStatus(error: unknown): number {
     return 400;
   }
   if (error instanceof TranscriptionConfigurationError) return 503;
-  if (error instanceof TranscriptionUpstreamError) return 502;
+  if (error instanceof TranscriptionUpstreamError) {
+    return error.status === 504 ? 504 : 502;
+  }
   return 500;
+}
+
+function transcriptionErrorMessage(error: unknown): string {
+  if (
+    error instanceof UnsupportedTranscriptionProviderError ||
+    error instanceof UnsupportedTranscriptionModelError ||
+    error instanceof TranscriptionConfigurationError ||
+    error instanceof TranscriptionUpstreamError
+  ) {
+    return error.message;
+  }
+  return 'Transcription failed';
 }
 
 function realtimeTokenErrorStatus(error: unknown): number {
@@ -167,6 +188,30 @@ export async function handleTranscription(
   req: Request,
   res: Response
 ): Promise<void> {
+  const declaredBytes = Number(req.get('content-length'));
+  if (Number.isFinite(declaredBytes) && declaredBytes > MAX_AUDIO_BYTES) {
+    res.status(413).json({ error: 'Audio exceeds 50 MB limit' });
+    return;
+  }
+
+  const cadenceKeytermsHeader = req.get('x-cadence-keyterms');
+  const lexiconHeader = req.get('x-lexicon');
+  if (
+    (cadenceKeytermsHeader?.length ?? 0) > MAX_KEYTERM_HEADER_CHARACTERS ||
+    (lexiconHeader?.length ?? 0) > MAX_KEYTERM_HEADER_CHARACTERS
+  ) {
+    res.status(400).json({ error: 'Vocabulary hint exceeds 4 KB' });
+    return;
+  }
+
+  const controller = new AbortController();
+  const abortRequest = () => controller.abort();
+  const abortIfResponseClosed = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  req.once('aborted', abortRequest);
+  res.once('close', abortIfResponseClosed);
+
   try {
     const chunks: Buffer[] = [];
     let totalBytes = 0;
@@ -174,7 +219,13 @@ export async function handleTranscription(
     for await (const chunk of req) {
       totalBytes += chunk.length;
       if (totalBytes > MAX_AUDIO_BYTES) {
-        res.status(413).json({ error: 'Audio file too large' });
+        controller.abort();
+        res.status(413).json({ error: 'Audio exceeds 50 MB limit' });
+        // Once the response has flushed, close a chunked upload that ignored
+        // the limit instead of continuing to buffer or transcribe it.
+        res.once('finish', () => {
+          if (!req.complete) req.destroy();
+        });
         return;
       }
       chunks.push(chunk as Buffer);
@@ -190,7 +241,12 @@ export async function handleTranscription(
     const provider = resolveTranscriptionProvider(queryString(req.query.provider));
     const requestedModel = queryString(req.query.model);
     const keyterms = parseTranscriptionKeyterms([
-      ...parseTranscriptionKeytermHeader(req.get('x-cadence-keyterms')),
+      ...parseTranscriptionKeytermHeader(cadenceKeytermsHeader),
+      ...optHeaderStringArray(
+        lexiconHeader,
+        MAX_LEXICON_HEADER_TERMS,
+        MAX_LEXICON_HEADER_TERM_CHARACTERS
+      ),
       ...(Array.isArray(req.query.keyterm)
         ? req.query.keyterm
         : [req.query.keyterm]),
@@ -200,11 +256,18 @@ export async function handleTranscription(
       model: requestedModel,
       contentType: req.get('content-type'),
       keyterms,
+      signal: controller.signal,
     });
+    if (controller.signal.aborted || res.destroyed) return;
     res.json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Transcription failed';
-    res.status(transcriptionErrorStatus(err)).json({ error: message });
+    if (controller.signal.aborted || res.destroyed) return;
+    res
+      .status(transcriptionErrorStatus(err))
+      .json({ error: transcriptionErrorMessage(err) });
+  } finally {
+    req.removeListener('aborted', abortRequest);
+    res.removeListener('close', abortIfResponseClosed);
   }
 }
 

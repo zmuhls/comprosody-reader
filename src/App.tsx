@@ -4,7 +4,6 @@ import { RecordingProvider } from './context/RecordingContext';
 import { Sidebar } from './components/layout/Sidebar';
 import { MainPanel } from './components/layout/MainPanel';
 import { ErrorBanner } from './components/layout/ErrorBanner';
-import { ScholarRail } from './components/layout/ScholarRail';
 import { CommandPalette } from './components/layout/CommandPalette';
 import { Tooltip } from 'radix-ui';
 import { LibraryProvider, useLibrary } from './context/LibraryContext';
@@ -138,7 +137,6 @@ function AppInner() {
               <MainPanel onOpenSidebar={openSidebar} />
             </div>
           </div>
-          <ScholarRail inert={sidebarModalOpen} />
           {sidebarModalOpen ? null : <CommandPalette />}
         </div>
       </Tooltip.Provider>

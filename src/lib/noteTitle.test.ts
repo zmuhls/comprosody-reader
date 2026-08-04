@@ -13,6 +13,8 @@ function entry(overrides: Partial<Entry> = {}): Entry {
     id: 'note-1',
     name: 'Untitled',
     parentId: null,
+    kind: 'note',
+    order: 0,
     rawTranscript: '',
     refinedText: 'Public memory is shaped by archival absence and return.',
     prosody: { ...defaultProsody },

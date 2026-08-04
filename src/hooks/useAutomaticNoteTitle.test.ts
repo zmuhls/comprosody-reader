@@ -24,6 +24,8 @@ function note(overrides: Partial<Entry> = {}): Entry {
     name: 'Untitled',
     titleSource: 'fallback',
     parentId: null,
+    kind: 'note',
+    order: 0,
     rawTranscript: '',
     refinedText: 'Archival absence reshapes how public memory returns.',
     prosody: { ...defaultProsody },

@@ -327,6 +327,13 @@ test('responsive breakpoint matrix preserves navigation and recording geometry',
       await expect(sidebar).toHaveAttribute('aria-modal', 'true');
       await expectWithinViewport(page, '.sidebar', `${label} note directory`);
       await page.getByRole('button', { name: 'Close note directory' }).click();
+      await expect(sidebar).not.toHaveClass(/is-open/u);
+      await expect.poll(async () => {
+        const box = await sidebar.boundingBox();
+        return box ? box.x + box.width <= 2 : true;
+      }, {
+        message: `${label} note directory should finish closing before the next viewport`,
+      }).toBe(true);
     } else {
       await expect(sidebar).toHaveRole('complementary');
       await expect(sidebar).toBeVisible();

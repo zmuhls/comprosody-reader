@@ -67,7 +67,7 @@ export function RecordingDock({
 
   return (
     <div className="recording-row">
-      <div className="record-control">
+      <div className="record-control recording-microphone-control">
         <RecordButton
           isRecording={isRecording}
           isTranscribing={isTranscribing}

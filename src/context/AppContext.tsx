@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import {
   createContext,
   useCallback,
@@ -12,7 +11,8 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react';
-import type { Entry, Directory } from '../types/editor';
+import type { Entry, Directory, EntryKind, DirectoryKind } from '../types/editor';
+import type { LexiconTerm, CorrectionCandidate } from '../types/lexicon';
 import type { RefinementSettings } from '../types/llm';
 import type { VoiceProfile } from '../lib/voiceProfile';
 import { defaultVoiceConfig, defaultProsody } from '../types/audio';
@@ -23,14 +23,28 @@ import {
   persistWorkspaceDatabase,
 } from '../lib/database';
 import {
+  createDebouncedPersist,
   loadEntries,
   saveEntries,
   loadDirectories,
   saveDirectories,
   saveVoiceProfile,
+  loadLexicon,
+  saveLexicon,
   loadRefinementSettings,
   saveRefinementSettings,
 } from '../lib/storage';
+import { mergeCandidate } from '../lib/lexicon';
+import { countWords } from '../lib/entries';
+
+const DEFAULT_REFINEMENT_SETTINGS: RefinementSettings = {
+  genre: 'academic',
+  scale: 'sentence',
+  temperature: 0.2,
+  mode: 'faithful',
+  highFidelity: true,
+  autoRefine: true,
+};
 
 export interface AppError {
   id: string;
@@ -46,6 +60,7 @@ export interface AppState {
   errors: AppError[];
   history: Record<string, Entry>[];
   historyIndex: number;
+  lexicon: Record<string, LexiconTerm>;
 }
 
 export type AppAction =
@@ -61,10 +76,16 @@ export type AppAction =
   | { type: 'CREATE_DIRECTORY'; directory: Directory }
   | { type: 'RENAME_DIRECTORY'; id: string; name: string }
   | { type: 'DELETE_DIRECTORY'; id: string }
-  | { type: 'MOVE_ENTRY'; id: string; parentId: string | null }
-  | { type: 'MOVE_DIRECTORY'; id: string; parentId: string | null }
+  | { type: 'MOVE_NODE'; nodeType: 'entry' | 'directory'; id: string; newParentId: string | null }
+  | { type: 'REORDER_ENTRY'; id: string; beforeId: string | null }
+  | { type: 'SET_DIRECTORY_KIND'; id: string; kind: DirectoryKind }
+  | { type: 'ATTACH_NOTE'; noteId: string; entryId: string }
+  | { type: 'DETACH_NOTE'; noteId: string }
   | { type: 'UPDATE_REFINEMENT_SETTINGS'; settings: Partial<RefinementSettings> }
   | { type: 'RENAME_ENTRY'; id: string; name: string }
+  | { type: 'CONFIRM_LEXICON_TERM'; candidate: CorrectionCandidate }
+  | { type: 'DELETE_LEXICON_TERM'; id: string }
+  | { type: 'RECORD_LEXICON_MISFIRE'; id: string }
   | { type: 'SET_ERROR'; error: AppError }
   | { type: 'CLEAR_ERROR'; id: string }
   | { type: 'UNDO' }
@@ -77,15 +98,34 @@ function recordHistory(
   nextEntries: Record<string, Entry>
 ): { history: Record<string, Entry>[]; historyIndex: number } {
   const history = state.history.slice(0, state.historyIndex + 1);
-  // Ensure the previous current state is captured before the new one.
   if (history.length === 0 || history[history.length - 1] !== state.entries) {
     history.push(state.entries);
   }
   history.push(nextEntries);
-  while (history.length > HISTORY_LIMIT) {
-    history.shift();
-  }
+  while (history.length > HISTORY_LIMIT) history.shift();
   return { history, historyIndex: history.length - 1 };
+}
+
+/** True when `candidateId` sits anywhere below `ancestorId` in the directory tree. */
+export function isDescendantDirectory(
+  directories: Record<string, Directory>,
+  candidateId: string,
+  ancestorId: string
+): boolean {
+  let cursor = directories[candidateId]?.parentId ?? null;
+  while (cursor !== null) {
+    if (cursor === ancestorId) return true;
+    cursor = directories[cursor]?.parentId ?? null;
+  }
+  return false;
+}
+
+function maxOrderIn(entries: Record<string, Entry>, parentId: string | null): number {
+  let max = -1;
+  for (const entry of Object.values(entries)) {
+    if (entry.parentId === parentId && entry.order > max) max = entry.order;
+  }
+  return max;
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -107,7 +147,13 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, activeEntryId: action.id };
 
     case 'CREATE_ENTRY': {
-      const nextEntries = { ...state.entries, [action.entry.id]: action.entry };
+      // The reducer owns ordering: whatever the caller set, a new entry lands
+      // after its siblings so books never get colliding chapter positions.
+      const order = maxOrderIn(state.entries, action.entry.parentId) + 1;
+      const nextEntries = {
+        ...state.entries,
+        [action.entry.id]: { ...action.entry, order },
+      };
       return {
         ...state,
         entries: nextEntries,
@@ -119,10 +165,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'UPDATE_ENTRY': {
       const existing = state.entries[action.id];
       if (!existing) return state;
-      const nextEntries = {
-        ...state.entries,
-        [action.id]: { ...existing, ...action.updates, updatedAt: Date.now() },
-      };
+      const merged = { ...existing, ...action.updates, updatedAt: Date.now() };
+      if (action.updates.rawTranscript !== undefined) {
+        merged.wordCount = countWords(action.updates.rawTranscript);
+      }
+      const nextEntries = { ...state.entries, [action.id]: merged };
       return {
         ...state,
         entries: nextEntries,
@@ -131,13 +178,155 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case 'DELETE_ENTRY': {
-      const rest = { ...state.entries };
-      delete rest[action.id];
+      const nextEntries = { ...state.entries };
+      delete nextEntries[action.id];
+      // Notes pinned to the deleted entry survive, unpinned.
+      for (const [id, entry] of Object.entries(nextEntries)) {
+        if (entry.attachedToId === action.id) {
+          const detached = { ...entry };
+          delete detached.attachedToId;
+          nextEntries[id] = detached;
+        }
+      }
       return {
         ...state,
-        entries: rest,
+        entries: nextEntries,
         activeEntryId: state.activeEntryId === action.id ? null : state.activeEntryId,
-        ...recordHistory(state, rest),
+        ...recordHistory(state, nextEntries),
+      };
+    }
+
+    case 'MOVE_NODE': {
+      if (action.nodeType === 'directory') {
+        const dir = state.directories[action.id];
+        if (!dir || dir.parentId === action.newParentId) return state;
+        if (action.newParentId !== null) {
+          if (!state.directories[action.newParentId]) return state;
+          if (
+            action.newParentId === action.id ||
+            isDescendantDirectory(state.directories, action.newParentId, action.id)
+          ) {
+            return state;
+          }
+        }
+        return {
+          ...state,
+          directories: {
+            ...state.directories,
+            [action.id]: { ...dir, parentId: action.newParentId },
+          },
+        };
+      }
+
+      const entry = state.entries[action.id];
+      if (!entry || entry.parentId === action.newParentId) return state;
+      if (action.newParentId !== null && !state.directories[action.newParentId]) {
+        return state;
+      }
+      const moved: Entry = {
+        ...entry,
+        parentId: action.newParentId,
+        order: maxOrderIn(state.entries, action.newParentId) + 1,
+        updatedAt: Date.now(),
+      };
+      // A note dragged away on its own comes unpinned; an entry that moves
+      // brings its pinned notes with it so display and location stay aligned.
+      if (moved.kind === 'note' && moved.attachedToId !== undefined) {
+        delete moved.attachedToId;
+      }
+      const nextEntries = { ...state.entries, [action.id]: moved };
+      for (const [id, candidate] of Object.entries(state.entries)) {
+        if (candidate.attachedToId === action.id) {
+          nextEntries[id] = { ...candidate, parentId: action.newParentId };
+        }
+      }
+      return { ...state, entries: nextEntries };
+    }
+
+    case 'REORDER_ENTRY': {
+      const entry = state.entries[action.id];
+      if (!entry || action.beforeId === action.id) return state;
+      const siblings = Object.values(state.entries)
+        .filter(
+          (e) =>
+            e.parentId === entry.parentId &&
+            e.id !== entry.id &&
+            e.attachedToId === undefined
+        )
+        .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
+      const insertAt =
+        action.beforeId === null
+          ? siblings.length
+          : siblings.findIndex((s) => s.id === action.beforeId);
+      if (insertAt === -1) return state;
+      siblings.splice(insertAt, 0, entry);
+      const nextEntries = { ...state.entries };
+      siblings.forEach((sibling, index) => {
+        if (nextEntries[sibling.id].order !== index) {
+          nextEntries[sibling.id] = { ...nextEntries[sibling.id], order: index };
+        }
+      });
+      return { ...state, entries: nextEntries };
+    }
+
+    case 'SET_DIRECTORY_KIND': {
+      const dir = state.directories[action.id];
+      if (!dir || dir.kind === action.kind) return state;
+      let entries = state.entries;
+      if (action.kind === 'book') {
+        // Promotion freezes the alphabetical order the folder was showing.
+        const children = Object.values(state.entries)
+          .filter((e) => e.parentId === action.id && e.attachedToId === undefined)
+          .sort((a, b) => a.name.localeCompare(b.name));
+        const next = { ...state.entries };
+        children.forEach((child, index) => {
+          next[child.id] = { ...child, order: index };
+        });
+        entries = next;
+      }
+      return {
+        ...state,
+        entries,
+        directories: {
+          ...state.directories,
+          [action.id]: { ...dir, kind: action.kind },
+        },
+      };
+    }
+
+    case 'ATTACH_NOTE': {
+      const note = state.entries[action.noteId];
+      const target = state.entries[action.entryId];
+      if (
+        !note ||
+        !target ||
+        note.kind !== 'note' ||
+        target.kind === 'note' ||
+        action.noteId === action.entryId
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        entries: {
+          ...state.entries,
+          [action.noteId]: {
+            ...note,
+            attachedToId: action.entryId,
+            parentId: target.parentId,
+          },
+        },
+      };
+    }
+
+    case 'DETACH_NOTE': {
+      const note = state.entries[action.noteId];
+      if (!note || note.attachedToId === undefined) return state;
+      const detached = { ...note };
+      delete detached.attachedToId;
+      return {
+        ...state,
+        entries: { ...state.entries, [action.noteId]: detached },
       };
     }
 
@@ -163,17 +352,28 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case 'DELETE_DIRECTORY': {
-      const idsToRemove = collectDescendantDirectoryIds(action.id, state.directories);
-      idsToRemove.add(action.id);
-
-      const restDirs: Record<string, Directory> = {};
+      const { directoryIds } = collectDirectoryCascade(
+        state.directories,
+        state.entries,
+        action.id
+      );
+      const nextDirectories: Record<string, Directory> = {};
       for (const [id, dir] of Object.entries(state.directories)) {
-        if (!idsToRemove.has(id)) restDirs[id] = dir;
+        if (!directoryIds.has(id)) nextDirectories[id] = dir;
       }
-
       const restEntries: Record<string, Entry> = {};
       for (const [id, entry] of Object.entries(state.entries)) {
-        if (!idsToRemove.has(entry.parentId ?? '')) restEntries[id] = entry;
+        if (entry.parentId === null || !directoryIds.has(entry.parentId)) {
+          restEntries[id] = entry;
+        }
+      }
+      // Unpin survivors whose target entry died in the cascade.
+      for (const [id, entry] of Object.entries(restEntries)) {
+        if (entry.attachedToId !== undefined && !restEntries[entry.attachedToId]) {
+          const detached = { ...entry };
+          delete detached.attachedToId;
+          restEntries[id] = detached;
+        }
       }
 
       const nextActive =
@@ -183,45 +383,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 
       return {
         ...state,
-        directories: restDirs,
+        directories: nextDirectories,
         entries: restEntries,
         activeEntryId: nextActive,
         ...recordHistory(state, restEntries),
-      };
-    }
-
-    case 'MOVE_ENTRY': {
-      const entry = state.entries[action.id];
-      if (!entry || entry.parentId === action.parentId) return state;
-      if (action.parentId !== null && !state.directories[action.parentId]) return state;
-      const nextEntries = {
-        ...state.entries,
-        [action.id]: { ...entry, parentId: action.parentId, updatedAt: Date.now() },
-      };
-      return {
-        ...state,
-        entries: nextEntries,
-        ...recordHistory(state, nextEntries),
-      };
-    }
-
-    case 'MOVE_DIRECTORY': {
-      const directory = state.directories[action.id];
-      if (!directory || directory.parentId === action.parentId) return state;
-      if (action.parentId !== null && !state.directories[action.parentId]) return state;
-      if (action.parentId === action.id) return state;
-      if (
-        action.parentId !== null
-        && collectDescendantDirectoryIds(action.id, state.directories).has(action.parentId)
-      ) {
-        return state;
-      }
-      return {
-        ...state,
-        directories: {
-          ...state.directories,
-          [action.id]: { ...directory, parentId: action.parentId },
-        },
       };
     }
 
@@ -279,55 +444,79 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         historyIndex: state.historyIndex + 1,
       };
 
+    case 'CONFIRM_LEXICON_TERM':
+      return {
+        ...state,
+        lexicon: mergeCandidate(state.lexicon, action.candidate, Date.now()),
+      };
+
+    case 'DELETE_LEXICON_TERM': {
+      if (!state.lexicon[action.id]) return state;
+      const nextLexicon = { ...state.lexicon };
+      delete nextLexicon[action.id];
+      return { ...state, lexicon: nextLexicon };
+    }
+
+    case 'RECORD_LEXICON_MISFIRE': {
+      const term = state.lexicon[action.id];
+      if (!term) return state;
+      return {
+        ...state,
+        lexicon: {
+          ...state.lexicon,
+          [action.id]: { ...term, misfires: term.misfires + 1, lastUsedAt: Date.now() },
+        },
+      };
+    }
+
     default:
       return state;
   }
 }
 
-function collectDescendantDirectoryIds(
-  rootId: string,
-  directories: Record<string, Directory>
-): Set<string> {
-  const ids = new Set<string>();
+export function collectDirectoryCascade(
+  directories: Record<string, Directory>,
+  entries: Record<string, Entry>,
+  rootId: string
+): { directoryIds: Set<string>; entryIds: string[] } {
+  const directoryIds = new Set<string>([rootId]);
   const queue = [rootId];
   while (queue.length > 0) {
-    const current = queue.shift()!;
+    const parentId = queue.shift()!;
     for (const dir of Object.values(directories)) {
-      if (dir.parentId === current) {
-        ids.add(dir.id);
+      if (dir.parentId === parentId && !directoryIds.has(dir.id)) {
+        directoryIds.add(dir.id);
         queue.push(dir.id);
       }
     }
   }
-  return ids;
+  const entryIds = Object.values(entries)
+    .filter((entry) => entry.parentId !== null && directoryIds.has(entry.parentId))
+    .map((entry) => entry.id);
+  return { directoryIds, entryIds };
 }
 
 function mostRecentEntryId(entries: Record<string, Entry>): string | null {
-  const entriesByRecency = Object.values(entries).sort(
+  return Object.values(entries).sort(
     (left, right) => right.updatedAt - left.updatedAt,
-  );
-  return entriesByRecency[0]?.id ?? null;
+  )[0]?.id ?? null;
 }
 
 function createInitialState(): AppState {
-  const storedSettings = loadRefinementSettings();
+  const savedSettings = loadRefinementSettings();
   const entries = loadEntries();
   return {
     entries,
     directories: loadDirectories(),
     activeEntryId: mostRecentEntryId(entries),
     refinementSettings: {
-      genre: 'academic',
-      scale: 'sentence',
-      temperature: 0.2,
-      mode: 'faithful',
-      highFidelity: true,
-      autoRefine: true,
-      ...storedSettings,
+      ...DEFAULT_REFINEMENT_SETTINGS,
+      ...savedSettings,
     },
     errors: [],
     history: [],
     historyIndex: -1,
+    lexicon: loadLexicon(),
   };
 }
 
@@ -340,58 +529,36 @@ const AppContext = createContext<{
   setTitleEditingEntryId: Dispatch<SetStateAction<string | null>>;
 } | null>(null);
 
-function useDebouncedSaver<T>(
-  value: T,
-  save: (value: T) => void,
-  delayMs: number = 500
-): void {
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSavedRef = useRef<string>('');
-
-  useEffect(() => {
-    const serialized = JSON.stringify(value);
-    if (serialized === lastSavedRef.current) return;
-
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    timeoutRef.current = setTimeout(() => {
-      save(value);
-      lastSavedRef.current = serialized;
-      timeoutRef.current = null;
-    }, delayMs);
-
-    const handleBeforeUnload = () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        save(value);
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-    };
-  }, [value, save, delayMs]);
-}
-
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, reducerDispatch] = useReducer(appReducer, null, createInitialState);
   const [storageReady, setStorageReady] = useState(false);
   const [titleEditingEntryId, setTitleEditingEntryId] = useState<string | null>(null);
   const storageReadyRef = useRef(false);
   const pendingWorkspaceActionsRef = useRef<AppAction[]>([]);
+  const entriesPersist = useMemo(() => createDebouncedPersist(saveEntries), []);
+  const dirsPersist = useMemo(() => createDebouncedPersist(saveDirectories), []);
+  const lexiconPersist = useMemo(() => createDebouncedPersist(saveLexicon), []);
+  const settingsPersist = useMemo(
+    () => createDebouncedPersist(saveRefinementSettings),
+    [],
+  );
+  const voicePersist = useMemo(
+    () => createDebouncedPersist(saveVoiceProfile, 1_000),
+    [],
+  );
+
   const dispatch = useCallback<Dispatch<AppAction>>(
     (action) => {
-      if (
-        !storageReadyRef.current &&
-        action.type !== 'HYDRATE_WORKSPACE' &&
-        action.type !== 'SET_ERROR' &&
-        action.type !== 'CLEAR_ERROR' &&
-        action.type !== 'UPDATE_REFINEMENT_SETTINGS'
-      ) {
+      const isWorkspaceAction = ![
+        'HYDRATE_WORKSPACE',
+        'SET_ERROR',
+        'CLEAR_ERROR',
+        'UPDATE_REFINEMENT_SETTINGS',
+        'CONFIRM_LEXICON_TERM',
+        'DELETE_LEXICON_TERM',
+        'RECORD_LEXICON_MISFIRE',
+      ].includes(action.type);
+      if (!storageReadyRef.current && isWorkspaceAction) {
         pendingWorkspaceActionsRef.current.push(action);
       }
       reducerDispatch(action);
@@ -403,14 +570,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.entries],
   );
 
-  useDebouncedSaver(state.entries, saveEntries, 500);
-  useDebouncedSaver(state.directories, saveDirectories, 500);
-  useDebouncedSaver(voiceProfile, saveVoiceProfile, 1_000);
-  useDebouncedSaver(
-    state.refinementSettings,
-    saveRefinementSettings,
-    500,
-  );
+  useEffect(() => {
+    if (!storageReady) return;
+    entriesPersist.schedule(state.entries);
+    dirsPersist.schedule(state.directories);
+    voicePersist.schedule(voiceProfile);
+  }, [
+    dirsPersist,
+    entriesPersist,
+    state.directories,
+    state.entries,
+    storageReady,
+    voicePersist,
+    voiceProfile,
+  ]);
+
+  useEffect(() => {
+    lexiconPersist.schedule(state.lexicon);
+  }, [lexiconPersist, state.lexicon]);
+
+  useEffect(() => {
+    settingsPersist.schedule(state.refinementSettings);
+  }, [settingsPersist, state.refinementSettings]);
 
   useEffect(() => {
     let cancelled = false;
@@ -459,6 +640,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [state.entries, state.directories, storageReady, voiceProfile]);
 
+  // Synchronously flush local backups before iOS suspends or discards the tab.
+  useEffect(() => {
+    const flushAll = () => {
+      entriesPersist.flush();
+      dirsPersist.flush();
+      lexiconPersist.flush();
+      settingsPersist.flush();
+      voicePersist.flush();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushAll();
+    };
+    window.addEventListener('pagehide', flushAll);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', flushAll);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      flushAll();
+    };
+  }, [dirsPersist, entriesPersist, lexiconPersist, settingsPersist, voicePersist]);
+
   return (
     <AppContext.Provider
       value={{
@@ -481,25 +683,36 @@ export function useApp() {
   return ctx;
 }
 
-export function newEntry(parentId: string | null): Entry {
+export function newEntry(parentId: string | null, kind: EntryKind = 'writing'): Entry {
   return {
     id: crypto.randomUUID(),
     name: 'Untitled',
     titleSource: 'fallback',
     parentId,
+    kind,
+    order: 0,
     rawTranscript: '',
     refinedText: '',
     prosody: { ...defaultProsody },
     voiceConfig: { ...defaultVoiceConfig },
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    wordCount: 0,
+    recordedDurationMs: 0,
+    audioTakes: 0,
+    draftHistory: [],
   };
 }
 
-export function newDirectory(parentId: string | null, name: string): Directory {
+export function newDirectory(
+  parentId: string | null,
+  name: string,
+  kind: DirectoryKind = 'folder'
+): Directory {
   return {
     id: crypto.randomUUID(),
     name,
     parentId,
+    kind,
   };
 }

@@ -1,13 +1,19 @@
 import { useCallback } from 'react';
-import { useApp, newEntry, newDirectory } from '../context/AppContext';
-import type { Entry } from '../types/editor';
+import {
+  useApp,
+  newEntry,
+  newDirectory,
+  collectDirectoryCascade,
+} from '../context/AppContext';
+import { deleteRecordings, deleteRecordingsForEntries } from '../lib/audioStore';
+import type { Entry, EntryKind, DirectoryKind } from '../types/editor';
 
 export function useStorage() {
   const { state, dispatch } = useApp();
 
   const createEntry = useCallback(
-    (parentId: string | null) => {
-      const entry = newEntry(parentId);
+    (parentId: string | null, kind: EntryKind = 'writing') => {
+      const entry = newEntry(parentId, kind);
       dispatch({ type: 'CREATE_ENTRY', entry });
       return entry;
     },
@@ -23,6 +29,7 @@ export function useStorage() {
 
   const deleteEntry = useCallback(
     (id: string) => {
+      void deleteRecordings(id).catch(console.error);
       dispatch({ type: 'DELETE_ENTRY', id });
     },
     [dispatch]
@@ -37,16 +44,55 @@ export function useStorage() {
 
   const moveEntry = useCallback(
     (id: string, parentId: string | null) => {
-      dispatch({ type: 'MOVE_ENTRY', id, parentId });
+      dispatch({ type: 'MOVE_NODE', nodeType: 'entry', id, newParentId: parentId });
     },
     [dispatch]
   );
 
   const createDirectory = useCallback(
-    (parentId: string | null, name: string = 'New Folder') => {
-      const dir = newDirectory(parentId, name);
+    (
+      parentId: string | null,
+      name: string = 'New Folder',
+      kind: DirectoryKind = 'folder'
+    ) => {
+      const dir = newDirectory(parentId, name, kind);
       dispatch({ type: 'CREATE_DIRECTORY', directory: dir });
       return dir;
+    },
+    [dispatch]
+  );
+
+  const moveNode = useCallback(
+    (nodeType: 'entry' | 'directory', id: string, newParentId: string | null) => {
+      dispatch({ type: 'MOVE_NODE', nodeType, id, newParentId });
+    },
+    [dispatch]
+  );
+
+  const reorderEntry = useCallback(
+    (id: string, beforeId: string | null) => {
+      dispatch({ type: 'REORDER_ENTRY', id, beforeId });
+    },
+    [dispatch]
+  );
+
+  const setDirectoryKind = useCallback(
+    (id: string, kind: DirectoryKind) => {
+      dispatch({ type: 'SET_DIRECTORY_KIND', id, kind });
+    },
+    [dispatch]
+  );
+
+  const attachNote = useCallback(
+    (noteId: string, entryId: string) => {
+      dispatch({ type: 'ATTACH_NOTE', noteId, entryId });
+    },
+    [dispatch]
+  );
+
+  const detachNote = useCallback(
+    (noteId: string) => {
+      dispatch({ type: 'DETACH_NOTE', noteId });
     },
     [dispatch]
   );
@@ -60,14 +106,25 @@ export function useStorage() {
 
   const deleteDirectory = useCallback(
     (id: string) => {
+      const { entryIds } = collectDirectoryCascade(
+        state.directories,
+        state.entries,
+        id
+      );
+      void deleteRecordingsForEntries(entryIds).catch(console.error);
       dispatch({ type: 'DELETE_DIRECTORY', id });
     },
-    [dispatch]
+    [dispatch, state.directories, state.entries]
   );
 
   const moveDirectory = useCallback(
     (id: string, parentId: string | null) => {
-      dispatch({ type: 'MOVE_DIRECTORY', id, parentId });
+      dispatch({
+        type: 'MOVE_NODE',
+        nodeType: 'directory',
+        id,
+        newParentId: parentId,
+      });
     },
     [dispatch]
   );
@@ -87,5 +144,10 @@ export function useStorage() {
     renameDirectory,
     moveDirectory,
     deleteDirectory,
+    moveNode,
+    reorderEntry,
+    setDirectoryKind,
+    attachNote,
+    detachNote,
   };
 }

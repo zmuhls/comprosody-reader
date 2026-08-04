@@ -25,7 +25,8 @@ export function createFasterWhisperProvider(
 ): TranscriptionProvider {
   return {
     id: 'local',
-    async transcribe({ audioBuffer, model, keyterms }) {
+    async transcribe({ audioBuffer, model, keyterms, signal }) {
+      if (signal?.aborted) throw signal.reason;
       const selectedModel =
         model ||
         process.env.FASTER_WHISPER_MODEL ||
@@ -35,7 +36,9 @@ export function createFasterWhisperProvider(
       }
 
       const hotwords = keyterms?.length ? keyterms.join(', ') : undefined;
-      return workerTranscribe(audioBuffer, selectedModel, hotwords);
+      const result = await workerTranscribe(audioBuffer, selectedModel, hotwords);
+      if (signal?.aborted) throw signal.reason;
+      return result;
     },
   };
 }

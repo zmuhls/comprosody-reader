@@ -18,6 +18,7 @@ export interface TranscriptionInput {
   model?: string;
   contentType?: string;
   keyterms?: string[];
+  signal?: AbortSignal;
 }
 
 export interface TranscriptionProvider {

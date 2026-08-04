@@ -34,6 +34,7 @@ export interface TranscriptionOptions {
   model?: string;
   contentType?: string;
   keyterms?: string[];
+  signal?: AbortSignal;
 }
 
 export function resolveTranscriptionProvider(
@@ -75,6 +76,7 @@ export async function transcribe(
     model: options.model,
     contentType: options.contentType,
     keyterms: options.keyterms,
+    signal: options.signal,
   });
 }
 

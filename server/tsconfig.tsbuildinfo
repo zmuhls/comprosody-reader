@@ -1,1 +1,0 @@
-{"root":["./index.ts","./lib/claude.ts","./lib/transcribe.ts","./lib/whisperworker.ts","./routes/refine.ts","./routes/transcribe.ts"],"errors":true,"version":"5.9.3"}

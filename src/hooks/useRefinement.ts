@@ -12,13 +12,14 @@ import {
   buildSystemPrompt,
 } from '../lib/prompts';
 import { streamRefinement, generateVariantsApi } from '../lib/refinementApi';
+import { buildRefineContext } from '../lib/refineContext';
 import {
   recordImprovementEvent,
   wordCount,
   type ImprovementOutcome,
 } from '../lib/improvementMetrics';
 import { selectTranscriptionHints } from '../lib/voiceProfile';
-import type { RefinementMode, Variant } from '../types/llm';
+import type { RefinementMode, Variant, VariantError } from '../types/llm';
 import { VARIANT_TEMPERATURES } from '../constants';
 
 const MAX_REQUEST_VOCABULARY_HINTS = 12;
@@ -45,6 +46,7 @@ interface VariantRequest extends EntryActivation {
 
 interface VariantSet extends EntryActivation {
   variants: Variant[];
+  errors: VariantError[];
   sourceText: string;
   startedRevision: EntryRevisionSnapshot;
 }
@@ -405,6 +407,11 @@ export function useRefinement() {
             learnedVocabulary,
             sourceText,
           ),
+          refineContext: buildRefineContext(
+            entry.id,
+            state.entries,
+            state.directories,
+          ),
         },
       );
 
@@ -527,6 +534,7 @@ export function useRefinement() {
       learnedVocabulary,
       publishProposal,
       setError,
+      state.directories,
       state.entries,
       state.refinementSettings,
     ],
@@ -555,6 +563,11 @@ export function useRefinement() {
           mode: 'faithful',
           instruction: options.instruction,
           vocabularyHints: requestVocabulary,
+          refineContext: buildRefineContext(
+            activeEntry.id,
+            state.entries,
+            state.directories,
+          ),
         },
       );
 
@@ -690,6 +703,8 @@ export function useRefinement() {
       learnedVocabulary,
       publishProposal,
       setError,
+      state.directories,
+      state.entries,
       state.refinementSettings,
     ],
   );
@@ -714,6 +729,11 @@ export function useRefinement() {
           learnedVocabulary,
           sourceText,
         ),
+        refineContext: buildRefineContext(
+          activeEntry.id,
+          state.entries,
+          state.directories,
+        ),
       },
     );
 
@@ -729,7 +749,7 @@ export function useRefinement() {
     setVariantSet(null);
 
     try {
-      const results = await generateVariantsApi({
+      const { variants: results, errors } = await generateVariantsApi({
         systemPrompt,
         userMessage: sourceText,
         temperatures: VARIANT_TEMPERATURES.map(({ label, temperature }) => ({
@@ -753,6 +773,7 @@ export function useRefinement() {
             refinedText: activeEntry.refinedText,
           },
           variants: results as Variant[],
+          errors,
         });
         recordRefinementMetric({
           startedAt: metricStartedAt,
@@ -801,6 +822,8 @@ export function useRefinement() {
     activeEntry,
     learnedVocabulary,
     setError,
+    state.directories,
+    state.entries,
     state.refinementSettings,
   ]);
 
@@ -1041,6 +1064,7 @@ export function useRefinement() {
   );
 
   const variants = isCurrentActivation(variantSet) ? variantSet!.variants : [];
+  const variantErrors = isCurrentActivation(variantSet) ? variantSet!.errors : [];
   const isRefining = isCurrentActivation(refinementRequest);
   const isGeneratingVariants = isCurrentActivation(variantRequest);
   const currentProposal =
@@ -1053,6 +1077,7 @@ export function useRefinement() {
     refine,
     refineSelection,
     variants,
+    variantErrors,
     isGeneratingVariants,
     generateVariants,
     acceptVariant,

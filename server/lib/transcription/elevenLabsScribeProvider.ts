@@ -11,6 +11,7 @@ const ELEVENLABS_SPEECH_TO_TEXT_URL =
 const ELEVENLABS_REALTIME_SCRIBE_TOKEN_URL =
   'https://api.elevenlabs.io/v1/single-use-token/realtime_scribe';
 const DEFAULT_ELEVENLABS_SCRIBE_MODEL = 'scribe_v2';
+const DEFAULT_BATCH_TRANSCRIPTION_TIMEOUT_MS = 120_000;
 const DEFAULT_REALTIME_TOKEN_TIMEOUT_MS = 10_000;
 const MAX_REALTIME_TOKEN_CHARACTERS = 8_192;
 export const REALTIME_SCRIBE_TOKEN_TTL_SECONDS = 15 * 60;
@@ -21,6 +22,7 @@ interface ElevenLabsScribeProviderOptions {
   fetchImpl?: FetchImplementation;
   getApiKey?: () => string | undefined;
   getDefaultModel?: () => string | undefined;
+  timeoutMs?: number;
 }
 
 interface ElevenLabsRealtimeTokenClientOptions {
@@ -265,6 +267,7 @@ export function createElevenLabsScribeProvider(
   const getApiKey = options.getApiKey ?? (() => process.env.ELEVENLABS_API_KEY);
   const getDefaultModel =
     options.getDefaultModel ?? (() => process.env.ELEVENLABS_SCRIBE_MODEL);
+  const timeoutMs = options.timeoutMs ?? DEFAULT_BATCH_TRANSCRIPTION_TIMEOUT_MS;
 
   return {
     id: 'elevenlabs',
@@ -297,13 +300,25 @@ export function createElevenLabsScribeProvider(
       }
 
       let response: Response;
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      const signal = input.signal
+        ? AbortSignal.any([input.signal, timeoutSignal])
+        : timeoutSignal;
       try {
         response = await fetchImpl(ELEVENLABS_SPEECH_TO_TEXT_URL, {
           method: 'POST',
           headers: { 'xi-api-key': apiKey },
           body: form,
+          signal,
         });
       } catch (error) {
+        if (input.signal?.aborted) throw input.signal.reason;
+        if (timeoutSignal.aborted) {
+          throw new TranscriptionUpstreamError(
+            504,
+            'ElevenLabs transcription service timed out',
+          );
+        }
         const detail = error instanceof Error ? `: ${error.message}` : '';
         throw new TranscriptionUpstreamError(
           502,

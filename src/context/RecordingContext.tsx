@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import {
   createContext,
   useContext,
@@ -21,8 +20,6 @@ export type RecordingAction =
   | { type: 'STOP_RECORDING' }
   | { type: 'UPDATE_INTERIM'; text: string }
   | { type: 'APPEND_FINAL'; text: string }
-  | { type: 'SET_TRANSCRIPT'; text: string }
-  | { type: 'ADD_WORD_TIMESTAMP'; word: string; start: number; end: number }
   | { type: 'ADD_PAUSE'; start: number; end: number }
   | { type: 'ADD_VOLUME_SAMPLE'; value: number }
   | { type: 'UPDATE_PROSODY'; prosody: ProsodyDiagnostics }
@@ -42,7 +39,6 @@ export function recordingReducer(
           startedAt: action.startedAt,
           interimTranscript: '',
           finalTranscript: '',
-          wordTimestamps: [],
           pauses: [],
           volumeSamples: [],
         },
@@ -69,31 +65,6 @@ export function recordingReducer(
             ? state.session.finalTranscript + ' ' + action.text
             : action.text,
           interimTranscript: '',
-        },
-      };
-
-    case 'SET_TRANSCRIPT':
-      if (!state.session) return state;
-      return {
-        ...state,
-        session: {
-          ...state.session,
-          finalTranscript: action.text,
-          interimTranscript: '',
-          wordTimestamps: [],
-        },
-      };
-
-    case 'ADD_WORD_TIMESTAMP':
-      if (!state.session) return state;
-      return {
-        ...state,
-        session: {
-          ...state.session,
-          wordTimestamps: [
-            ...state.session.wordTimestamps,
-            { word: action.word, start: action.start, end: action.end },
-          ],
         },
       };
 

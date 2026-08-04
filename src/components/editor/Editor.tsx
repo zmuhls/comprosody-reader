@@ -27,6 +27,7 @@ import type { Entry } from '../../types/editor';
 import { LinkedPassages } from '../library/LinkedPassages';
 import { SpeechControl } from '../speech/SpeechControl';
 import { useAutomaticNoteTitle } from '../../hooks/useAutomaticNoteTitle';
+import { AudioTakes } from './AudioTakes';
 
 interface Props {
   backgroundLimitMs: number;
@@ -168,11 +169,15 @@ export function DocumentTitle({
 }
 
 export function SourceTranscriptDrawer({
+  audioTakes,
+  entryId,
   interimTranscript,
   isOpen,
   onClose,
   rawTranscript,
 }: {
+  audioTakes?: number;
+  entryId: string;
   interimTranscript: string;
   isOpen: boolean;
   onClose: () => void;
@@ -204,6 +209,7 @@ export function SourceTranscriptDrawer({
         {rawTranscript || 'No transcript has been recorded yet.'}
         {interimTranscript ? ` ${interimTranscript}` : ''}
       </div>
+      <AudioTakes entryId={entryId} audioTakes={audioTakes} />
     </aside>
   );
 }
@@ -534,7 +540,7 @@ export const Editor = memo(function Editor({
         </button>
         <div>
           <p>A quiet place for spoken thought.</p>
-          <button onClick={() => createEntry(null)} type="button">
+          <button onClick={() => createEntry(null, 'note')} type="button">
             <Icon name="plus" size={15} />
             New note
           </button>
@@ -751,6 +757,8 @@ export const Editor = memo(function Editor({
         </article>
 
         <SourceTranscriptDrawer
+          audioTakes={activeEntry.audioTakes}
+          entryId={activeEntry.id}
           interimTranscript={interimTranscript}
           isOpen={isSourceOpen}
           onClose={() => setIsSourceOpen(false)}

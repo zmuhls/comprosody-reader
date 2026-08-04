@@ -25,3 +25,9 @@ server-dist
 *.sln
 *.sw?
 test-results/
+
+# Claude Code — per-user overrides and runtime state
+.claude/settings.local.json
+.claude/state/
+*.tsbuildinfo
+.claude/worktrees/

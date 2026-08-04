@@ -135,7 +135,10 @@ export async function generateVariantsApi(params: {
   userMessage: string;
   temperatures: Array<{ label: string; temperature: number }>;
   signal?: AbortSignal;
-}): Promise<Array<{ label: string; temperature: number; text: string }>> {
+}): Promise<{
+  variants: Array<{ label: 'cool' | 'warm' | 'hot'; temperature: number; text: string }>;
+  errors: Array<{ label: 'cool' | 'warm' | 'hot'; error: string }>;
+}> {
   const response = await fetch(cadenceApiUrl('/variants'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -149,5 +152,8 @@ export async function generateVariantsApi(params: {
   }
 
   const data = await response.json();
-  return data.variants;
+  return {
+    variants: Array.isArray(data.variants) ? data.variants : [],
+    errors: Array.isArray(data.errors) ? data.errors : [],
+  };
 }

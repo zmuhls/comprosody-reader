@@ -2,6 +2,7 @@ import Dexie, { type EntityTable, type IDType } from 'dexie';
 import type { Directory, Entry } from '../types/editor';
 import type { PassageLink } from '../types/library';
 import type { VoiceProfile } from './voiceProfile';
+import { normalizeDirectory, normalizeEntry } from './storage';
 
 interface DatabaseMeta {
   key: string;
@@ -95,10 +96,19 @@ export async function hydrateWorkspaceDatabase(
         });
       }
 
-      const [entries, directories] = await Promise.all([
+      const [storedEntries, storedDirectories] = await Promise.all([
         cadenceDatabase.entries.toArray(),
         cadenceDatabase.directories.toArray(),
       ]);
+      // IndexedDB predates the v3 organization and automatic-title fields.
+      // Normalize every row on hydration and write the upgraded shape back so
+      // subsequent launches never operate on a mixed schema.
+      const entries = storedEntries.map((entry) => normalizeEntry(entry));
+      const directories = storedDirectories.map((directory) =>
+        normalizeDirectory(directory),
+      );
+      if (entries.length) await cadenceDatabase.entries.bulkPut(entries);
+      if (directories.length) await cadenceDatabase.directories.bulkPut(directories);
       return {
         entries: recordById(entries),
         directories: recordById(directories),

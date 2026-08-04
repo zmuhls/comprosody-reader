@@ -4,6 +4,7 @@ import {
   streamRefinement,
   refineComplete,
 } from '../lib/ollama.js';
+import { HttpError, reqNumber, reqObject, reqString } from '../lib/validate.js';
 
 export const refineRouter = Router();
 
@@ -21,37 +22,31 @@ interface VariantsBody {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-function validateRefineBody(body: unknown): body is RefineBody {
-  if (typeof body !== 'object' || body === null) return false;
-  const b = body as Partial<RefineBody>;
-  return (
-    typeof b.systemPrompt === 'string' &&
-    typeof b.userMessage === 'string' &&
-    typeof b.temperature === 'number' &&
-    b.temperature >= 0 &&
-    b.temperature <= 1
-  );
+function parseRefineBody(raw: unknown): RefineBody {
+  const body = reqObject(raw);
+  return {
+    systemPrompt: reqString(body, 'systemPrompt', 50_000),
+    userMessage: reqString(body, 'userMessage', 200_000),
+    temperature: reqNumber(body, 'temperature', 0, 1),
+  };
 }
 
-function validateVariantsBody(body: unknown): body is VariantsBody {
-  if (typeof body !== 'object' || body === null) return false;
-  const b = body as Partial<VariantsBody>;
-  if (
-    typeof b.systemPrompt !== 'string' ||
-    typeof b.userMessage !== 'string' ||
-    !Array.isArray(b.temperatures)
-  ) {
-    return false;
+function parseVariantsBody(raw: unknown): VariantsBody {
+  const body = reqObject(raw);
+  const systemPrompt = reqString(body, 'systemPrompt', 50_000);
+  const userMessage = reqString(body, 'userMessage', 200_000);
+  const items = body.temperatures;
+  if (!Array.isArray(items) || items.length < 1 || items.length > 5) {
+    throw new HttpError(400, 'temperatures must be an array of 1 to 5 items');
   }
-  return b.temperatures.every(
-    (t) =>
-      typeof t === 'object' &&
-      t !== null &&
-      typeof (t as { label?: unknown }).label === 'string' &&
-      typeof (t as { temperature?: unknown }).temperature === 'number' &&
-      (t as { temperature: number }).temperature >= 0 &&
-      (t as { temperature: number }).temperature <= 1
-  );
+  const temperatures = items.map((item) => {
+    const entry = reqObject(item, 'each temperatures item must be an object');
+    return {
+      label: reqString(entry, 'label', 32),
+      temperature: reqNumber(entry, 'temperature', 0, 1),
+    };
+  });
+  return { systemPrompt, userMessage, temperatures };
 }
 
 function createAbortController(timeoutMs: number): AbortController {
@@ -91,19 +86,17 @@ function classifyError(err: unknown): { status: number; message: string } {
 }
 
 refineRouter.post('/refine', async (req, res) => {
-  if (!validateRefineBody(req.body)) {
-    res.status(400).json({ error: 'Invalid request body' });
-    return;
-  }
-
-  const { systemPrompt, userMessage, temperature } = req.body;
+  const { systemPrompt, userMessage, temperature } = parseRefineBody(req.body);
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
 
   const controller = createAbortController(DEFAULT_TIMEOUT_MS);
   const stopWatching = abortOnDisconnect(req, res, controller);
+  let chunks = 0;
 
   try {
     for await (const chunk of streamRefinement({
@@ -112,9 +105,14 @@ refineRouter.post('/refine', async (req, res) => {
       temperature,
       signal: controller.signal,
     })) {
+      chunks += 1;
       res.write(`data: ${JSON.stringify({ text: chunk })}\n\n`);
     }
-    res.write('data: [DONE]\n\n');
+    if (chunks === 0) {
+      res.write(`data: ${JSON.stringify({ error: 'Model returned an empty refinement' })}\n\n`);
+    } else {
+      res.write('data: [DONE]\n\n');
+    }
   } catch (err) {
     if (!res.destroyed && !res.writableEnded) {
       const { message } = classifyError(err);
@@ -128,12 +126,7 @@ refineRouter.post('/refine', async (req, res) => {
 });
 
 refineRouter.post('/refine/complete', async (req, res) => {
-  if (!validateRefineBody(req.body)) {
-    res.status(400).json({ error: 'Invalid request body' });
-    return;
-  }
-
-  const { systemPrompt, userMessage, temperature } = req.body;
+  const { systemPrompt, userMessage, temperature } = parseRefineBody(req.body);
   const controller = createAbortController(DEFAULT_TIMEOUT_MS);
   const stopWatching = abortOnDisconnect(req, res, controller);
 
@@ -152,12 +145,7 @@ refineRouter.post('/refine/complete', async (req, res) => {
 });
 
 refineRouter.post('/variants', async (req, res) => {
-  if (!validateVariantsBody(req.body)) {
-    res.status(400).json({ error: 'Invalid request body' });
-    return;
-  }
-
-  const { systemPrompt, userMessage, temperatures } = req.body;
+  const { systemPrompt, userMessage, temperatures } = parseVariantsBody(req.body);
   const controllers: AbortController[] = [];
   const disconnectController = new AbortController();
   const stopWatching = abortOnDisconnect(req, res, disconnectController);
@@ -168,20 +156,35 @@ refineRouter.post('/variants', async (req, res) => {
   );
 
   try {
-    // Sequential generation to avoid tripling rate-limit exposure
+    // Sequential generation bounds provider pressure while still returning any
+    // successful alternatives when one temperature fails.
     const results: Array<{ label: string; temperature: number; text: string }> = [];
+    const errors: Array<{ label: string; error: string }> = [];
     for (const { label, temperature } of temperatures) {
       const controller = createAbortController(DEFAULT_TIMEOUT_MS);
       controllers.push(controller);
-      const text = await refineComplete({
-        systemPrompt,
-        userMessage,
-        temperature,
-        signal: controller.signal,
-      });
-      results.push({ label, temperature, text });
+      try {
+        const text = await refineComplete({
+          systemPrompt,
+          userMessage,
+          temperature,
+          signal: controller.signal,
+        });
+        results.push({ label, temperature, text });
+      } catch (error) {
+        errors.push({
+          label,
+          error: classifyError(error).message,
+        });
+      } finally {
+        controller.abort();
+      }
     }
-    res.json({ variants: results });
+    if (results.length === 0) {
+      res.status(502).json({ error: errors[0]?.error ?? 'All variant generations failed' });
+      return;
+    }
+    res.json({ variants: results, errors });
   } catch (err) {
     controllers.forEach((c) => c.abort());
     if (!res.destroyed && !res.writableEnded) {

@@ -29,6 +29,8 @@ function makeEntry(
     id,
     name: id,
     parentId: null,
+    kind: 'writing',
+    order: 0,
     rawTranscript,
     refinedText: '',
     prosody: { ...defaultProsody },

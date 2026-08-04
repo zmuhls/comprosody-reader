@@ -12,19 +12,14 @@ export interface VoiceConfig {
   cadenceAsGuide: boolean;
 }
 
-export interface WordTimestamp {
-  word: string;
-  start: number;
-  end: number;
-}
-
 export interface RecordingSession {
   startedAt: number;
   interimTranscript: string;
   finalTranscript: string;
-  wordTimestamps: WordTimestamp[];
   pauses: Array<{ start: number; end: number }>;
   volumeSamples: number[];
+  /** Legacy/local timing data; optional so older sessions remain readable. */
+  wordTimestamps?: Array<{ word: string; start: number; end: number }>;
 }
 
 export const defaultVoiceConfig: VoiceConfig = {

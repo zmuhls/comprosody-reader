@@ -8,6 +8,8 @@ function makeEntry(name: string): Entry {
     id: 'entry-1',
     name,
     parentId: null,
+    kind: 'note',
+    order: 0,
     rawTranscript: '',
     refinedText: '',
     prosody: { ...defaultProsody },
@@ -106,6 +108,7 @@ describe('SourceTranscriptDrawer', () => {
     const onClose = vi.fn();
     const { rerender } = render(
       <SourceTranscriptDrawer
+        entryId="entry-1"
         interimTranscript=""
         isOpen={false}
         onClose={onClose}
@@ -118,6 +121,7 @@ describe('SourceTranscriptDrawer', () => {
 
     rerender(
       <SourceTranscriptDrawer
+        entryId="entry-1"
         interimTranscript="continuing"
         isOpen
         onClose={onClose}

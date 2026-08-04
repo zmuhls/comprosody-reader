@@ -23,16 +23,22 @@ function declarationsFor(...selectors: string[]) {
   return rules.map((rule) => rule[2]).join('\n');
 }
 
-function expectFortyFourPixelTarget(...selectors: string[]) {
+function expectRoomyTouchTarget(...selectors: string[]) {
   const declarations = declarationsFor(...selectors);
-  expect(declarations).toContain('min-width: 44px');
-  expect(declarations).toContain('min-height: 44px');
+  const minWidths = [...declarations.matchAll(/min-width:\s*(\d+)px/g)].map(
+    (match) => Number(match[1]),
+  );
+  const minHeights = [...declarations.matchAll(/min-height:\s*(\d+)px/g)].map(
+    (match) => Number(match[1]),
+  );
+  expect(Math.max(...minWidths)).toBeGreaterThanOrEqual(48);
+  expect(Math.max(...minHeights)).toBeGreaterThanOrEqual(48);
 }
 
 describe('mobile touch target stylesheet contract', () => {
-  it('keeps compact icon controls inside 44px mobile hit areas', () => {
+  it('keeps icon controls inside roomy 48px mobile hit areas', () => {
     expect(mobileStart).toBeGreaterThanOrEqual(0);
-    expectFortyFourPixelTarget(
+    expectRoomyTouchTarget(
       '.sidebar-header .icon-button',
       '.entry-folder-action',
       '.tree-rename-action',
@@ -43,13 +49,13 @@ describe('mobile touch target stylesheet contract', () => {
   });
 
   it('keeps the refinement, recording, and provider controls touch-sized', () => {
-    expectFortyFourPixelTarget('.refinement-send');
-    expectFortyFourPixelTarget('.mini-switch');
-    expectFortyFourPixelTarget('.record-button');
-    expectFortyFourPixelTarget('.refinement-guidance button');
+    expectRoomyTouchTarget('.refinement-send');
+    expectRoomyTouchTarget('.mini-switch');
+    expectRoomyTouchTarget('.record-button');
+    expectRoomyTouchTarget('.refinement-guidance button');
 
     expect(declarationsFor('.refinement-input-shell', '.text-action')).toContain(
-      'min-height: 44px',
+      'min-height: 48px',
     );
     expect(
       declarationsFor(
@@ -58,15 +64,15 @@ describe('mobile touch target stylesheet contract', () => {
         '.refinement-reject',
         '.refinement-stop',
       ),
-    ).toContain('min-height: 44px');
-    expect(declarationsFor('.provider-trigger')).toContain('min-height: 44px');
+    ).toContain('min-height: 48px');
+    expect(declarationsFor('.provider-trigger')).toContain('min-height: 48px');
     expect(declarationsFor('.background-limit-trigger')).toContain(
-      'min-height: 44px',
+      'min-height: 48px',
     );
   });
 
-  it('keeps title and full-row targets at least 44px high', () => {
-    expect(declarationsFor('.document-title')).toContain('min-height: 44px');
+  it('keeps title and full-row targets at least 48px high', () => {
+    expect(declarationsFor('.document-title')).toContain('min-height: 50px');
     expect(
       declarationsFor(
         '.entry-primary-action',
@@ -75,7 +81,7 @@ describe('mobile touch target stylesheet contract', () => {
         '.breadcrumb',
         '.mobile-workspace-switch button',
       ),
-    ).toContain('min-height: 44px');
+    ).toContain('min-height: 48px');
   });
 
   it('keeps the microphone fully inside its keyboard-open dock', () => {
@@ -89,9 +95,9 @@ describe('mobile touch target stylesheet contract', () => {
       'html[data-virtual-keyboard="open"] .record-button',
     );
 
-    expect(dock).toContain('height: 82px');
-    expect(control).toContain('top: 8px');
-    expect(button).toContain('height: 50px');
-    expect(8 + 50).toBeLessThan(82);
+    expect(dock).toContain('height: 100px');
+    expect(control).toContain('top: 12px');
+    expect(button).toContain('height: 56px');
+    expect(12 + 56).toBeLessThan(100);
   });
 });

@@ -44,6 +44,8 @@ function makeEntry(id: string, text: string): Entry {
     id,
     name: `Note ${id}`,
     parentId: null,
+    kind: 'note',
+    order: 0,
     rawTranscript: '',
     refinedText: text,
     prosody: { ...defaultProsody },
@@ -68,6 +70,7 @@ function makeState(entries: Record<string, Entry>): AppState {
     errors: [],
     history: [],
     historyIndex: -1,
+    lexicon: {},
   };
 }
 
@@ -197,7 +200,10 @@ describe('useRefinement async note integrity', () => {
   });
 
   it('hides variants on switch and refuses a stale accept callback', async () => {
-    services.generateVariantsApi.mockResolvedValueOnce(variants);
+    services.generateVariantsApi.mockResolvedValueOnce({
+      variants,
+      errors: [],
+    });
     const { result, rerender } = renderHook(() => useRefinement());
 
     await act(async () => {
@@ -218,7 +224,7 @@ describe('useRefinement async note integrity', () => {
   });
 
   it('discards variants that arrive after a switch, including after returning', async () => {
-    const response = deferred<Variant[]>();
+    const response = deferred<{ variants: Variant[]; errors: [] }>();
     services.generateVariantsApi.mockReturnValueOnce(response.promise);
     const { result, rerender } = renderHook(() => useRefinement());
     let generationPromise!: Promise<void>;
@@ -233,7 +239,7 @@ describe('useRefinement async note integrity', () => {
     rerender();
 
     await act(async () => {
-      response.resolve(variants);
+      response.resolve({ variants, errors: [] });
       await generationPromise;
     });
 

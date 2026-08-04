@@ -56,6 +56,7 @@ function controller(
     retryProposal: vi.fn().mockResolvedValue('retried'),
     streamingText: current?.text ?? '',
     variants: [],
+    variantErrors: [],
   };
 }
 

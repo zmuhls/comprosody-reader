@@ -10,7 +10,7 @@ export const TRANSCRIPTION_PROVIDERS: ReadonlyArray<{
     id: 'local',
     label: 'Private Whisper',
     shortLabel: 'Private · Whisper',
-    privacy: 'Audio is sent to your private Cadence service and is not retained.',
+    privacy: 'Audio is sent to your private Comprosody service and is not retained.',
   },
   {
     id: 'elevenlabs',

@@ -7,7 +7,6 @@ import {
 } from 'react';
 import type { RealtimeConnection } from '@elevenlabs/client';
 import { useApp } from '../context/AppContext';
-import { useRecording } from '../context/RecordingContext';
 import {
   recordImprovementEvent,
   wordCount,
@@ -163,7 +162,6 @@ async function requestRealtimeToken(
 
 export function useRealtimeTranscription() {
   const { dispatch: appDispatch } = useApp();
-  const { dispatch: recordingDispatch } = useRecording();
   const [status, setStatus] =
     useState<RealtimeTranscriptionStatus>('idle');
   const [partialTranscript, setPartialTranscript] = useState('');
@@ -443,7 +441,6 @@ export function useRealtimeTranscription() {
     setStatus('idle');
 
     if (!shouldFallback) {
-      recordingDispatch({ type: 'SET_TRANSCRIPT', text: transcript });
       void recordImprovementEvent({
         eventType: 'transcription',
         outcome: 'succeeded',
@@ -463,7 +460,7 @@ export function useRealtimeTranscription() {
     }
 
     return { shouldFallback, transcript };
-  }, [recordingDispatch, stopCapture]);
+  }, [stopCapture]);
 
   const cancel = useCallback(async () => {
     const session = activeRef.current;
