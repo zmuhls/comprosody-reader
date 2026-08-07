@@ -40,9 +40,12 @@ interface Props {
   onBackgroundLimitChange: (milliseconds: number) => void;
   onProviderChange: (provider: TranscriptionProviderId) => void;
   onStart: () => void;
+  /** Creates a fresh entry and begins recording into it in one action. */
+  onStartNewDictation: () => void;
   onStop: () => void;
   prosody: ProsodyDiagnostics;
   provider: TranscriptionProviderId;
+  publicationId?: string | null;
   refinement: RefinementController;
   startedAt?: number;
 }
@@ -225,9 +228,11 @@ export const Editor = memo(function Editor({
   onBackgroundLimitChange,
   onProviderChange,
   onStart,
+  onStartNewDictation,
   onStop,
   prosody,
   provider,
+  publicationId = null,
   refinement,
   startedAt,
 }: Props) {
@@ -540,15 +545,32 @@ export const Editor = memo(function Editor({
           onClick={(event) => onOpenSidebar(event.currentTarget)}
           type="button"
         >
-          <Icon name="menu" size={17} />
-          <span>Notes</span>
+          <Icon name="menu" size={16} />
+          <span>Workspace</span>
         </button>
         <div>
           <h1>A quiet place for spoken thought.</h1>
-          <button onClick={() => createEntry(null, 'note')} type="button">
-            <Icon name="plus" size={15} />
-            New note
-          </button>
+          <div className="editor-empty-actions">
+            <button
+              className="is-primary"
+              onClick={() => createEntry(null, 'writing', publicationId)}
+              type="button"
+            >
+              <Icon name="plus" size={14} />
+              New Writing
+            </button>
+            <button
+              onClick={() => createEntry(null, 'note', publicationId)}
+              type="button"
+            >
+              <Icon name="plus" size={14} />
+              New Note
+            </button>
+            <button onClick={onStartNewDictation} type="button">
+              <Icon name="mic" size={14} />
+              Start dictating
+            </button>
+          </div>
         </div>
       </main>
     );
@@ -567,7 +589,7 @@ export const Editor = memo(function Editor({
       <div className="editor-shell">
       <div className="editor-topbar">
         <button
-          aria-label="Open note directory"
+          aria-label="Open workspace menu"
           className="icon-button mobile-directory-trigger"
           onClick={(event) => onOpenSidebar(event.currentTarget)}
           type="button"
@@ -600,6 +622,42 @@ export const Editor = memo(function Editor({
         </span>
 
         <div className="topbar-actions">
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger
+              aria-label="Create new writing or note"
+              className="icon-button topbar-create-trigger"
+            >
+              <Icon name="plus" size={16} />
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content align="end" className="ui-menu" sideOffset={7}>
+                <DropdownMenu.Item
+                  className="ui-menu-item"
+                  onSelect={() => createEntry(null, 'writing', publicationId)}
+                >
+                  <Icon name="file" size={14} />
+                  New Writing
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  className="ui-menu-item"
+                  onSelect={() => createEntry(null, 'note', publicationId)}
+                >
+                  <Icon name="plus" size={14} />
+                  New Note
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator className="ui-menu-separator" />
+                <DropdownMenu.Item
+                  className="ui-menu-item"
+                  disabled={isRecording || isTranscribing}
+                  onSelect={onStartNewDictation}
+                >
+                  <Icon name="mic" size={14} />
+                  New dictation
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+
           <Tooltip.Root>
             <Tooltip.Trigger asChild>
               <Dialog.Trigger asChild>

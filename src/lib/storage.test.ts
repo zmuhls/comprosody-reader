@@ -213,7 +213,7 @@ describe('saveEntries', () => {
 
   it('writes the schema version alongside entries', () => {
     saveEntries({});
-    expect(localStorage.getItem(STORAGE_KEYS.schemaVersion)).toBe('3');
+    expect(localStorage.getItem(STORAGE_KEYS.schemaVersion)).toBe('4');
     expect(localStorage.getItem(STORAGE_KEYS.entries)).toBe('{}');
   });
 
@@ -316,5 +316,44 @@ describe('schema v3 migration', () => {
     expect(dirs.d1.kind).toBe('folder');
     expect(dirs.d2.kind).toBe('book');
     expect(dirs.d3.kind).toBe('folder');
+  });
+});
+
+describe('publication scoping (schema v4)', () => {
+  it('preserves the publication an entry was written against', () => {
+    expect(
+      normalizeEntry({ id: 'a', publicationId: 'solaris' }).publicationId,
+    ).toBe('solaris');
+  });
+
+  it('leaves pre-v4 entries free-standing rather than inventing a book', () => {
+    const migrated = normalizeEntry({ id: 'a', name: 'Old note' });
+    expect('publicationId' in migrated).toBe(false);
+  });
+
+  it('ignores a blank or non-string publication', () => {
+    expect('publicationId' in normalizeEntry({ id: 'a', publicationId: '' })).toBe(
+      false,
+    );
+    expect(
+      'publicationId' in
+        normalizeEntry({ id: 'a', publicationId: 7 } as unknown as Partial<Entry> & {
+          id: string;
+        }),
+    ).toBe(false);
+  });
+
+  it('keeps a scoped entry out of the free-standing set and vice versa', () => {
+    const scoped = normalizeEntry({ id: 'a', publicationId: 'solaris' });
+    const free = normalizeEntry({ id: 'b' });
+    const forSolaris = [scoped, free].filter(
+      (entry) => (entry.publicationId ?? null) === 'solaris',
+    );
+    const freeStanding = [scoped, free].filter(
+      (entry) => (entry.publicationId ?? null) === null,
+    );
+
+    expect(forSolaris.map((entry) => entry.id)).toEqual(['a']);
+    expect(freeStanding.map((entry) => entry.id)).toEqual(['b']);
   });
 });

@@ -12,8 +12,12 @@ export function useStorage() {
   const { state, dispatch } = useApp();
 
   const createEntry = useCallback(
-    (parentId: string | null, kind: EntryKind = 'writing') => {
-      const entry = newEntry(parentId, kind);
+    (
+      parentId: string | null,
+      kind: EntryKind = 'writing',
+      publicationId?: string | null,
+    ) => {
+      const entry = newEntry(parentId, kind, publicationId);
       dispatch({ type: 'CREATE_ENTRY', entry });
       return entry;
     },

@@ -11,7 +11,9 @@ import { useRecording } from '../../context/RecordingContext';
 import { useAudioAnalyser } from '../../hooks/useAudioAnalyser';
 import { useMediaRecorder } from '../../hooks/useMediaRecorder';
 import { useRealtimeTranscription } from '../../hooks/useRealtimeTranscription';
+import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 import { useTranscription } from '../../hooks/useTranscription';
+import { newEntry } from '../../lib/entries';
 import { useProsody } from '../../hooks/useProsody';
 import { useRefinement } from '../../hooks/useRefinement';
 import {
@@ -33,6 +35,8 @@ import {
 
 interface MainPanelProps {
   onOpenSidebar: (returnFocusTarget?: HTMLElement) => void;
+  /** Tags dictation started from here to the book being read. */
+  publicationId?: string | null;
 }
 
 const PROVIDER_STORAGE_KEY = 'cadence:transcription-provider';
@@ -71,7 +75,10 @@ function initialProvider(): TranscriptionProviderId {
   }
 }
 
-export function MainPanel({ onOpenSidebar }: MainPanelProps) {
+export function MainPanel({
+  onOpenSidebar,
+  publicationId = null,
+}: MainPanelProps) {
   const { state, dispatch, voiceProfile } = useApp();
   const { state: recordingState, dispatch: recordingDispatch } = useRecording();
   const [provider, setProvider] = useState<TranscriptionProviderId>(initialProvider);
@@ -82,6 +89,10 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
   const audio = useAudioAnalyser();
   const recorder = useMediaRecorder();
   const realtime = useRealtimeTranscription();
+  // The private default (Faster Whisper) can only transcribe a finished file, so
+  // the browser recognizer carries the on-screen stream while it records. Its
+  // text is display-only; the batch transcript remains authoritative on stop.
+  const speech = useSpeechRecognition();
   const realtimeError = realtime.liveError;
   const realtimeStatus = realtime.status;
   const surfaceRealtimeError = realtime.surfaceError;
@@ -111,6 +122,9 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
   const recordingTargetRef = useRef<RecordingTarget | null>(null);
   const privateWorkEpochRef = useRef(0);
   const stateRef = useRef(state);
+  const handleStartRef = useRef<(entryId?: unknown) => Promise<void>>(
+    async () => undefined,
+  );
   const handleStopRef = useRef<() => Promise<void>>(async () => undefined);
   const stopInFlightRef = useRef(false);
   const backgroundedAtRef = useRef<number | null>(null);
@@ -153,6 +167,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
       cancelTranscription();
       recorder.cancel();
       refinement.cancel();
+      speech.stop();
       void realtime.cancel();
       audio.stop();
       stopMediaStream(streamRef.current);
@@ -172,6 +187,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     recordingDispatch,
     realtime,
     refinement,
+    speech,
   ]);
 
   const setRecordingError = useCallback(
@@ -191,9 +207,13 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     [dispatch],
   );
 
-  const handleStart = useCallback(async () => {
+  const handleStart = useCallback(async (entryIdOverride?: unknown) => {
+    // RecordButton wires this straight to onClick, so the first argument is a
+    // MouseEvent unless an explicit entry id was passed. Only a string counts.
+    const entryId =
+      typeof entryIdOverride === 'string' ? entryIdOverride : activeEntry?.id;
     if (
-      !activeEntry ||
+      !entryId ||
       recordingTargetRef.current ||
       recordingState.isRecording ||
       isTranscribing
@@ -202,7 +222,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     }
 
     const target: RecordingTarget = {
-      entryId: activeEntry.id,
+      entryId,
       epoch: privateWorkEpochRef.current,
       provider,
       keyterms: [...keyterms],
@@ -234,6 +254,8 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
       recorder.start(stream);
       if (target.provider === 'elevenlabs') {
         void realtime.start(stream, target.keyterms);
+      } else {
+        speech.start();
       }
     } catch (error) {
       audio.stop();
@@ -256,6 +278,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     recordingDispatch,
     recordingState.isRecording,
     setRecordingError,
+    speech,
   ]);
 
   const handleStop = useCallback(async () => {
@@ -270,6 +293,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
         : 0;
       const capturedProsody = { ...prosody };
       const capturedVoiceConfig = { ...recordingState.voiceConfig };
+      speech.stop();
       recordingDispatch({ type: 'STOP_RECORDING' });
       let audioBlob: Blob;
       let realtimeTranscript = '';
@@ -467,12 +491,14 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     recordingState,
     refinement,
     setRecordingError,
+    speech,
     transcribe,
   ]);
 
   useLayoutEffect(() => {
+    handleStartRef.current = handleStart;
     handleStopRef.current = handleStop;
-  }, [handleStop]);
+  }, [handleStart, handleStop]);
 
   useEffect(() => {
     if (!recordingState.isRecording) {
@@ -543,6 +569,34 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
     return () => clearTimeout(timer);
   }, [backgroundNotice, isTranscribing, realtime.status, recordingState.isRecording]);
 
+  // Dictation should not require picking a destination first. The entry is
+  // created, and recording starts on the render that first observes it, so the
+  // target is guaranteed to exist by the time the stream opens.
+  const pendingDictationRef = useRef<string | null>(null);
+  const startNewDictation = useCallback(() => {
+    if (recordingState.isRecording || isTranscribing) return;
+    const entry = newEntry(null, 'writing', publicationId);
+    pendingDictationRef.current = entry.id;
+    dispatch({ type: 'CREATE_ENTRY', entry });
+  }, [dispatch, isTranscribing, publicationId, recordingState.isRecording]);
+
+  useEffect(() => {
+    const pendingId = pendingDictationRef.current;
+    if (!pendingId || !state.entries[pendingId]) return;
+    pendingDictationRef.current = null;
+    void handleStartRef.current(pendingId);
+  }, [state.entries]);
+
+  const liveTranscript =
+    provider === 'elevenlabs'
+      ? realtime.liveTranscript
+      : [
+          recordingState.session?.finalTranscript ?? '',
+          recordingState.session?.interimTranscript ?? '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+
   const updateBackgroundLimit = useCallback((milliseconds: number) => {
     const normalized = normalizeBackgroundRecordingLimit(milliseconds);
     setBackgroundLimitMs(normalized);
@@ -560,7 +614,7 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
         backgroundNotice={backgroundNotice}
         key={state.activeEntryId ?? 'no-active-entry'}
         drawWaveform={audio.drawWaveform}
-        interimTranscript={realtime.liveTranscript}
+        interimTranscript={liveTranscript}
         isRecording={recordingState.isRecording}
         isTranscribing={
           isTranscribing || realtime.status === 'finalizing'
@@ -569,7 +623,9 @@ export function MainPanel({ onOpenSidebar }: MainPanelProps) {
         onOpenSidebar={onOpenSidebar}
         onProviderChange={setProvider}
         onStart={handleStart}
+        onStartNewDictation={startNewDictation}
         onStop={handleStop}
+        publicationId={publicationId}
         prosody={prosody}
         provider={provider}
         refinement={refinement}

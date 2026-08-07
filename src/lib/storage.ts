@@ -7,7 +7,7 @@ import type { VoiceProfile } from './voiceProfile';
 import { migrateVoiceProfile } from './voiceProfile';
 import { countWords } from './entries';
 
-const SCHEMA_VERSION = '3';
+const SCHEMA_VERSION = '4';
 const ORDER_UNSET = -1;
 const FALLBACK_TITLES = new Set(['', 'untitled', 'untitled note', 'new note']);
 
@@ -38,6 +38,11 @@ export function normalizeEntry(raw: Partial<Entry> & { id: string }): Entry {
         ? raw.order
         : ORDER_UNSET,
     ...(typeof raw.attachedToId === 'string' ? { attachedToId: raw.attachedToId } : {}),
+    // Schema v4. Pre-v4 entries carry no publication, which is exactly the
+    // free-standing reading the absent field already means — nothing to backfill.
+    ...(typeof raw.publicationId === 'string' && raw.publicationId
+      ? { publicationId: raw.publicationId }
+      : {}),
     ...(typeof raw.includeInRefinement === 'boolean'
       ? { includeInRefinement: raw.includeInRefinement }
       : {}),

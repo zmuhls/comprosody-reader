@@ -11,11 +11,10 @@ import {
   type Dispatch,
   type SetStateAction,
 } from 'react';
-import type { Entry, Directory, EntryKind, DirectoryKind } from '../types/editor';
+import type { Entry, Directory, DirectoryKind } from '../types/editor';
 import type { LexiconTerm, CorrectionCandidate } from '../types/lexicon';
 import type { RefinementSettings } from '../types/llm';
 import type { VoiceProfile } from '../lib/voiceProfile';
-import { defaultVoiceConfig, defaultProsody } from '../types/audio';
 import { buildVoiceProfile } from '../lib/voiceProfile';
 import {
   hydrateWorkspaceDatabase,
@@ -683,36 +682,6 @@ export function useApp() {
   return ctx;
 }
 
-export function newEntry(parentId: string | null, kind: EntryKind = 'writing'): Entry {
-  return {
-    id: crypto.randomUUID(),
-    name: 'Untitled',
-    titleSource: 'fallback',
-    parentId,
-    kind,
-    order: 0,
-    rawTranscript: '',
-    refinedText: '',
-    prosody: { ...defaultProsody },
-    voiceConfig: { ...defaultVoiceConfig },
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    wordCount: 0,
-    recordedDurationMs: 0,
-    audioTakes: 0,
-    draftHistory: [],
-  };
-}
-
-export function newDirectory(
-  parentId: string | null,
-  name: string,
-  kind: DirectoryKind = 'folder'
-): Directory {
-  return {
-    id: crypto.randomUUID(),
-    name,
-    parentId,
-    kind,
-  };
-}
+// The node factories moved to lib/entries so non-React callers can mint nodes;
+// re-exported here because every existing import points at this module.
+export { newEntry, newDirectory } from '../lib/entries';

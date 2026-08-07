@@ -33,8 +33,9 @@ function AppInner() {
       view: 'reader',
     });
   const { activePublication } = useLibrary();
-  const { state } = useApp();
+  const { state, dispatch } = useApp();
   const previousPublicationIdRef = useRef<string | null>(null);
+  const scopedPublicationIdRef = useRef<string | null>(null);
 
   useEffect(() => installVisualViewportSync(), []);
   useEffect(() => {
@@ -53,6 +54,22 @@ function AppInner() {
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
     : null;
+
+  // Writing belongs to the book it was written against. Changing books swaps in
+  // that book's most recent work instead of carrying the previous book's note
+  // across, which is what made every book look like it shared one note.
+  useEffect(() => {
+    if (scopedPublicationIdRef.current === activePublicationId) return;
+    scopedPublicationIdRef.current = activePublicationId;
+    const current = state.activeEntryId
+      ? state.entries[state.activeEntryId]
+      : null;
+    if ((current?.publicationId ?? null) === activePublicationId) return;
+    const next = Object.values(state.entries)
+      .filter((entry) => (entry.publicationId ?? null) === activePublicationId)
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    dispatch({ type: 'SET_ACTIVE_ENTRY', id: next?.id ?? null });
+  }, [activePublicationId, dispatch, state.activeEntryId, state.entries]);
 
   useEffect(() => {
     const contextTitle = activePublication && mobileWorkspaceView === 'reader'
@@ -112,7 +129,7 @@ function AppInner() {
             returnFocusTarget={sidebarReturnFocusTarget}
           />
           <div
-            aria-label="Note directory sizing"
+            aria-label="Workspace sizing"
             className="sidebar-resizer-region"
             role="region"
           >
@@ -132,7 +149,7 @@ function AppInner() {
                 className="mobile-workspace-switch"
               >
                 <button
-                  aria-label="Open note directory"
+                  aria-label="Open workspace menu"
                   className="mobile-workspace-menu"
                   onClick={(event) => openSidebar(event.currentTarget)}
                   type="button"
@@ -162,7 +179,10 @@ function AppInner() {
             {activePublication ? <ReadingPane key="reading-pane" /> : null}
             <div className="app-main" key="note-pane">
               <ErrorBanner />
-              <MainPanel onOpenSidebar={openSidebar} />
+              <MainPanel
+                onOpenSidebar={openSidebar}
+                publicationId={activePublicationId}
+              />
             </div>
           </div>
           {sidebarModalOpen ? null : <CommandPalette />}

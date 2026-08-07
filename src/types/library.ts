@@ -15,6 +15,9 @@ export type PublicationStatus =
   | 'ready'
   | 'failed';
 
+/** The file a publication was ingested from, when the catalog reports it. */
+export type PublicationSourceFormat = 'epub' | 'pdf';
+
 export interface LibraryPublication {
   id: string;
   title: string;
@@ -24,6 +27,10 @@ export interface LibraryPublication {
   status: PublicationStatus;
   epubUrl?: string;
   coverUrl?: string;
+  /** Absent when the catalog does not report an ingestion source. */
+  sourceFormat?: PublicationSourceFormat;
+  /** Explicit original-file location, when the catalog supplies one. */
+  sourceUrl?: string;
 }
 
 /**

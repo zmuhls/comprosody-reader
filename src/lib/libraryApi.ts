@@ -1,5 +1,6 @@
 import type {
   LibraryPublication,
+  PublicationSourceFormat,
   ReaderAnnotation,
   ReaderLocation,
   ReaderShellTheme,
@@ -12,6 +13,16 @@ interface ReadingsCatalogRecord {
   words?: unknown;
   sections?: unknown;
   status?: unknown;
+  // Ingestion metadata. The upstream catalog has used several spellings for
+  // this, so every known key is accepted rather than pinning one.
+  sourceFormat?: unknown;
+  source_format?: unknown;
+  source?: unknown;
+  format?: unknown;
+  sourceUrl?: unknown;
+  source_url?: unknown;
+  pdf?: unknown;
+  pdfUrl?: unknown;
 }
 
 interface ReadingsBookState {
@@ -64,6 +75,41 @@ function finiteNumber(value: unknown): number {
   return Number.isFinite(number) ? number : 0;
 }
 
+/**
+ * Reads the ingestion format out of whichever key the catalog used. A record
+ * that merely carries a `.pdf` source path counts as PDF-ingested.
+ */
+export function readSourceFormat(
+  record: ReadingsCatalogRecord,
+): PublicationSourceFormat | undefined {
+  const candidates = [
+    record.sourceFormat,
+    record.source_format,
+    record.source,
+    record.format,
+    record.sourceUrl,
+    record.source_url,
+    record.pdf,
+    record.pdfUrl,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const normalized = candidate.trim().toLowerCase();
+    if (!normalized) continue;
+    if (normalized === 'pdf' || normalized.endsWith('.pdf')) return 'pdf';
+    if (normalized === 'epub' || normalized.endsWith('.epub')) return 'epub';
+  }
+  return undefined;
+}
+
+function readSourceUrl(record: ReadingsCatalogRecord): string | undefined {
+  for (const candidate of [record.sourceUrl, record.source_url, record.pdfUrl]) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return undefined;
+}
+
 function isReaderAnnotation(value: unknown): value is ReaderAnnotation {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<ReaderAnnotation>;
@@ -92,6 +138,10 @@ export async function fetchLibraryCatalog(): Promise<LibraryPublication[]> {
       words: finiteNumber(record.words),
       sections: finiteNumber(record.sections),
       status: record.status === 'pass' ? 'ready' : 'processing',
+      ...(readSourceFormat(record)
+        ? { sourceFormat: readSourceFormat(record) }
+        : {}),
+      ...(readSourceUrl(record) ? { sourceUrl: readSourceUrl(record) } : {}),
     } satisfies LibraryPublication];
   });
 }
@@ -138,6 +188,42 @@ export async function saveReadingState(
 
 export function publicationFileUrl(publicationId: string): string {
   return `/books/${encodeURIComponent(publicationId)}.epub`;
+}
+
+export function publicationPdfUrl(publicationId: string): string {
+  return `/books/${encodeURIComponent(publicationId)}.pdf`;
+}
+
+/**
+ * Resolves the original PDF for a publication. An explicit catalog `sourceUrl`
+ * wins; otherwise the conventional `/books/<id>.pdf` path is probed, because
+ * the catalog does not always report the ingestion format. Returns null when
+ * no PDF is reachable, so callers can simply omit the control.
+ */
+export async function resolvePublicationPdf(
+  publication: Pick<LibraryPublication, 'id' | 'sourceFormat' | 'sourceUrl'>,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  if (publication.sourceUrl?.toLowerCase().endsWith('.pdf')) {
+    return publication.sourceUrl;
+  }
+  if (publication.sourceFormat === 'epub') return null;
+
+  const candidate = publicationPdfUrl(publication.id);
+  try {
+    const response = await fetch(candidate, {
+      credentials: 'include',
+      method: 'HEAD',
+      signal,
+    });
+    if (!response.ok) return null;
+    const contentType = response.headers.get('content-type') ?? '';
+    // A SPA fallback answers 200 with HTML; only a real PDF counts.
+    if (contentType && !contentType.toLowerCase().includes('pdf')) return null;
+    return candidate;
+  } catch {
+    return null;
+  }
 }
 
 export function readingShelfUrl(): string {

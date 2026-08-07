@@ -16,6 +16,7 @@ import { useLibrary } from '../../context/LibraryContext';
 import {
   fetchReadingState,
   publicationFileUrl,
+  resolvePublicationPdf,
   saveReadingState,
 } from '../../lib/libraryApi';
 import { addPassageLink } from '../../lib/passageLinks';
@@ -195,6 +196,27 @@ function PublicationReadingPane({
   const [isOpening, setIsOpening] = useState(true);
   const [readerError, setReaderError] = useState<string | null>(null);
   const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [pdfSource, setPdfSource] = useState<{
+    publicationId: string;
+    url: string;
+  } | null>(null);
+
+  // The rendered EPUB is a derived artifact. When a publication came from a
+  // PDF, the original stays one tap away rather than being replaced by it.
+  useEffect(() => {
+    const controller = new AbortController();
+    void resolvePublicationPdf(activePublication, controller.signal).then(
+      (resolved) => {
+        if (controller.signal.aborted || !resolved) return;
+        setPdfSource({ publicationId: activePublication.id, url: resolved });
+      },
+    );
+    return () => controller.abort();
+  }, [activePublication]);
+
+  // Stamped with its publication so a resolved URL can never outlive its book.
+  const pdfUrl =
+    pdfSource?.publicationId === activePublication.id ? pdfSource.url : null;
 
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
@@ -550,6 +572,18 @@ function PublicationReadingPane({
         >
           <Icon name="chevron-right" size={18} />
         </button>
+        {pdfUrl ? (
+          <a
+            className="reading-source-link"
+            href={pdfUrl}
+            rel="noreferrer"
+            target="_blank"
+            title={`Open the source PDF for ${activePublication.title}`}
+          >
+            <Icon name="download" size={13} />
+            <span>PDF</span>
+          </a>
+        ) : null}
         <button
           aria-label="Close book"
           className="close-book"

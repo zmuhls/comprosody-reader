@@ -97,7 +97,7 @@ describe('mobile touch target stylesheet contract', () => {
 
     expect(dock).toContain('height: 100px');
     expect(control).toContain('top: 12px');
-    expect(button).toContain('height: 56px');
-    expect(12 + 56).toBeLessThan(100);
+    expect(button).toContain('height: 48px');
+    expect(12 + 48).toBeLessThan(100);
   });
 });

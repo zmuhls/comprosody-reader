@@ -1,14 +1,21 @@
-import { memo, useRef, useState, type DragEvent } from 'react';
+import { memo, useMemo, useRef, useState, type DragEvent } from 'react';
 import { useStorage } from '../../hooks/useStorage';
 import { useDirectoryTree } from '../../hooks/useDirectoryTree';
 import { TreeNode, type TreeMoveItem } from './TreeNode';
 
 interface DirectoryTreeProps {
   onSelectEntry?: () => void;
+  /**
+   * Restricts the tree to entries written against this publication. `null`
+   * shows only free-standing work, which is what keeps one book's writing from
+   * following the reader into the next book.
+   */
+  publicationScope?: string | null;
 }
 
 export const DirectoryTree = memo(function DirectoryTree({
   onSelectEntry,
+  publicationScope,
 }: DirectoryTreeProps) {
   const {
     directories,
@@ -16,7 +23,15 @@ export const DirectoryTree = memo(function DirectoryTree({
     moveDirectory,
     moveEntry,
   } = useStorage();
-  const tree = useDirectoryTree(directories, entries);
+  const scopedEntries = useMemo(() => {
+    if (publicationScope === undefined) return entries;
+    return Object.fromEntries(
+      Object.entries(entries).filter(
+        ([, entry]) => (entry.publicationId ?? null) === publicationScope,
+      ),
+    );
+  }, [entries, publicationScope]);
+  const tree = useDirectoryTree(directories, scopedEntries);
   const [pickedItem, setPickedItem] = useState<TreeMoveItem | null>(null);
   const [draggedItem, setDraggedItem] = useState<TreeMoveItem | null>(null);
   const [moveStatus, setMoveStatus] = useState('');

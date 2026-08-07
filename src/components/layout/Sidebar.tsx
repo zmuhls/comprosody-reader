@@ -5,11 +5,9 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
-import { DirectoryTree } from '../sidebar/DirectoryTree';
-import { EntryActions } from '../sidebar/EntryActions';
 import { Icon } from '../ui/Icon';
 import { useApp } from '../../context/AppContext';
-import { LibrarySection } from '../library/LibrarySection';
+import { WorkspaceNavigator } from '../library/WorkspaceNavigator';
 import { cadenceApiUrl } from '../../lib/urls';
 import { LogoutControl } from './LogoutControl';
 import { LexiconPanel } from '../sidebar/LexiconPanel';
@@ -115,7 +113,7 @@ export const Sidebar = memo(function Sidebar({
   return (
     <>
       <button
-        aria-label="Close note directory"
+        aria-label="Close workspace menu"
         aria-hidden="true"
         className={`sidebar-backdrop ${isOpen ? 'is-visible' : ''}`}
         onClick={onClose}
@@ -123,7 +121,7 @@ export const Sidebar = memo(function Sidebar({
         type="button"
       />
       <section
-        aria-label="Note directory"
+        aria-label="Workspace"
         aria-hidden={isNarrowViewport ? !isOpen : undefined}
         aria-modal={isNarrowViewport && isOpen ? true : undefined}
         className={`sidebar ${isOpen ? 'is-open' : ''}`}
@@ -138,7 +136,7 @@ export const Sidebar = memo(function Sidebar({
             <p>Agentic Reader \ Vocal Notes</p>
           </div>
           <button
-            aria-label="Close note directory"
+            aria-label="Close workspace menu"
             className="icon-button sidebar-close"
             onClick={onClose}
             ref={closeButtonRef}
@@ -149,18 +147,8 @@ export const Sidebar = memo(function Sidebar({
         </div>
 
         <div className="sidebar-workspace">
-          <LibrarySection onSelectPublication={onClose} />
-
-          <div className="notes-section">
-            <div className="sidebar-section-heading">
-              <span>Notes</span>
-            </div>
-            <EntryActions />
-            <nav aria-label="Note directory" className="sidebar-tree">
-              <DirectoryTree onSelectEntry={onClose} />
-            </nav>
-            <LexiconPanel />
-          </div>
+          <WorkspaceNavigator onNavigate={onClose} />
+          <LexiconPanel />
         </div>
 
         <div className="sidebar-footer">
@@ -177,10 +165,7 @@ export const Sidebar = memo(function Sidebar({
                   <Icon name="x" size={14} />
                 </button>
               </div>
-              <p>
-                Comprosody learns only from transcripts and prosody saved in this
-                browser. Raw audio is not retained.
-              </p>
+              <p>Learned in this browser. Audio is not retained.</p>
               <dl className="profile-mini-grid">
                 <div>
                   <dt>Sessions</dt>
@@ -216,10 +201,7 @@ export const Sidebar = memo(function Sidebar({
                   <Icon name="x" size={14} />
                 </button>
               </div>
-              <p>
-                Transcription provider and fidelity controls live beside the
-                recording dock, where their effect is visible.
-              </p>
+              <p>Transcription controls sit beside the recording dock.</p>
               <div className="server-state">
                 <span
                   className={`server-dot ${storageReady ? 'is-online' : ''}`}

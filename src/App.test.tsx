@@ -3,7 +3,10 @@ import type { ReactNode } from 'react';
 
 const mocks = vi.hoisted(() => ({
   activePublication: null as { id: string; title: string } | null,
-  activeEntry: null as { id: string; name: string } | null,
+  activeEntry: null as
+    | { id: string; name: string; publicationId?: string; updatedAt?: number }
+    | null,
+  dispatch: vi.fn(),
 }));
 
 function PassThrough({ children }: { children: ReactNode }) {
@@ -19,6 +22,7 @@ vi.mock('radix-ui', () => ({
 vi.mock('./context/AppContext', () => ({
   AppProvider: PassThrough,
   useApp: () => ({
+    dispatch: mocks.dispatch,
     state: {
       activeEntryId: mocks.activeEntry?.id ?? null,
       entries: mocks.activeEntry
@@ -93,6 +97,7 @@ describe('mobile reading workspace', () => {
   beforeEach(() => {
     mocks.activePublication = null;
     mocks.activeEntry = null;
+    mocks.dispatch.mockClear();
     document.title = 'Comprosody';
   });
 
@@ -163,7 +168,7 @@ describe('mobile reading workspace', () => {
     expect(directory?.getAttribute('data-open')).toBe('false');
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Open note directory' }),
+      screen.getByRole('button', { name: 'Open workspace menu' }),
     );
 
     expect(directory?.getAttribute('data-open')).toBe('true');

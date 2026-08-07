@@ -2235,8 +2235,8 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 
 .record-button {
   display: inline-flex;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--color-border);
@@ -3267,8 +3267,8 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 
   .record-button {
-    width: 48px;
-    height: 48px;
+    width: 42px;
+    height: 42px;
   }
 
   .recording-state-text {
@@ -3711,10 +3711,10 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 
   .record-button {
-    width: 56px;
-    min-width: 56px;
-    height: 56px;
-    min-height: 56px;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
   }
 
   .interaction-dock[data-recording="true"] .record-control,
@@ -3801,10 +3801,10 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   }
 
   html[data-virtual-keyboard="open"] .record-button {
-    width: 56px;
-    min-width: 56px;
-    height: 56px;
-    min-height: 56px;
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    min-height: 48px;
   }
 
   html[data-virtual-keyboard="open"] .refinement-composer,
@@ -3921,5 +3921,292 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
   select,
   textarea {
     border-color: CanvasText;
+  }
+}
+
+/* ── Combined workspace navigator ──────────────────────────────────────────
+   Books and the writing held against them share one scroll container, so a
+   growing shelf no longer competes with the tree for vertical space. */
+
+.workspace-navigator {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.workspace-navigator .library-section,
+.workspace-navigator .notes-section {
+  flex: 0 0 auto;
+}
+
+/* The navigator owns the scroll; nested panes size to content. */
+.workspace-navigator .sidebar-tree {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.library-group-body {
+  padding: 2px 0 8px 20px;
+}
+
+.library-row-shell {
+  display: flex;
+  align-items: center;
+}
+
+.library-row-shell .library-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.library-disclosure svg {
+  transition: transform var(--motion-fast) ease;
+}
+
+.library-disclosure.is-expanded svg {
+  transform: rotate(180deg);
+}
+
+.library-entry-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.library-entry-row {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-left: 1px solid var(--color-border);
+  padding: 5px 10px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.library-entry-row:hover,
+.library-entry-row.is-active {
+  color: var(--color-text-primary);
+  background: var(--accent-soft);
+}
+
+.library-entry-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-entry-row[data-kind="note"] {
+  font-style: italic;
+}
+
+.library-group-empty {
+  margin: 0;
+  padding: 4px 10px 6px;
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+
+.library-group-actions {
+  display: flex;
+  gap: 4px;
+  padding: 4px 0 0 10px;
+}
+
+.library-group-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 3px;
+  padding: 5px 7px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.library-group-action:hover {
+  color: var(--color-accent);
+  background: var(--accent-soft);
+}
+
+/* ── Create actions ───────────────────────────────────────────────────────
+   Structural creation (folders, books) is rare, so it stays folded away
+   instead of holding a permanent seat in the row. */
+
+.entry-primary-action.is-secondary {
+  flex: 0 1 auto;
+  color: var(--color-text-muted);
+}
+
+.entry-structure {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.entry-structure-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 6;
+  display: flex;
+  min-width: 140px;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 4px;
+  background: var(--color-surface-overlay);
+  box-shadow: 0 6px 22px rgb(35 35 30 / 0.12);
+}
+
+.entry-structure-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 3px;
+  padding: 8px 9px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.entry-structure-menu button:hover {
+  color: var(--color-text-primary);
+  background: var(--accent-soft);
+}
+
+.editor-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* ── Footer popovers ──────────────────────────────────────────────────────
+   These expand upward out of a 12px-padded footer. Without a ceiling they run
+   off the top of the sidebar on short viewports and become unreachable. */
+
+.sidebar-popover {
+  max-height: min(52vh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 900px) {
+  /* Mobile type was set for a reading surface, not a navigator. Bring the
+     chrome down so more than a few rows fit on a phone screen; body copy stays
+     at 16px because iOS auto-zooms an editable region below that. */
+  .document-title {
+    font-size: clamp(24px, 6.5vw, 30px);
+  }
+
+  .document-prose {
+    font-size: 16px;
+  }
+
+  .library-row strong,
+  .tree-row {
+    font-size: 13px;
+  }
+
+  .sidebar-section-heading,
+  .sidebar-section-heading a {
+    font-size: 10px;
+  }
+
+  .recording-options-panel > strong {
+    font-size: 14px;
+  }
+
+  .entry-primary-action,
+  .tree-primary-action {
+    font-size: 12px;
+  }
+
+  .library-entry-row {
+    min-height: 44px;
+    font-size: 13px;
+  }
+
+  .library-group-action {
+    min-height: 40px;
+    font-size: 12px;
+  }
+
+  .entry-structure-menu button {
+    min-height: 48px;
+    font-size: 13px;
+  }
+
+  .library-group-body {
+    padding-left: 14px;
+  }
+
+  /* A footer popover that grows upward has nowhere to go on a phone. Dock it
+     to the bottom of the sidebar as a bounded sheet instead. */
+  .sidebar-popover {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 32;
+    max-height: min(64vh, 400px);
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 10px 10px 0 0;
+    padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+    box-shadow: 0 -8px 28px rgb(20 20 18 / 0.18);
+  }
+
+  .sidebar-popover-heading {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding-bottom: 8px;
+    background: var(--color-surface-overlay);
+    font-size: 13px;
+  }
+
+  .sidebar-popover p {
+    font-size: 12px;
+  }
+}
+
+.reading-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  padding: 5px 8px;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+}
+
+.reading-source-link:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+@media (max-width: 900px) {
+  .reading-source-link {
+    min-height: 44px;
+    padding: 5px 10px;
+    font-size: 12px;
   }
 }

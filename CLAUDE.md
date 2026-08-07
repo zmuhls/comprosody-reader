@@ -50,7 +50,12 @@ All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs)
 
 **AppContext** — entries (`Record<string, Entry>`), directories, `activeEntryId`, refinementSettings (genre, scale, temperature), lexicon (`Record<string, LexiconTerm>`). Entries/directories/lexicon persist to localStorage via a 300 ms trailing debounce (`createDebouncedPersist` in `src/lib/storage.ts`) with flush on `pagehide`/`visibilitychange`; settings save immediately. Any new debounced collection must also register its `flush()` in `flushAll`, or up to 300 ms of writes are lost on tab close. All savers are quota-safe. `loadEntries` normalizes legacy data (`schemaVersion` `'3'`: backfills `kind`, name-ranked `order`, plus the older `wordCount`/`recordedDurationMs`/`audioTakes`/`draftHistory`). `DELETE_DIRECTORY` cascades recursively (shared `collectDirectoryCascade` BFS, also used by `useStorage` to cascade IndexedDB deletes) and unpins surviving notes.
 
-### Library model (schema v3)
+### Library model (schema v4)
+
+`Entry.publicationId` scopes writing to the book it was written against. It is set when an entry is created while a publication is open, and absent for free-standing work — absent, not null, so `JSON.stringify` costs nothing per entry and pre-v4 data migrates by meaning rather than by backfill. `App.tsx` swaps the active entry when the publication changes (most recent entry in that scope, or none), which is what stops one book's note from following the reader into the next book. `DirectoryTree` takes a `publicationScope` prop; `WorkspaceNavigator` passes `null` so the tree shows only free-standing work while each book row discloses its own.
+
+The sidebar is one `WorkspaceNavigator` (books and writing in a single scroll container) rather than a fixed-height `Library` section stacked above the note tree — a growing shelf used to squeeze the tree to nothing.
+
 
 `Directory.kind` is `'folder' | 'book'`; `Entry.kind` is `'writing' | 'note'`. Books order children by `Entry.order` (folders stay alphabetical); promotion folder→book freezes the alphabetical order as chapter order (`SET_DIRECTORY_KIND`). Notes can pin to a writing entry via `attachedToId` (`ATTACH_NOTE` also syncs `parentId` so tree position and display never disagree; the tree nests them under their target). The reducer owns ordering invariants: `CREATE_ENTRY` appends (`maxOrder+1`), `MOVE_NODE` is cycle-guarded and drags pinned notes along (moving a note alone unpins it), `REORDER_ENTRY` re-sequences a book. Sidebar rows drag natively (`src/components/sidebar/dnd.ts` — pure `resolveDropIntent` + a module-scoped payload mirror because `dataTransfer.getData` is empty during `dragover`); the `⋯` RowMenu (*move to…*, *make book/folder*, *attach*, *delete*) is the keyboard path. Dropping a note on a writing row attaches it.
 
@@ -62,8 +67,10 @@ All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs)
 
 1. **useAudioAnalyser** — Web Audio `AnalyserNode` for waveform canvas drawing + `getTimeDomainData()` for energy measurement
 2. **useMediaRecorder** — captures audio chunks into a Blob (mimeType probed: `webm;codecs=opus` → `webm` → `mp4` for Safari; 1s intervals)
-3. **useSpeechRecognition** — Web Speech API for real-time interim transcript display; `getFinalTranscript()` reads a ref to avoid stale closures
+3. **useSpeechRecognition** — Web Speech API for real-time interim transcript display; `getFinalTranscript()` reads a ref to avoid stale closures. Runs whenever the provider is `local`, because Faster Whisper can only transcribe a finished file and would otherwise leave the screen blank until stop. Its text is **display-only** — the batch transcript stays authoritative and is what `appendRecordingTranscript` writes. Note the privacy tradeoff: browsers process Web Speech remotely, so live preview leaves the device even though the stored transcript does not.
 4. **useProsody** — 500ms interval keyed on `isRecording`: computes pace/energy/fluency/density, dispatches `UPDATE_PROSODY`
+
+`handleStart` accepts an optional entry id so `startNewDictation` can mint an entry and record into it in one action; it type-guards that argument because `RecordButton` wires `onClick={onStart}` directly, which would otherwise pass a `MouseEvent` as the target id.
 
 On stop: the take is saved to IndexedDB (fire-and-forget) and the blob goes to `POST /api/transcribe`. On transcription failure the footer offers `retry upload` / `use live transcript` (Web Speech fallback) instead of silently substituting; a pending failed take's live transcript is auto-rescued if a new recording starts.
 
@@ -90,6 +97,10 @@ Settings render as a delimited rail (`SettingsRail`: register · scale · reach)
 Mobile viewport: `useAppViewportHeight` mirrors `visualViewport.height × scale` into `--app-height` (consumed by the `h-app` utility on the shell and sidebar) because iOS never resizes the layout viewport for the keyboard — it overlays it and pans the window. Below `xl` the transcript/draft panes stack in a scrollable column and size to content (`flex-none` + `min-h-[60%]`; `flex-1`'s zero basis would let a pane compress below its content and spill). The `short:` variant (`@custom-variant`, ≤520px height) hides the entry header when the keyboard is up; form controls floor at 16px on coarse pointers (`index.css`) to suppress iOS focus auto-zoom. Don't reintroduce `h-screen`/`100dvh` on the shell or `fixed bottom-0` panels — both break under the iOS keyboard.
 
 `AudioTakes` is metadata-first: `listTakeMeta` renders rows without touching blobs; a take hydrates via `loadTakeBlob` (streamed read, determinate progress bar) when it nears the viewport or on demand, pages of 10 reveal through a sentinel IntersectionObserver, object URLs are revoked when rows scroll far away, and a ring-buffered log strip reports each hydration/release.
+
+### Publication sources
+
+`resolvePublicationPdf()` (`src/lib/libraryApi.ts`) keeps the original PDF reachable for PDF-ingested titles: an explicit catalog `sourceUrl` wins, an EPUB-sourced record short-circuits, and otherwise `/books/<id>.pdf` is probed with `HEAD`. The probe rejects a non-PDF content-type because a SPA fallback answers 200 with HTML. `readSourceFormat()` accepts every spelling the upstream catalog has used (`sourceFormat`, `source_format`, `source`, `format`, `pdfUrl`, …) rather than pinning one, since that catalog lives in the separate Readings service. The reader toolbar renders the link only when a PDF actually resolves.
 
 ### Prompt composition system
 

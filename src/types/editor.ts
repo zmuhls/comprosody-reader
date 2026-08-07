@@ -14,6 +14,12 @@ export interface Entry {
   order: number;
   /** Notes only: the writing entry this note is pinned to. */
   attachedToId?: string;
+  /**
+   * The publication this entry was written against. Set when the entry is
+   * created while a book is open; absent means free-standing writing that
+   * belongs to no book and stays reachable from every reading context.
+   */
+  publicationId?: string;
   /** Notes only: fold this note into refinement context (undefined = true). */
   includeInRefinement?: boolean;
   rawTranscript: string;
