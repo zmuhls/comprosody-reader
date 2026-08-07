@@ -24,6 +24,9 @@ import { RefinementComposer } from './Toolbar';
 import { VariantCards } from './VariantCards';
 import { RefinementSidecar } from './RefinementSidecar';
 import type { Entry } from '../../types/editor';
+import type { CorrectionCandidate } from '../../types/lexicon';
+import { CorrectionChips } from './CorrectionChips';
+import { useCorrectionCandidates } from '../../hooks/useCorrectionCandidates';
 import { LinkedPassages } from '../library/LinkedPassages';
 import { SpeechControl } from '../speech/SpeechControl';
 import { useAutomaticNoteTitle } from '../../hooks/useAutomaticNoteTitle';
@@ -85,7 +88,6 @@ export function DocumentTitle({
   });
   const inputRef = useRef<HTMLInputElement | null>(null);
   const displayRef = useRef<HTMLButtonElement | null>(null);
-  const lastTouchAtRef = useRef(Number.NEGATIVE_INFINITY);
   const value = isEditing ? draft.value : entry.name;
 
   useEffect(() => () => onEditingChange?.(false), [onEditingChange]);
@@ -116,27 +118,16 @@ export function DocumentTitle({
       <button
         aria-label={`Rename note title: ${entry.name}`}
         className="document-title document-title-display"
-        onClick={(event) => {
-          if (event.detail === 0) beginEditing();
-        }}
-        onDoubleClick={beginEditing}
+        // A single activation renames. The old double-click/double-tap gesture
+        // was undiscoverable and unreliable on touch, where the 460ms window
+        // competed with the browser's own tap handling.
+        onClick={beginEditing}
         onKeyDown={(event) => {
           if (!['Enter', ' ', 'F2'].includes(event.key)) return;
           event.preventDefault();
           beginEditing();
         }}
-        onPointerUp={(event) => {
-          if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
-          const now = performance.now();
-          if (now - lastTouchAtRef.current <= 460) {
-            event.preventDefault();
-            beginEditing();
-            lastTouchAtRef.current = Number.NEGATIVE_INFINITY;
-          } else {
-            lastTouchAtRef.current = now;
-          }
-        }}
-        title="Double-click or double-tap to rename"
+        title="Click to rename"
         type="button"
         ref={displayRef}
       >
@@ -173,20 +164,36 @@ export function DocumentTitle({
 
 export function SourceTranscriptDrawer({
   audioTakes,
+  candidates = [],
   entryId,
   interimTranscript,
   isOpen,
+  isRecording = false,
+  onChangeTranscript,
   onClose,
+  onConfirmCandidate,
+  onDismissCandidate,
   rawTranscript,
 }: {
   audioTakes?: number;
+  candidates?: CorrectionCandidate[];
   entryId: string;
   interimTranscript: string;
   isOpen: boolean;
+  isRecording?: boolean;
+  onChangeTranscript?: (value: string) => void;
   onClose: () => void;
+  onConfirmCandidate?: (candidate: CorrectionCandidate) => void;
+  onDismissCandidate?: (id: string) => void;
   rawTranscript: string;
 }) {
   if (!isOpen) return null;
+
+  // Live interim text is appended for reading but is not part of the stored
+  // record, so it must never be editable — a keystroke against it would be
+  // overwritten the moment the next interim result lands.
+  const composed =
+    rawTranscript + (isRecording && interimTranscript ? ` ${interimTranscript}` : '');
 
   return (
     <aside
@@ -208,10 +215,28 @@ export function SourceTranscriptDrawer({
           <Icon name="x" size={15} />
         </button>
       </div>
-      <div className="source-transcript-copy">
-        {rawTranscript || 'No transcript has been recorded yet.'}
-        {interimTranscript ? ` ${interimTranscript}` : ''}
-      </div>
+      {onConfirmCandidate && onDismissCandidate ? (
+        <CorrectionChips
+          candidates={candidates}
+          onConfirm={onConfirmCandidate}
+          onDismiss={onDismissCandidate}
+        />
+      ) : null}
+      {onChangeTranscript ? (
+        <textarea
+          aria-label="Source transcript"
+          className="source-transcript-copy source-transcript-input"
+          onChange={(event) => onChangeTranscript(event.target.value)}
+          placeholder="No transcript has been recorded yet."
+          readOnly={isRecording}
+          value={composed}
+        />
+      ) : (
+        <div className="source-transcript-copy">
+          {rawTranscript || 'No transcript has been recorded yet.'}
+          {interimTranscript ? ` ${interimTranscript}` : ''}
+        </div>
+      )}
       <AudioTakes entryId={entryId} audioTakes={audioTakes} />
     </aside>
   );
@@ -260,6 +285,12 @@ export const Editor = memo(function Editor({
   const activeEntry = state.activeEntryId
     ? state.entries[state.activeEntryId]
     : null;
+  // Correction proposals are noise mid-recording; the transcript is still
+  // being appended to.
+  const { candidates, dismiss: dismissCandidate } = useCorrectionCandidates(
+    isRecording ? null : activeEntry?.id ?? null,
+    activeEntry?.rawTranscript ?? '',
+  );
   const automaticTitleStatus = useAutomaticNoteTitle(
     activeEntry,
     Boolean(activeEntry && titleEditingEntryId === activeEntry.id),
@@ -348,6 +379,14 @@ export const Editor = memo(function Editor({
     const incoming = activeEntry.refinedText || activeEntry.rawTranscript || '';
     const switchedEntry = lastEntryIdRef.current !== activeEntry.id;
     const isExternalUpdate = incoming !== lastLocalMarkdownRef.current;
+
+    // An unflushed keystroke is newer than anything in state. Without this
+    // guard, any unrelated dispatch landing inside the 350ms debounce window
+    // (take count, prosody, automatic title) produces a fresh entry object
+    // still carrying the pre-edit text, and this effect writes it back over
+    // what is being typed — the edit visibly reverts, then reappears when the
+    // debounce finally flushes.
+    if (!switchedEntry && pendingUpdateRef.current) return;
 
     if (switchedEntry || isExternalUpdate) {
       editor.commands.setContent(incoming, {
@@ -828,10 +867,27 @@ export const Editor = memo(function Editor({
 
         <SourceTranscriptDrawer
           audioTakes={activeEntry.audioTakes}
+          candidates={candidates}
           entryId={activeEntry.id}
           interimTranscript={interimTranscript}
           isOpen={isSourceOpen}
+          isRecording={isRecording}
+          onChangeTranscript={(value) =>
+            dispatch({
+              type: 'UPDATE_ENTRY',
+              id: activeEntry.id,
+              updates: { rawTranscript: value },
+              recordHistory: false,
+            })
+          }
           onClose={() => setIsSourceOpen(false)}
+          onConfirmCandidate={(candidate) => {
+            dispatch({ type: 'CONFIRM_LEXICON_TERM', candidate });
+            // The baseline still holds the misheard form, so the diff would
+            // keep re-proposing this pair until the next take overwrites it.
+            dismissCandidate(candidate.id);
+          }}
+          onDismissCandidate={dismissCandidate}
           rawTranscript={activeEntry.rawTranscript}
         />
 

@@ -78,6 +78,8 @@ On stop: the take is saved to IndexedDB (fire-and-forget) and the blob goes to `
 
 The app learns the user's vocabulary from their own corrections. `src/lib/lexicon.ts` holds the pure functions; nothing here is per-entry — the lexicon is global.
 
+The loop only closes because the source transcript is editable. `SourceTranscriptDrawer` renders it as a textarea (read-only while recording, since interim text is display-only and would be overwritten by the next result) and hosts `CorrectionChips`. `Editor` owns the wiring — `useCorrectionCandidates` plus the confirm/dismiss dispatches — so the drawer stays presentational and unit-testable without a provider. A read-only transcript silently kills the whole lexicon feature: no edits means no diff, no candidates, nothing to learn from.
+
 **Capture.** Each take records the text it contributed (`StoredRecording.transcript`). `loadTranscriptBaseline()` concatenates those in recording order; `extractCandidates()` diffs that baseline against the current `rawTranscript` with `diffWords` and keeps adjacent removed/added pairs that survive a phonetic filter — `phoneticSimilarity()` (normalized Levenshtein plus a folded consonant skeleton), a ≤3-word cap, and a ≥4-char minimum. The filter exists because the transcript pane serves two purposes a diff cannot tell apart: fixing mishearings and revising content. Survivors surface as confirm chips (`CorrectionChips`, via `useCorrectionCandidates`).
 
 **Apply.** Two deliberately overlapping mechanisms:
@@ -89,6 +91,8 @@ Substitutions are reported by `AutoCorrectionNotice` — the transcript no longe
 **The metric:** deterministic substitutions fire exactly where the upstream hint failed. If that count trends down as the lexicon grows, the hint works; if it stays flat, only the find/replace is carrying the feature.
 
 ### Editor features
+
+The TipTap content-sync effect returns early when `pendingUpdateRef` holds an unflushed keystroke. Without that guard, any unrelated dispatch landing inside the 350 ms debounce (take count, prosody, automatic title) yields a fresh entry object still carrying pre-edit text, and the effect writes it back over what is being typed — the edit visibly reverts, then reappears when the debounce flushes. Entry titles rename on a **single** click/tap or Enter/Space/F2; the former double-click/double-tap gesture was undiscoverable and fought the browser's own tap handling on touch.
 
 Refined-pane textarea locks (`readOnly`) while refinement streams; `refineSelection` verifies the captured selection still matches before splicing. `entry.draftHistory` (cap 10) backs toolbar undo across full-refine/selection/variant overwrites. `DiffView` renders raw-vs-refined via `diffWords` (from `diff`). `src/lib/export.ts` provides markdown download and clipboard copy. Shortcuts: Ctrl/Cmd+Shift+Space (record), Ctrl/Cmd+Enter (refine), Ctrl/Cmd+Shift+C (copy), `[`/`]` page between sibling chapters (touch swipe does the same via `useSwipePaging`).
 

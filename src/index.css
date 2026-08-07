@@ -4210,3 +4210,19 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
     font-size: 12px;
   }
 }
+
+.source-transcript-input {
+  display: block;
+  width: 100%;
+  min-height: 140px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  resize: vertical;
+  outline: none;
+}
+
+.source-transcript-input:read-only {
+  opacity: 0.75;
+}
