@@ -26,13 +26,17 @@ A green run is `tsc -b` **and** `npm test` **and** `npm run lint`. `tsc -b` catc
 
 ## Configuration
 
-All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs). Set in `.env`:
+Credentials are server-side only; the browser never holds a provider key. Every variable is optional — set only the routes you use (`.env.example` is the annotated source of truth).
 
-- `OPENROUTER_API_KEY` — required
-- `OPENROUTER_MODEL` — refinement LLM (default: `moonshotai/kimi-k2-0905`)
-- `OPENROUTER_TRANSCRIBE_MODEL` — audio transcription (default: `google/gemini-2.5-flash`)
-- `CORS_ORIGIN` — comma-separated CORS allowlist (default: `http://localhost:5173`)
-- `PORT` — backend port (default: `3001`; the Vite proxy targets 3001, so change both together)
+- `OLLAMA_API_KEY` / `OLLAMA_BASE_URL` (default `https://ollama.com`) / `OLLAMA_MODEL` (default `qwen3.5:397b`) / `OLLAMA_MAX_TOKENS` (default 8192) — refinement
+- `TRANSCRIPTION_PROVIDER` — `local` (default, on-device) or `elevenlabs` (cloud upload)
+- `FASTER_WHISPER_MODEL` — local quality/speed tradeoff: `base` (default), `turbo`, `large-v3-turbo`
+- `ELEVENLABS_API_KEY` / `ELEVENLABS_SCRIBE_MODEL` (default `scribe_v2`) — Scribe transcription and read-aloud
+- `COMPROSODY_API_KEY` — shared secret; **required** in production and whenever `HOST` is non-loopback
+- `HOST` (default `127.0.0.1`) / `PORT` (default `3001`; the Vite proxy targets 3001, so change both together)
+- `ALLOWED_ORIGINS` / `CORS_ORIGIN` — comma-separated CORS allowlist
+
+The server binds to loopback by default and refuses to start on a non-loopback `HOST` without `COMPROSODY_API_KEY`, so cloud credentials can't be exposed on the local network by a stray flag.
 
 ## Architecture
 
@@ -40,16 +44,22 @@ All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs)
 
 **Frontend** (React 19 + Vite + Tailwind CSS v4): recording UI, prosody analysis, transcript editing, refinement controls. All state client-side with localStorage persistence.
 
-**Backend** (Express 5 + tsx): stateless API proxy. No database, no auth — just relays to OpenRouter.
+**Backend** (Express 5 + tsx): stateless provider gateway. No database. It holds the provider credentials and enforces the transcription boundary; it stores nothing.
 
 ### Server routes and libs
 
-- `server/lib/claude.ts` — `streamRefinement()` (SSE generator, idle-timeout abort: 60s to first byte / 30s per chunk, accepts an external signal) and `refineComplete()` (60s timeout, throws on empty content) via OpenRouter `/chat/completions`. Direct `fetch`, no SDK. Shared `getApiKey()` and `MAX_OUTPUT_TOKENS` (8192).
-- `server/lib/transcribe.ts` — `transcribe()` sends base64 audio as `input_audio` to an audio-capable model (120s timeout). Returns `{ transcript }`. `audioFormatFromContentType()` maps the request Content-Type (webm/mp4/ogg/wav) to the upstream format string.
+- `server/lib/ollama.ts` — refinement via Ollama `/api/chat`. `createOllamaRefinementProvider()` is the injectable factory; the module also exports bound `streamRefinement` / `refineComplete` for route use. Direct `fetch`, no SDK, 2 retries with a 250 ms delay. `resolveBaseUrl()` is deliberately fussy — it normalizes any of `https://host`, `.../api`, `.../api/chat` to one endpoint, rejects non-http(s) schemes, and **rejects embedded credentials** in the URL.
+- `server/lib/transcribe.ts` — provider-neutral facade. `resolveTranscriptionProvider()` dispatches on `TRANSCRIPTION_PROVIDER` to one of two implementations behind the `TranscriptionProvider` interface (`server/lib/transcription/types.ts`), which returns `{ transcript, words, language, duration }` — word timestamps, not just text.
+  - `fasterWhisperProvider` — **on-device**; `whisperWorker.ts` spawns `python3` against a local script, so local transcription needs a working Python environment, not just npm.
+  - `elevenLabsScribeProvider` — cloud upload.
+  - Typed error classes (`UnsupportedTranscriptionProviderError`, `TranscriptionConfigurationError`, `TranscriptionUpstreamError`, …) carry the HTTP status, so routes map failures without string-matching messages.
 - `server/lib/validate.ts` — hand-rolled request validation: `HttpError`, `reqObject`, `reqString`, `reqNumber`. Async route rejections flow to the global 4-arity JSON error middleware in `server/index.ts`.
 - `server/routes/refine.ts` — `POST /api/refine` (SSE stream; validates before headers; client disconnect aborts upstream), `POST /api/variants` (`Promise.allSettled` → `{ variants, errors }`, 502 only when all fail)
-- `server/routes/transcribe.ts` — `POST /api/transcribe` receives a raw audio buffer (25 MB cap: Content-Length pre-check plus streamed byte counting)
-- `GET /api/health` — `{ status: 'ok', keyConfigured }`
+- `server/routes/transcribe.ts` — `POST /api/transcribe` takes a raw audio body (50 MB cap: Content-Length pre-check plus streamed byte counting). Vocabulary arrives as headers, separately bounded (4096 header chars, 200 terms, 64 chars each → capped again at 100 keyterms of ≤50 chars / ≤5 words) because a raw-body request has no JSON envelope to put them in.
+- `server/routes/speech.ts` — ElevenLabs read-aloud and timed alignment. Bounded by construction: 10k characters, 25 MB audio, 45 s provider timeout, speed clamped to 0.7–1.2.
+- `GET /api/health` — `{ ok: true }`, deliberately value-free and registered **before** auth and rate limiting so Railway's healthcheck works without a credential.
+
+Request pipeline in `server/index.ts`: health → `express.json({ limit: '10mb' })` → in-memory rate limit (60 req/min/IP) → bearer auth (skipped on loopback in development) → routers → JSON 404 for unknown `/api` → static SPA → error middleware.
 
 ### Frontend state (two contexts, both useReducer)
 

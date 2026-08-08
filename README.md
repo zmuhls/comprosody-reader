@@ -68,7 +68,7 @@ The `voice` button in the footer:
 src/                    # React frontend (Vite + Tailwind v4)
   components/
     dictation/          # RecordButton, Waveform, RecordingFooter, VoiceConfigToggles
-    editor/             # Editor, Toolbar, TranscriptView, PassesBar, DiffView,
+    editor/             # Editor, Toolbar, SettingsRail, PassesBar, DiffView,
                         # MarginNotes, AudioTakes, CorrectionChips
     layout/             # Sidebar, MainPanel
     sidebar/            # DirectoryTree, TreeNode, RowMenu, LexiconPanel, dnd
