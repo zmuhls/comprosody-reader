@@ -85,8 +85,12 @@ describe('mobile touch target stylesheet contract', () => {
   });
 
   it('keeps the microphone fully inside its keyboard-open dock', () => {
-    const dock = declarationsFor(
-      'html[data-virtual-keyboard="open"] .interaction-dock',
+    // The dock drives its own height off the variable so scroll padding, the
+    // source drawer and the margin-notes sheet track it; read the height from
+    // there rather than from a literal on .interaction-dock.
+    const dockHeight = Number(
+      /html\[data-virtual-keyboard="open"\]\s*\{[^}]*--dock-collapsed-height:\s*(\d+)px/
+        .exec(mobileStyles)?.[1],
     );
     const control = declarationsFor(
       'html[data-virtual-keyboard="open"] .record-control',
@@ -94,10 +98,38 @@ describe('mobile touch target stylesheet contract', () => {
     const button = declarationsFor(
       'html[data-virtual-keyboard="open"] .record-button',
     );
+    const buttonHeight = Math.max(
+      ...[...button.matchAll(/height:\s*(\d+)px/g)].map((m) => Number(m[1])),
+    );
 
-    expect(dock).toContain('height: 100px');
-    expect(control).toContain('top: 12px');
-    expect(button).toContain('height: 48px');
-    expect(12 + 48).toBeLessThan(100);
+    expect(dockHeight).toBeGreaterThan(0);
+    // Centred rather than offset from the top, so the fit holds at any height.
+    expect(control).toContain('top: 50%');
+    expect(control).toContain('transform: translate(-50%, -50%)');
+    expect(buttonHeight).toBeGreaterThanOrEqual(48);
+    expect(buttonHeight).toBeLessThanOrEqual(dockHeight);
+  });
+
+  it('leaves the keyboard-open note room for more than a line or two', () => {
+    // The visual viewport is roughly 360px with an iOS keyboard up. Topbar,
+    // dock and the page's own padding are everything the prose does not get.
+    const dockHeight = Number(
+      /html\[data-virtual-keyboard="open"\]\s*\{[^}]*--dock-collapsed-height:\s*(\d+)px/
+        .exec(mobileStyles)?.[1],
+    );
+    const page = declarationsFor(
+      'html[data-virtual-keyboard="open"] .document-page',
+    );
+    const padTop = Number(/padding-top:\s*(\d+)px/.exec(page)?.[1]);
+
+    expect(
+      declarationsFor('html[data-virtual-keyboard="open"] .document-date'),
+    ).toContain('display: none');
+
+    const topbar = 56;
+    const title = 25;
+    const prose = 360 - topbar - dockHeight - padTop - title;
+    // ~27px per line at 16px/1.7. Four lines is the floor worth defending.
+    expect(prose / 27).toBeGreaterThan(4);
   });
 });

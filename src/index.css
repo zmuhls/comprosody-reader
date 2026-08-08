@@ -3332,6 +3332,75 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
     padding-left: 8px;
   }
 
+  /* One scroller for the whole drawer body. Stacking a navigator scroller, a
+     lexicon scroller and a term-list scroller inside a 360px-wide sheet meant
+     a touch drag hit whichever one was under the finger and the drawer as a
+     whole never scrolled — the tree and the lexicon each had to be reached on
+     their own terms, and neither could reach the other. */
+  .sidebar-workspace {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .sidebar-workspace .workspace-navigator {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  .sidebar-workspace .lexicon-panel {
+    max-height: none;
+    flex: 0 0 auto;
+    overflow: visible;
+  }
+
+  /* Three stacked rows, each a 48px tap target carrying a title and a subtitle,
+     cost 164px — a quarter of the drawer on a phone and nearly half of it with
+     the keyboard up — to hold three controls you touch once a session. Lay them
+     out side by side and drop the subtitles; the tap targets stay 48px tall.
+     The safe-area inset keeps the row clear of the home indicator. */
+  .sidebar-footer {
+    display: flex;
+    gap: 4px;
+    padding: 6px 8px calc(8px + env(safe-area-inset-bottom));
+  }
+
+  .sidebar-footer-row {
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 4px;
+  }
+
+  .sidebar-footer-row .sidebar-footer-copy {
+    flex: 0 0 auto;
+    align-items: center;
+  }
+
+  .sidebar-footer-row .sidebar-footer-copy small {
+    display: none;
+  }
+
+  .sidebar-footer-copy strong {
+    max-width: 100%;
+    overflow: hidden;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* The disclosure chevron read as "more below" in a stacked list. Side by
+     side there is nothing below it, and the aria-expanded state still says so. */
+  .voice-profile-row > svg {
+    display: none;
+  }
+
+  .voice-mark {
+    width: 21px;
+    height: 21px;
+  }
+
   .entry-actions {
     min-height: 60px;
     gap: 6px;
@@ -3778,33 +3847,83 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 }
 
 @media (max-width: 900px) {
+  /* With the keyboard up the visual viewport is roughly 360px tall. A 100px
+     dock plus a 56px topbar plus the page's own 52px/220px padding and the
+     date/title block left about two lines of prose visible — you could not see
+     what you were typing. Drive the dock off the height variables so the
+     scroll padding, source drawer and margin-notes sheet all follow, and
+     collapse the microphone into the bar rather than floating it above the
+     border. */
+  html[data-virtual-keyboard="open"] {
+    --dock-collapsed-height: 60px;
+    --dock-expanded-height: 60px;
+  }
+
+  /* Stays visible: the recording-options panel opens upward out of the dock,
+     and clipping it is worse than the spill it would have caught. Nothing
+     spills anyway — every control below is centred in the bar. */
   html[data-virtual-keyboard="open"] .interaction-dock,
   html[data-virtual-keyboard="open"] .interaction-dock:hover,
   html[data-virtual-keyboard="open"] .interaction-dock:focus-within,
   html[data-virtual-keyboard="open"] .interaction-dock[data-recording="true"],
   html[data-virtual-keyboard="open"] .interaction-dock[data-busy="true"] {
-    height: 100px;
     overflow: visible;
   }
 
+  /* The floating circle reads as a separate surface hovering over the dock.
+     At this height there is no room for it to float, so seat it in the bar. */
+  html[data-virtual-keyboard="open"] .interaction-dock::before {
+    display: none;
+  }
+
   html[data-virtual-keyboard="open"] .recording-row {
-    height: 100px;
+    height: 60px;
+    gap: 12px;
   }
 
   html[data-virtual-keyboard="open"] .record-control,
   html[data-virtual-keyboard="open"] .interaction-dock[data-recording="true"] .record-control,
   html[data-virtual-keyboard="open"] .interaction-dock[data-busy="true"] .record-control,
   html[data-virtual-keyboard="open"] .interaction-dock:focus-within .record-control {
-    top: 12px;
+    top: 50%;
     left: 50%;
-    transform: translateX(-50%);
+    transform: translate(-50%, -50%);
   }
 
+  html[data-virtual-keyboard="open"] .recording-microphone-control {
+    width: 48px;
+    height: 48px;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  /* Its 20px top offset was measured against a 100px dock; in a 60px bar it
+     hangs 8px below the edge and gets clipped. Centre it like the microphone. */
+  html[data-virtual-keyboard="open"] .recording-options-trigger {
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+  }
+
+  html[data-virtual-keyboard="open"] .recording-microphone-button,
   html[data-virtual-keyboard="open"] .record-button {
     width: 48px;
     min-width: 48px;
     height: 48px;
     min-height: 48px;
+  }
+
+  /* Ornament the keyboard has no room for. The title stays — it says which
+     note you are in — but drops to a size that costs one line, not three. */
+  html[data-virtual-keyboard="open"] .document-date {
+    display: none;
+  }
+
+  html[data-virtual-keyboard="open"] .document-title,
+  html[data-virtual-keyboard="open"] .document-title-heading {
+    min-height: 0;
+    font-size: 20px;
+    line-height: 1.25;
   }
 
   html[data-virtual-keyboard="open"] .refinement-composer,
@@ -3816,16 +3935,25 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
     display: none;
   }
 
+  /* The status line is centred, and so is the microphone once the dock loses
+     the height to float it — they landed on top of each other. Move the text
+     to the start of the bar, where the collapsed dock has nothing else. */
   html[data-virtual-keyboard="open"] .recording-state-text,
   html[data-virtual-keyboard="open"] .interaction-dock[data-recording="true"] .recording-state-text,
   html[data-virtual-keyboard="open"] .interaction-dock[data-busy="true"] .recording-state-text {
-    bottom: 5px;
+    top: 50%;
+    bottom: auto;
+    left: 16px;
+    max-width: calc(50% - 44px);
+    overflow: hidden;
     opacity: 1;
+    text-overflow: ellipsis;
+    transform: translateY(-50%);
   }
 
   html[data-virtual-keyboard="open"] .document-page {
-    padding-top: 28px;
-    padding-bottom: 116px;
+    padding-top: 14px;
+    padding-bottom: calc(var(--dock-collapsed-height) + 20px);
   }
 }
 
@@ -3946,6 +4074,20 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
 .workspace-navigator .sidebar-tree {
   flex: 0 0 auto;
   overflow: visible;
+}
+
+/* The lexicon sits below the navigator in the same column. Left unbounded it
+   has no reason to shrink — `min-height: auto` on a flex item means it takes
+   its full content height, and the navigator (the only `flex: 1` sibling)
+   collapses to zero to pay for it. An expanded lexicon with a dozen terms
+   swallowed the entire tree and then spilled over the footer rows. Cap it and
+   let it scroll inside itself; the navigator keeps the remainder. */
+.lexicon-panel {
+  min-height: 0;
+  max-height: 55%;
+  flex: 0 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .library-group-body {
@@ -4154,20 +4296,24 @@ html[data-sidebar-resizing="true"] .sidebar-resizer::after {
     padding-left: 14px;
   }
 
-  /* A footer popover that grows upward has nowhere to go on a phone. Dock it
-     to the bottom of the sidebar as a bounded sheet instead. */
+  /* A footer popover that grows upward has nowhere to go on a phone, but
+     `position: fixed; bottom: 0` was worse: the sidebar's own transform makes
+     it the containing block, so the sheet landed *on* the footer and buried
+     the three rows underneath it — including the toggle that opened it and
+     the log-out row. Sit it on top of the footer instead, so the controls
+     stay tappable and it is obvious which one is open. */
   .sidebar-popover {
-    position: fixed;
+    position: absolute;
     right: 0;
-    bottom: 0;
+    bottom: 100%;
     left: 0;
     z-index: 32;
-    max-height: min(64vh, 400px);
+    max-height: min(58vh, 360px);
     border-right: 0;
     border-bottom: 0;
     border-left: 0;
     border-radius: 10px 10px 0 0;
-    padding: 14px 16px calc(16px + env(safe-area-inset-bottom));
+    padding: 14px 16px;
     box-shadow: 0 -8px 28px rgb(20 20 18 / 0.18);
   }
 

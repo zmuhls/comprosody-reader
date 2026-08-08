@@ -40,7 +40,7 @@ export function LexiconPanel() {
   };
 
   return (
-    <div className="border-t border-border">
+    <div className="lexicon-panel border-t border-border">
       <button
         onClick={() => setIsOpen((prev) => !prev)}
         aria-expanded={isOpen}
@@ -82,7 +82,7 @@ export function LexiconPanel() {
               Corrections you confirm in the transcript appear here.
             </p>
           ) : (
-            <div className="flex max-h-64 flex-col gap-1.5 overflow-y-auto">
+            <div className="flex flex-col gap-1.5">
               {terms.map((term) => {
                 const demoted = term.heard.length > 0 && !isSubstitutionActive(term);
                 return (
