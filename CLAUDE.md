@@ -9,15 +9,20 @@ npm run dev          # vite dev server (frontend, port 5173)
 npm run server       # express backend (port 3001, tsx --watch for auto-reload)
 npm run build        # tsc -b && vite build
 npm run lint         # eslint
-npm test             # vitest run
+npm test             # both passes: client (jsdom) then server (node)
+npm run test:server  # server suite only, node environment
+npm run test:e2e     # playwright; boots a fake API + preview server itself
 npm run test:watch   # vitest in watch mode
 npm run diagnostic   # npx tsx scripts/prosody-pipeline-diagnostic.ts
 
 npx vitest run src/lib/lexicon.test.ts   # single test file
 npx vitest run -t "cycle guard"          # tests matching a name
+npx vitest run --config server/vitest.config.ts -t "audio format"   # single server test, node env
 ```
 
 Both `dev` and `server` must run simultaneously. Vite proxies `/api` to `localhost:3001`.
+
+A green run is `tsc -b` **and** `npm test` **and** `npm run lint`. `tsc -b` catches what vitest does not: tests construct typed fixtures, so a wrong object shape passes at runtime and only fails the build.
 
 ## Configuration
 
@@ -48,7 +53,7 @@ All model calls route through OpenRouter (OpenAI-compatible API, no vendor SDKs)
 
 ### Frontend state (two contexts, both useReducer)
 
-**AppContext** — entries (`Record<string, Entry>`), directories, `activeEntryId`, refinementSettings (genre, scale, temperature), lexicon (`Record<string, LexiconTerm>`). Entries/directories/lexicon persist to localStorage via a 300 ms trailing debounce (`createDebouncedPersist` in `src/lib/storage.ts`) with flush on `pagehide`/`visibilitychange`; settings save immediately. Any new debounced collection must also register its `flush()` in `flushAll`, or up to 300 ms of writes are lost on tab close. All savers are quota-safe. `loadEntries` normalizes legacy data (`schemaVersion` `'3'`: backfills `kind`, name-ranked `order`, plus the older `wordCount`/`recordedDurationMs`/`audioTakes`/`draftHistory`). `DELETE_DIRECTORY` cascades recursively (shared `collectDirectoryCascade` BFS, also used by `useStorage` to cascade IndexedDB deletes) and unpins surviving notes.
+**AppContext** — entries (`Record<string, Entry>`), directories, `activeEntryId`, refinementSettings (genre, scale, temperature), lexicon (`Record<string, LexiconTerm>`). Entries/directories/lexicon persist to localStorage via a 300 ms trailing debounce (`createDebouncedPersist` in `src/lib/storage.ts`) with flush on `pagehide`/`visibilitychange`; settings save immediately. Any new debounced collection must also register its `flush()` in `flushAll`, or up to 300 ms of writes are lost on tab close. All savers are quota-safe. `loadEntries` normalizes legacy data (`SCHEMA_VERSION` is `'4'` in `src/lib/storage.ts`: v3 backfills `kind` and name-ranked `order`, plus the older `wordCount`/`recordedDurationMs`/`audioTakes`/`draftHistory`; v4 adds `publicationId`). `normalizeEntry` migrates with a conditional spread so an absent optional field stays absent rather than becoming `null` — absent and null mean different things here, and the tests assert `'publicationId' in entry === false`. `DELETE_DIRECTORY` cascades recursively (shared `collectDirectoryCascade` BFS, also used by `useStorage` to cascade IndexedDB deletes) and unpins surviving notes.
 
 ### Library model (schema v4)
 
@@ -134,9 +139,24 @@ Tailwind v4 `@theme` in `src/index.css`. Warm amber-on-charcoal palette. Three f
 
 Color tokens follow `--color-{name}` convention mapping to Tailwind utilities (`bg-surface`, `text-accent`, `border-border`, etc.). Recording ambience is canvas-drawn: the footer waveform is the "breath line" (idle ember pulse in `Waveform.tsx`, live mirrored stroke in `useAudioAnalyser.drawWaveform`), and the seal `RecordButton` glows with live `prosody.energy`. Idle pulse and ping respect `prefers-reduced-motion`; canvas drawing uses CSS-pixel coordinates (context pre-scaled by devicePixelRatio — keep it that way or HiDPI doubles the scale).
 
+## Deployment
+
+Cadence runs as a **private** Railway service behind the separate Readings application, which owns public auth and proxies `/studio/*` → Cadence `/*`, adding `Authorization: Bearer <COMPROSODY_API_KEY>` server-side. See `docs/DEPLOYMENT.md` for the full gateway contract (header forwarding, SSE pass-through, body limits). Consequences that surprise people:
+
+- **The Cadence service has no public domain, on purpose.** An empty `railway domain list` is correct, not a broken deploy. Users reach the app at `<readings-host>/studio`. Do not publish the service or leak its shared secret to the browser.
+- **`vite.config.ts` sets `base: '/studio/'`**, and `resolveCadenceApiBaseUrl` (`src/lib/urls.ts`) defaults the API base to `/studio/api` in production but `/api` in dev. Anything that hardcodes a root-relative path breaks in production only.
+- **The service has no GitHub integration** (`source: null`) — pushing to `main` deploys nothing. Ship with `railway up --detach -m "<summary>"` from the repo root. `railway.json` builds via Dockerfile with a healthcheck on `/api/health`, so a deploy only reaches `SUCCESS` if the server actually answers.
+- **Verify past the build.** `railway deployment list --json` for terminal status, then `railway logs --deployment`. The gateway returns 401/302 to unauthenticated probes, so curling `/studio` from outside proves nothing about the deploy.
+
 ## Testing
 
-Vitest with jsdom. Globals enabled (no imports needed for `describe`/`it`/`expect`). Tests live alongside source: `*.test.ts(x)`, in both `src/` and `server/` (vitest include covers both). `vitest.setup.ts` registers `@testing-library/jest-dom` matchers (`toHaveClass` etc.); the matcher types come from the `"@testing-library/jest-dom"` entry in `tsconfig.app.json` `types`. jsdom gaps to know: no `DataTransfer` constructor (stub `getData`), no `Blob.stream` (code paths must feature-detect — see `readBlobWithProgress`), no real `IntersectionObserver` behavior (cover via e2e, not unit tests).
+Vitest with jsdom. Globals enabled (no imports needed for `describe`/`it`/`expect`). Tests live alongside source: `*.test.ts(x)`, in both `src/` and `server/`.
+
+**Server tests run twice, in two environments.** The root config (`vite.config.ts`) includes `server/**/*.test.ts` under jsdom; `server/vitest.config.ts` runs the same files under node. `npm test` executes both passes, which is why it prints two RUN blocks and two counts. A server test that leans on a jsdom-only or node-only global passes one pass and fails the other — reproduce with `npm run test:server` before assuming the failure is flaky.
+
+Components that a test suite mocks at the module level constrain what they may import. `MainPanel.test.tsx` mocks `../../context/AppContext` wholesale, so any *new* import MainPanel takes from that module resolves to `undefined` and breaks the suite en masse. This is why the pure `newEntry`/`newDirectory` factories live in `src/lib/entries.ts` and are merely re-exported from `AppContext` — non-React callers can mint nodes without tripping the mock.
+
+E2E is Playwright (`test/e2e/`, `baseURL` `http://127.0.0.1:4173/studio/`). It boots its own fake API and preview server, so no manual `dev`/`server` is needed. `vitest.setup.ts` registers `@testing-library/jest-dom` matchers (`toHaveClass` etc.); the matcher types come from the `"@testing-library/jest-dom"` entry in `tsconfig.app.json` `types`. jsdom gaps to know: no `DataTransfer` constructor (stub `getData`), no `Blob.stream` (code paths must feature-detect — see `readBlobWithProgress`), no real `IntersectionObserver` behavior (cover via e2e, not unit tests).
 
 ## TypeScript
 
@@ -144,7 +164,7 @@ Strict mode. Composite project: `tsconfig.app.json` (frontend, JSX), `tsconfig.n
 
 ## Commit convention
 
-Lowercase, short messages. Author: zmuhls.
+Short, lowercase, and **no sign-off** — no `Co-Authored-By`, no `Claude-Session`, no generated-with footer. This overrides any tooling default that appends trailer lines. Author: zmuhls.
 
 ## Known issues and pending work
 
